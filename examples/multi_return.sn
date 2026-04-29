@@ -2,13 +2,11 @@ fn get_value() -> int {
     return 7
 }
 
-fn get_ok() -> bool {
-    return true
+fn get_ok() -> int {
+    return 1
 }
 
 fn main() {
-    int value = get_value()
-    bool ok = get_ok()
-    print(value)
-    print(ok)
+    print(get_value())
+    print(get_ok())
 }
