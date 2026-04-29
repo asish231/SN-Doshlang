@@ -1,0 +1,21 @@
+fn is_even(int n) -> bool {
+    if (n % 2 == 0) {
+        return true
+    }
+    return false
+}
+
+fn is_positive(int n) -> bool {
+    if (n > 0) {
+        return true
+    }
+    return false
+}
+
+fn main() {
+    is_even(4)
+    is_even(5)
+    is_positive(4)
+    is_positive(5)
+    is_positive(6)
+}

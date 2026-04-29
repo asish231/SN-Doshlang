@@ -1,0 +1,11 @@
+fn process(int n) -> str {
+    if (n % 2 == 0) {
+        return "even"
+    }
+    return "odd"
+}
+
+fn main() {
+    print(process(4))
+    print(process(5))
+}

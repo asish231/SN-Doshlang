@@ -1,0 +1,6 @@
+fn main() {
+    map<int, list<int>> graph = {1: [2, 3], 2: [4]}
+    for (node in graph[1]) {
+        print(node)
+    }
+}

@@ -1,0 +1,10 @@
+fn outer(int x) -> int {
+    fn inner(int y) -> int {
+        return y * 2
+    }
+    return inner(x) + 1
+}
+
+fn main() {
+    print(outer(5))
+}

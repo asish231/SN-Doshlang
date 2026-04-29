@@ -24,12 +24,32 @@ else
     PLATFORM="Unknown ($OS)"
 fi
 
+# --- Helper: Get Milliseconds ---
+get_time_ms() {
+    if [[ "$OS" == "Darwin" ]]; then
+        # macOS date doesn't support %N, use perl if available
+        if command -v perl >/dev/null 2>&1; then
+            perl -MTime::HiRes=time -e 'printf "%.0f\n", time()*1000'
+        else
+            # fallback to seconds if perl is missing
+            echo $(($(date +%s) * 1000))
+        fi
+    else
+        date +%s%3N
+    fi
+}
+
 # --- Helper: Performance Run ---
 run_and_time() {
     local file=$1
     local asm=".build/tmp_out.s"
     local bin=".build/tmp_out"
     
+    if [ -z "$file" ]; then
+        echo -e "${RED}❌ No file specified!${NC}"
+        return 1
+    fi
+
     echo -e "${CYAN}🚀 Compiling $file...${NC}"
     
     # Compile
@@ -55,10 +75,10 @@ run_and_time() {
     echo -e "${YELLOW}--------------------------------${NC}"
     
     # Accurate timing
-    start_time=$(date +%s%3N)
+    start_time=$(get_time_ms)
     "./$bin"
     exit_code=$?
-    end_time=$(date +%s%3N)
+    end_time=$(get_time_ms)
     
     echo -e "${YELLOW}--------------------------------${NC}"
     
@@ -200,7 +220,13 @@ if [ "$1" == "@" ]; then
         fi
         echo -e "${RED}❌ Invalid selection.${NC}"
     done
+elif [ -n "$1" ]; then
+    # Standard CLI run
+    run_and_time "$1"
+else
+    echo -e "${BOLD}${CYAN}🚀 SNlang Dash Tool${NC}"
+    echo -e "Usage:"
+    echo -e "  ./run.sh <file.sn>    Compile and run a specific file"
+    echo -e "  ./run.sh @            Open the interactive file selector"
+    echo ""
 fi
-
-# Standard CLI run
-run_and_time "$1"

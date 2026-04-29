@@ -1,0 +1,27 @@
+fn is_even(int n) -> bool {
+    if (n % 2 == 0) {
+        return true
+    }
+    return false
+}
+
+fn is_positive(int n) -> bool {
+    if (n > 0) {
+        return true
+    }
+    return false
+}
+
+fn process(int n) -> str {
+    if (is_even(n)) {
+        if (is_positive(n)) {
+            return "even positive"
+        }
+        return "even negative or zero"
+    }
+    return "odd"
+}
+
+fn main() {
+    print(process(4))
+}

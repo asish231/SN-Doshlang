@@ -1,0 +1,10 @@
+fn get_str() -> str {
+    return "hi"
+}
+
+fn main() {
+    str a = get_str()
+    str b = get_str()
+    print(a)
+    print(b)
+}

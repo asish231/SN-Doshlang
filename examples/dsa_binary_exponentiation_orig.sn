@@ -4,7 +4,7 @@ fn main() {
 
     for (int x = 2, x <= 100, x += 1) {
         bool prime = true
-        for (int d = 2, d * d <= x && prime, d += 1) {
+        for (int d = 2, d * d <= x, d += 1) {
             if (x % d == 0) {
                 prime = false
             }

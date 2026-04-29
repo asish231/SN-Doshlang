@@ -1,0 +1,13 @@
+fn is_even(int n) -> bool {
+    if (n % 2 == 0) {
+        return true
+    }
+    return false
+}
+
+fn main() {
+    bool a = is_even(0)
+    bool b = is_even(1)
+    print(a)
+    print(b)
+}

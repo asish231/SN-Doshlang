@@ -1,0 +1,10 @@
+fn identity(int n) -> int {
+    return n
+}
+
+fn main() {
+    int a = identity(1)
+    int b = identity(2)
+    print(a)
+    print(b)
+}

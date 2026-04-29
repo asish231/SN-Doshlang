@@ -1,0 +1,14 @@
+fn get_a() -> str {
+    return "a"
+}
+
+fn get_b() -> str {
+    return "b"
+}
+
+fn main() {
+    str a = get_a()
+    str b = get_b()
+    print(a)
+    print(b)
+}

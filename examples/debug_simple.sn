@@ -1,0 +1,25 @@
+fn main() {
+    // Test with a known composite number
+    int x = 4
+    bool prime = true
+    for (int d = 2, d * d <= x && prime, d += 1) {
+        print("x=" + cast(x, str) + ", d=" + cast(d, str) + ", x%d=" + cast(x % d, str))
+        if (x % d == 0) {
+            print("Found divisor!")
+            prime = false
+        }
+    }
+    print(x + " is prime: " + cast(prime, str))
+    
+    // Test with a known prime
+    x = 7
+    prime = true
+    for (int d = 2, d * d <= x && prime, d += 1) {
+        print("x=" + cast(x, str) + ", d=" + cast(d, str) + ", x%d=" + cast(x % d, str))
+        if (x % d == 0) {
+            print("Found divisor!")
+            prime = false
+        }
+    }
+    print(x + " is prime: " + cast(prime, str))
+}

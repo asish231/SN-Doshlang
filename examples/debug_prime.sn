@@ -1,0 +1,29 @@
+fn main() {
+    // Simple debug: check if 7 is prime
+    int x = 7
+    bool prime = true
+    for (int d = 2, d * d <= x && prime, d += 1) {
+        print("Checking divisor: " + cast(d, str))
+        if (x % d == 0) {
+            print("Found divisor: " + cast(d, str))
+            prime = false
+        }
+    }
+    print("Is " + cast(x, str) + " prime? " + cast(prime, str))
+    
+    // Count primes in [2..10]
+    int primeCount = 0
+    for (int x = 2, x <= 10, x += 1) {
+        bool prime = true
+        for (int d = 2, d * d <= x && prime, d += 1) {
+            if (x % d == 0) {
+                prime = false
+            }
+        }
+        if (prime) {
+            primeCount += 1
+            print("Found prime: " + cast(x, str))
+        }
+    }
+    print("Primes in [2..10]: " + cast(primeCount, str))
+}

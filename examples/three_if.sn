@@ -1,0 +1,18 @@
+fn nesting_function_test(int t)-> int {
+    list<int> methods = [1,2,3,4,5]
+    int result = 0
+    for (method in methods) {
+        if(method == 1) {
+            result = sum(2, 2)
+        }
+    }
+    return result
+}
+
+fn sum(int add1, int add2) -> int {
+    return add1 + add2
+}
+
+fn main() { 
+    print(nesting_function_test(1))
+}

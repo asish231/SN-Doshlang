@@ -1,0 +1,32 @@
+fn is_even(int n) -> bool {
+    if (n % 2 == 0) {
+        return true
+    }
+    return false
+}
+
+fn is_positive(int n) -> bool {
+    if (n > 0) {
+        return true
+    }
+    return false
+}
+
+fn process(int n) -> str {
+    if (is_even(n)) {
+        if (is_positive(n)) {
+            return "even positive"
+        }
+        return "even negative or zero"
+    }
+    return "odd"
+}
+
+fn main() {
+    str a = process(4)
+    str b = process(-2)
+    str c = process(3)
+    print(a)
+    print(b)
+    print(c)
+}

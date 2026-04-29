@@ -1,0 +1,11 @@
+fn is_positive(int n) -> bool {
+    if (n > 0) {
+        return true
+    }
+    return false
+}
+
+fn main() {
+    bool a = is_positive(1)
+    print(a)
+}

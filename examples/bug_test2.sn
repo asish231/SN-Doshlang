@@ -1,0 +1,20 @@
+fn is_even(int n) -> bool {
+    if (n % 2 == 0) {
+        return true
+    }
+    return false
+}
+
+fn process(int n) -> str {
+    if (is_even(n)) {
+        return "ok"
+    }
+    return "other"
+}
+
+fn main() {
+    str a = process(4)
+    str b = process(-2)
+    print(a)
+    print(b)
+}

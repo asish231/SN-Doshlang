@@ -1,0 +1,13 @@
+fn outer(int x) -> str {
+    fn inner(int y) -> str {
+        if (y > 0) {
+            return "positive"
+        }
+        return "not positive"
+    }
+    return inner(x)
+}
+
+fn main() {
+    print(outer(4))
+}

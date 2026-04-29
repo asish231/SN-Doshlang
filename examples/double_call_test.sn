@@ -1,0 +1,11 @@
+fn is_even(int n) -> bool {
+    if (n % 2 == 0) {
+        return true
+    }
+    return false
+}
+
+fn main() {
+    is_even(4)
+    is_even(5)
+}
