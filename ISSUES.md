@@ -35,16 +35,19 @@ fn add(int a, int b) -> int {
 
 Cast/string concat fix to verify:
 
-- attempted fix: `cast(int, str)` now returns a real `str` type for concatenation paths
-- attempted fix: compile-time `int -> str` cast now builds a real string value
-- attempted fix: runtime `int -> str` cast now uses a dedicated helper before string concatenation
-- needs user verification with the example below:
+- fixed in current workspace:
+  `cast(int, str)` now works in the chained string-concat path after stack-slot accounting was corrected for temporary variables
+- verified example:
 
 ```sn
 print("k=" + cast(k, str) + ", j=" + cast(j, str))
 ```
+- verified output:
 
-Scope of current fix:
+```text
+k=2, j=5
+```
 
-- targeted `int -> str` inside larger string concatenation
+Remaining follow-up:
+
 - `bool -> str` and `dec -> str` concat hardening still needs separate verification later

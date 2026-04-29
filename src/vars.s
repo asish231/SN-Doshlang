@@ -527,6 +527,14 @@ _allocate_temp_var:
     ldr x0, [x9]
     add x1, x0, #1
     str x1, [x9]
+
+    LOAD_ADDR x11, max_var_count
+    ldr x12, [x11]
+    cmp x1, x12
+    b.le Lalloc_temp_meta
+    str x1, [x11]
+
+Lalloc_temp_meta:
     
     LOAD_ADDR x10, var_types
     str xzr, [x10, x0, lsl #3]

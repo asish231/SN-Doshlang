@@ -15,6 +15,10 @@ _emit_program:
 
     LOAD_ADDR x19, max_var_count
     ldr x19, [x19]
+    LOAD_ADDR x20, var_count
+    ldr x20, [x20]
+    cmp x20, x19
+    csel x19, x20, x19, hi
     mov x20, #8
     mul x19, x19, x20
     add x19, x19, #15

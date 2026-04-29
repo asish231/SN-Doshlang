@@ -26,10 +26,7 @@ fn main() {
     print("Nested loop output:")
     for (int k = 1, k <= 3, k += 1) {
         for (int j = 1, j <= 3, j += 1) {
-            print("k")
-            print(k)
-            print("j")
-            print(j)
+            print("k=" + cast(k, str) + ", j=" + cast(j, str))
         }
     }
 
