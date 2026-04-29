@@ -1,0 +1,9 @@
+// program to print a weather a given number is a even number or a odd number
+fn check(int num1, int b) {
+    if (num1 % 2 == 0) {
+        print("Even")
+    } else {
+        print("Odd")
+    }
+}
+fn main 

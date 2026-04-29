@@ -1,0 +1,37 @@
+// Example: void return type functions
+// Functions without -> type are treated as void-like (no return required)
+// Functions with -> type require a matching return value
+
+fn greet(str name) {
+    print(name)
+}
+
+fn add(int a, int b) -> int {
+    return a + b
+}
+
+fn say_hello() {
+    print("Hello from void function!")
+}
+
+fn main() {
+    greet("hello")
+    say_hello()
+    int x = add(2, 3)
+
+    for (int i = 1, i <= 10, i += 1) {
+        print(i)
+    }
+
+    print("Nested loop output:")
+    for (int k = 1, k <= 3, k += 1) {
+        for (int j = 1, j <= 3, j += 1) {
+            print("k")
+            print(k)
+            print("j")
+            print(j)
+        }
+    }
+
+    print(x)
+}

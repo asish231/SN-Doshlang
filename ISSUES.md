@@ -32,3 +32,18 @@ fn add(int a, int b) -> int {
     return a + b
 }
 ```
+
+Known compiler issue to track:
+
+- casting an `int` to `str` inside a larger string expression is not reliable yet
+- chained string concatenation with casted numeric values can fail at compile time with unclear type-mismatch errors
+- example shape that currently breaks:
+
+```sn
+print("k=" + cast(k, str) + ", j=" + cast(j, str))
+```
+
+Current practical workaround:
+
+- avoid reusing casted numeric values inside a larger concatenated string expression
+- print labels and numbers separately until `cast(..., str)` and chained string concatenation are hardened
