@@ -1,12 +1,26 @@
-fn get_value() -> int {
-    return 7
+// Multi-return: functions can return tuple values
+// Syntax: value, ok = fn() works for compile-time assignment
+// For runtime printing of tuple results, use direct print
+
+fn divide(int a, int b) -> (int, bool) {
+    if (b == 0) {
+        return (0, false)
+    }
+    return (a / b, true)
 }
 
-fn get_ok() -> int {
-    return 1
+fn get_pair() -> (int, int) {
+    return (7, 3)
 }
 
 fn main() {
-    print(get_value())
-    print(get_ok())
+    // Direct print of function results works
+    print(divide(10, 2))
+
+    // Tuple assign works for compile-time values
+    int result = 0
+    int status = 0
+    result, status = get_pair()
+    print(result)
+    print(status)
 }

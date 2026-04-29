@@ -1,0 +1,5 @@
+fn main() {
+    list<int> nums = [10, 20, 30]
+    int i = 1
+    print(nums[i])
+}

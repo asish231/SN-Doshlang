@@ -1682,6 +1682,22 @@ Lstmt_index_map_store:
     str x25, [x17, x16, lsl #3]
     LOAD_ADDR x17, map_pool_lengths
     str x27, [x17, x16, lsl #3]
+    // Update the variable's metadata count so future lookups see the new entry
+    mov x0, x19
+    mov x1, x20
+    bl _lookup_variable
+    cbz x0, Lstmt_fail
+    // x1=value x2=type x3=metadata. Update count (lower 32 bits) to x14
+    mov x28, x1  // save value
+    mov x27, x2  // save type
+    and x26, x3, #0xFFFFFFFF00000000
+    orr x26, x26, x14  // new metadata with updated count
+    mov x0, x19
+    mov x1, x20
+    mov x2, x28  // value
+    mov x3, x27  // type
+    mov x4, x26  // new metadata
+    bl _set_variable_full
     bl _consume_optional_semicolon
     mov x0, #0
     b Lstmt_return
@@ -1714,6 +1730,18 @@ Lstmt_tuple_assign:
     mov x4, x25
     bl _set_variable_full
     cbnz x0, Lstmt_fail
+    // Emit runtime store for first var
+    mov x0, x19
+    mov x1, x20
+    bl _lookup_variable
+    cbz x0, Lstmt_fail
+    cmp x2, #2
+    b.eq Lstmt_tuple_first_done
+    mov x0, x4
+    mov x1, x21
+    bl _record_store_variable
+    cbnz x0, Lstmt_fail
+Lstmt_tuple_first_done:
 
     // Store second return value from fn_return_extra (typed)
     LOAD_ADDR x9, fn_return_extra
@@ -1727,6 +1755,18 @@ Lstmt_tuple_assign:
     mov x4, #0
     bl _set_variable_full
     cbnz x0, Lstmt_fail
+    // Emit runtime store for second var
+    mov x0, x23
+    mov x1, x24
+    bl _lookup_variable
+    cbz x0, Lstmt_fail
+    cmp x2, #2
+    b.eq Lstmt_tuple_second_done
+    mov x0, x4
+    mov x1, x21
+    bl _record_store_variable
+    cbnz x0, Lstmt_fail
+Lstmt_tuple_second_done:
 
     bl _consume_optional_semicolon
     mov x0, #0

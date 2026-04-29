@@ -1,0 +1,6 @@
+fn main() {
+    list<int> nums = [10, 20, 30]
+    str s = "2"
+    int i = cast(s, int)
+    print(nums[i])
+}

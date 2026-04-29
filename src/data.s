@@ -758,6 +758,20 @@ asm_input_null_body:
     .asciz "    add x11, x10, x9\n    strb wzr, [x11]\n"
 asm_input_store_x10_str:
     .asciz "    stur x10, [x29, #-"
+asm_load_list_pool_x11:
+    .asciz "    adrp x11, list_pool_values@PAGE\n    add x11, x11, list_pool_values@PAGEOFF\n"
+asm_load_map_pool_x11:
+    .asciz "    adrp x11, map_pool_values@PAGE\n    add x11, x11, map_pool_values@PAGEOFF\n"
+asm_add_x10_imm:
+    .asciz "    add x10, x10, #"
+asm_load_pool_val_x10:
+    .asciz "    ldr x10, [x11, x10, lsl #3]\n"
+asm_load_pool_len_x12:
+    .asciz "    ldr x12, [x11, x10, lsl #3]\n"
+asm_load_list_pool_lens_x11:
+    .asciz "    adrp x11, list_pool_lengths@PAGE\n    add x11, x11, list_pool_lengths@PAGEOFF\n"
+asm_load_map_pool_lens_x11:
+    .asciz "    adrp x11, map_pool_lengths@PAGE\n    add x11, x11, map_pool_lengths@PAGEOFF\n"
 asm_input_buffer_space:
     .asciz ":\n    .space 256\n"
 newline_char:      .byte 10
