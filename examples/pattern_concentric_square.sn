@@ -1,0 +1,18 @@
+fn main() {
+    // Floyd's triangle pattern using string row assembly.
+    int rows = 7
+    int cur = 1
+
+    for (int r = 1, r <= rows, r += 1) {
+        str line = ""
+        for (int c = 1, c <= r, c += 1) {
+            if (c == 1) {
+                line = cast(cur, str)
+            } else {
+                line = line + " " + cast(cur, str)
+            }
+            cur += 1
+        }
+        print(line)
+    }
+}

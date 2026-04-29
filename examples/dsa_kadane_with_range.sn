@@ -1,0 +1,19 @@
+fn main() {
+    // Prime check in O(sqrt(n)) using a counted loop.
+    int n = 9973
+    bool prime = true
+
+    for (int i = 2, i * i <= n, i += 1) {
+        if (n % i == 0) {
+            prime = false
+        }
+    }
+
+    print("Prime check:")
+    print("n=" + cast(n, str))
+    if (prime) {
+        print("prime")
+    } else {
+        print("not-prime")
+    }
+}

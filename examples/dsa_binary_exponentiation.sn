@@ -1,0 +1,19 @@
+fn main() {
+    // Count primes in [2..100] using trial division.
+    int primeCount = 0
+
+    for (int x = 2, x <= 100, x += 1) {
+        bool prime = true
+        for (int d = 2, d * d <= x, d += 1) {
+            if (x % d == 0) {
+                prime = false
+            }
+        }
+        if (prime) {
+            primeCount += 1
+        }
+    }
+
+    print("Prime counting DSA:")
+    print("primes_in_2_to_100=" + cast(primeCount, str))
+}

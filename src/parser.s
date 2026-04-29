@@ -4628,6 +4628,7 @@ Lprimary_indexing:
     mov x23, x1 // index
     mov x24, x2 // index type
     mov x21, x3 // index metadata/length
+    mov x22, x4 // index source var slot
     
     bl _skip_whitespace
     mov w0, #']'
@@ -4642,6 +4643,13 @@ Lprimary_indexing:
     // If it's a list, index must be an int
     cmp x24, #0
     b.ne Lprimary_fail
+
+    // If index expression came from a variable/temp slot, load its value.
+    cmn x22, #1
+    b.eq Lprimary_list_index_value_ready
+    LOAD_ADDR x11, var_values
+    ldr x23, [x11, x22, lsl #3]
+Lprimary_list_index_value_ready:
     
     and x9, x27, #0xFFFFFFFF // count
     cmp x23, x9
