@@ -1,5 +1,0 @@
-fn main() {
-  file_write("local_test.txt", "SNlang File IO Works")
-  str c = file_read("local_test.txt")
-  print(c)
-}

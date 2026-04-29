@@ -1,12 +1,14 @@
-fn pair() -> (int, bool) {
-    return (7, true)
+fn get_value() -> int {
+    return 7
+}
+
+fn get_ok() -> bool {
+    return true
 }
 
 fn main() {
-    int value = 0
-    bool ok = false
-
-    value, ok = pair()
+    int value = get_value()
+    bool ok = get_ok()
     print(value)
     print(ok)
 }

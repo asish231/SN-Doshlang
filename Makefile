@@ -1,7 +1,7 @@
 CC ?= clang
 ASFLAGS ?= -x assembler-with-cpp
 LDFLAGS ?=
-TMPDIR ?= .build/tmp
+TMPDIR ?= /tmp
 SRCS = src/main.s src/parser.s src/vars.s src/codegen.s src/lexer.s src/utils.s src/data.s
 OBJS = $(SRCS:.s=.o)
 
@@ -22,15 +22,18 @@ $(SNC): $(OBJS)
 src/%.o: src/%.s src/platform.inc
 	$(CC) $(ASFLAGS) -c $< -o $@
 
+clean:
+	rm -f $(SNC) src/*.o
+
 run: $(SNC)
 	./$(SNC) examples/math.sn
 
-example: $(SNC) | $(TMPDIR)
+example: $(SNC)
 	./$(SNC) examples/math.sn > $(TMPDIR)/snc_example.s
 	$(CC) $(TMPDIR)/snc_example.s -o $(TMPDIR)/snc_example$(EXEEXT)
 	$(TMPDIR)/snc_example$(EXEEXT)
 
-test: $(SNC) | $(TMPDIR)
+test: $(SNC)
 	./$(SNC) examples/math.sn > $(TMPDIR)/snc_math.s
 	$(CC) $(TMPDIR)/snc_math.s -o $(TMPDIR)/snc_math$(EXEEXT)
 	$(TMPDIR)/snc_math$(EXEEXT)
@@ -127,7 +130,3 @@ test: $(SNC) | $(TMPDIR)
 	./$(SNC) examples/decimals_invalid_mixed.sn >$(TMPDIR)/snc_dec_invalid_mixed.s 2>$(TMPDIR)/snc_dec_invalid_mixed.err; test $$? -ne 0
 	./$(SNC) examples/decimals_invalid_mod.sn >$(TMPDIR)/snc_dec_invalid_mod.s 2>$(TMPDIR)/snc_dec_invalid_mod.err; test $$? -ne 0
 	./$(SNC) examples/decimals_invalid_arg.sn >$(TMPDIR)/snc_dec_invalid_arg.s 2>$(TMPDIR)/snc_dec_invalid_arg.err; test $$? -ne 0
-
-clean:
-	rm -f $(SNC) src/*.o
-	rm -rf .build

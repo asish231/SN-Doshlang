@@ -719,3 +719,56 @@ _str_concat:
     ldp x19, x20, [sp], #16
     ldp x29, x30, [sp], #16
     ret
+
+.global _compare_cstr
+_compare_cstr:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+
+    mov x19, x0
+    mov x20, x1
+    mov x21, x2
+    mov x0, x19
+    bl _cstring_length
+    mov x22, x0
+    mov x0, x21
+    bl _cstring_length
+    cmp x22, x0
+    b.ne Lcompare_cstr_notequal
+    mov x0, x19
+    mov x1, x21
+    mov x2, x22
+    bl _compare_cstr_len
+    b Lcompare_cstr_return
+
+Lcompare_cstr_notequal:
+    mov x0, #1
+
+Lcompare_cstr_return:
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+_compare_cstr_len:
+    mov x2, x2
+    mov x3, #0
+_compare_cstr_len_loop:
+    cmp x3, x2
+    b.ge Lcompare_cstr_len_equal
+    ldrb w4, [x0, x3]
+    ldrb w5, [x1, x3]
+    cmp w4, w5
+    b.ne Lcompare_cstr_len_notequal
+    add x3, x3, #1
+    b _compare_cstr_len_loop
+
+Lcompare_cstr_len_equal:
+    mov x0, #0
+    ret
+
+Lcompare_cstr_len_notequal:
+    mov x0, #1
+    ret

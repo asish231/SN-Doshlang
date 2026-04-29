@@ -1,4 +1,8 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
+if [ -z "${BASH_VERSION:-}" ]; then
+    exec bash "$0" "$@"
+fi
 
 # --- Professional Colors ---
 RED='\033[0;31m'
@@ -26,7 +30,7 @@ fi
 
 # --- Helper: Get Milliseconds ---
 get_time_ms() {
-    if [[ "$OS" == "Darwin" ]]; then
+    if [ "$OS" = "Darwin" ]; then
         # macOS date doesn't support %N, use perl if available
         if command -v perl >/dev/null 2>&1; then
             perl -MTime::HiRes=time -e 'printf "%.0f\n", time()*1000'
@@ -35,7 +39,8 @@ get_time_ms() {
             echo $(($(date +%s) * 1000))
         fi
     else
-        date +%s%3N
+        # GNU date supports %N, but sanitize in case it is unavailable.
+        date +%s%3N 2>/dev/null || echo $(($(date +%s) * 1000))
     fi
 }
 
@@ -79,6 +84,14 @@ run_and_time() {
     "./$bin"
     exit_code=$?
     end_time=$(get_time_ms)
+    start_time=${start_time//[^0-9]/}
+    end_time=${end_time//[^0-9]/}
+    if [ -z "$start_time" ]; then
+        start_time=$(($(date +%s) * 1000))
+    fi
+    if [ -z "$end_time" ]; then
+        end_time=$(($(date +%s) * 1000))
+    fi
     
     echo -e "${YELLOW}--------------------------------${NC}"
     
@@ -123,7 +136,7 @@ watch_file() {
 }
 
 # --- The "@" Feature: Interactive Selector ---
-if [ "$1" == "@" ]; then
+if [ "$1" = "@" ]; then
     clear
     echo -e "${BOLD}${CYAN}🔍 DASH DEVICE DISCOVERY${NC}"
     echo -e "${BLUE}--------------------------${NC}"
@@ -192,6 +205,7 @@ if [ "$1" == "@" ]; then
         # Selection Logic
         MODE="run"
         SEL_INPUT="$INPUT"
+        FILE=""
         if [[ "$INPUT" == w* ]]; then
             MODE="watch"
             SEL_INPUT="${INPUT#w}"

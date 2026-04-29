@@ -68,6 +68,18 @@
 .global kw_otherwise
 .global kw_file_read
 .global kw_file_write
+.global kw_ref
+.global kw_address
+.global kw_value
+.global kw_set
+.global kw_alloc
+.global kw_free
+.global kw_push
+.global kw_pop
+.global kw_contains
+.global kw_has
+.global kw_keys
+.global kw_values
 .global asm_header
 .global asm_runtime_helpers
 .global asm_sub_sp_prefix
@@ -219,6 +231,7 @@
 .global map_pool_count
 .global map_pool_keys
 .global map_pool_key_lengths
+.global map_pool_key_ptrs
 .global map_pool_values
 .global map_pool_lengths
 .global print_values
@@ -325,6 +338,18 @@ kw_none:           .asciz "none"
 kw_otherwise:      .asciz "otherwise"
 kw_file_read:      .asciz "file_read"
 kw_file_write:     .asciz "file_write"
+kw_ref:            .asciz "ref"
+kw_address:        .asciz "address"
+kw_value:          .asciz "value"
+kw_set:            .asciz "set"
+kw_alloc:          .asciz "alloc"
+kw_free:           .asciz "free"
+kw_push:           .asciz "push"
+kw_pop:            .asciz "pop"
+kw_contains:      .asciz "contains"
+kw_has:            .asciz "has"
+kw_keys:          .asciz "keys"
+kw_values:        .asciz "values"
 asm_sub_sp_prefix:
     .asciz "    sub sp, sp, #"
 asm_header:
@@ -715,6 +740,7 @@ list_pool_lengths: .space 32768
 map_pool_count:  .space 8
 map_pool_keys:   .space 32768
 map_pool_key_lengths: .space 32768
+map_pool_key_ptrs: .space 32768
 map_pool_values: .space 32768
 map_pool_lengths: .space 32768
 print_values:   .space 16384       // 2048 prints

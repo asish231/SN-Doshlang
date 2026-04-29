@@ -1,4 +1,0 @@
-fn main() {
-    str s = "Hello, " + "World"
-    print(s)
-}

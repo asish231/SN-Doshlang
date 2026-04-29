@@ -1,8 +1,0 @@
-fn main() {
-    str path = "test_io.txt"
-    str content = "Hello from SNlang file I/O!"
-    file_write(path, content)
-    
-    str read_content = file_read(path)
-    print(read_content)
-}

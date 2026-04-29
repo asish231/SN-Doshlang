@@ -210,6 +210,12 @@ _parse_statement:
 
     mov x0, x19
     mov x1, x20
+    LOAD_ADDR x2, kw_ref
+    bl _match_cstr_span
+    cbnz x0, Lstmt_ref
+
+    mov x0, x19
+    mov x1, x20
     LOAD_ADDR x2, kw_map
     bl _match_cstr_span
     cbnz x0, Lstmt_map
@@ -232,6 +238,19 @@ _parse_statement:
     bl _match_cstr_span
     cbnz x0, Lstmt_return_val
 
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_set
+    bl _match_cstr_span
+    cbnz x0, Lstmt_set
+
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_free
+    bl _match_cstr_span
+    cbnz x0, Lstmt_free
+
+
     b Lstmt_assign
 
     LOAD_ADDR x0, msg_unknown_stmt
@@ -242,6 +261,80 @@ _parse_statement:
     bl _write_buffer_fd
     bl _write_newline_stderr
     b Lstmt_fail
+
+Lstmt_set:
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lstmt_fail
+
+    bl _parse_expr_value
+    cbz x0, Lstmt_fail
+    mov x21, x1 // pointer value
+    mov x22, x2 // type ID
+    cmp x22, #9 // must be ref
+    b.ne Lstmt_type_mismatch
+    mov x26, x3 // element type metadata
+
+    bl _skip_whitespace
+    mov w0, #','
+    bl _expect_char
+    cbz x0, Lstmt_fail
+
+    bl _parse_expr_value
+    cbz x0, Lstmt_fail
+    mov x23, x1 // value to set
+    mov x24, x2 // type ID
+    cmp x24, x26
+    b.ne Lstmt_type_mismatch
+
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lstmt_fail
+
+    bl _consume_optional_semicolon
+
+    // Emit pointer set operation
+    mov x0, #80 // op_set_ptr
+    mov x1, x21 // pointer value (var_slot holding the address)
+    mov x2, x23 // value to set
+    mov x3, x26 // element type
+    bl _record_operation3
+    cbnz x0, Lstmt_fail
+
+    mov x0, #0
+    b Lstmt_return
+
+Lstmt_free:
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lstmt_fail
+
+    bl _parse_expr_value
+    cbz x0, Lstmt_fail
+    mov x21, x1 // pointer value
+    mov x22, x2 // type ID
+    cmp x22, #9 // must be ref
+    b.ne Lstmt_type_mismatch
+
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lstmt_fail
+
+    bl _consume_optional_semicolon
+
+    // Emit free operation
+    mov x0, #81 // op_free_ptr
+    mov x1, x21 // pointer value
+    bl _record_operation
+    cbnz x0, Lstmt_fail
+
+    mov x0, #0
+    b Lstmt_return
+
 
 Lstmt_let:
     bl _skip_whitespace
@@ -765,6 +858,83 @@ Lstmt_list_value_ok:
 
     mov x0, #0
     b Lstmt_return
+
+Lstmt_ref:
+    bl _skip_whitespace
+    mov w0, #'<'
+    bl _expect_char
+    cbz x0, Lstmt_fail
+
+    bl _skip_whitespace
+    bl _parse_type_spec
+    cbz x0, Lstmt_fail
+    mov x23, x1 // element type
+    mov x24, #9 // ref type ID
+
+    bl _skip_whitespace
+    mov w0, #'>'
+    bl _expect_char
+    cbz x0, Lstmt_fail
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, #'?'
+    b.ne Lstmt_ref_name
+    bl _advance_char
+    add x24, x24, #16
+Lstmt_ref_name:
+
+    bl _skip_whitespace
+    bl _parse_identifier
+    cbz x0, Lstmt_need_name
+    mov x19, x0
+    mov x20, x1
+
+    bl _skip_whitespace
+    mov w0, #'='
+    bl _expect_char
+    cbz x0, Lstmt_fail
+
+    bl _parse_expr_value
+    cbz x0, Lstmt_fail
+    mov x21, x1 // value
+    mov x22, x2 // type ID
+    mov x25, x3 // metadata (for ref it could be element type, but maybe just value is enough)
+
+    // Check if types match exactly or none
+    cmp x22, x24
+    b.eq Lstmt_ref_value_ok
+
+    cmp x24, #25 // ref?
+    b.ne Lstmt_type_mismatch
+    cmp x22, #7 // none
+    b.eq Lstmt_ref_value_ok
+    cmp x22, #9 // ref
+    b.ne Lstmt_type_mismatch
+
+Lstmt_ref_value_ok:
+    bl _consume_optional_semicolon
+
+    mov x0, x19
+    mov x1, x20
+    mov x2, x21
+    mov x3, #0
+    mov x4, x24
+    mov x5, x23 // store element type in length metadata field
+    bl _define_variable
+    cbnz x0, Lstmt_fail
+
+    mov x0, x19
+    mov x1, x20
+    bl _lookup_variable
+    cbz x0, Lstmt_fail
+    mov x0, x4
+    mov x1, x21
+    bl _record_store_variable
+    cbnz x0, Lstmt_fail
+
+    mov x0, #0
+    b Lstmt_return
+
 
 Lstmt_map:
     bl _skip_whitespace
@@ -1525,6 +1695,114 @@ Lstmt_fn_call:
     bl _consume_optional_semicolon
     mov x0, #0
     b Lstmt_return
+
+Lstmt_method_call:
+    bl _advance_char
+    bl _parse_identifier
+    cbz x0, Lstmt_fail
+    mov x21, x0
+    mov x22, x1
+
+    mov x0, x21
+    mov x1, x22
+    LOAD_ADDR x2, kw_push
+    bl _match_cstr_span
+    cbnz x0, Lstmt_method_push
+
+    mov x0, x21
+    mov x1, x22
+    LOAD_ADDR x2, kw_pop
+    bl _match_cstr_span
+    cbnz x0, Lstmt_method_pop
+
+    b Lstmt_fail
+
+Lstmt_method_push:
+    mov x0, x19
+    mov x1, x20
+    bl _lookup_variable
+    cbz x0, Lstmt_unknown_var
+    mov x9, x1
+    mov x10, x2
+    mov x11, x3
+    cmp x10, #4
+    b.ne Lstmt_fail
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lstmt_fail
+    bl _parse_expr_value
+    cbz x0, Lstmt_fail
+    mov x23, x0
+    mov x24, x1
+    mov x25, x2
+    mov x26, x3
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lstmt_fail
+    and x12, x11, #0xFFFFFFFF
+    LOAD_ADDR x13, list_pool_values
+    LOAD_ADDR x14, list_pool_lengths
+    add x27, x12, #1
+    and x11, x11, #0xFFFFFFFF00000000
+    orr x11, x11, x27
+    str x23, [x13, x12, lsl #3]
+    str x24, [x14, x12, lsl #3]
+    mov x0, x9
+    mov x1, x12
+    mov x2, x11
+    bl _set_variable_full
+    bl _consume_optional_semicolon
+    mov x0, #0
+    b Lstmt_return
+
+Lstmt_method_pop:
+    mov x0, x19
+    mov x1, x20
+    bl _lookup_variable
+    cbz x0, Lstmt_unknown_var
+    mov x9, x1
+    mov x10, x2
+    mov x11, x3
+    cmp x10, #4
+    b.ne Lstmt_fail
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lstmt_fail
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lstmt_fail
+    and x12, x11, #0xFFFFFFFF
+    cmp x12, #0
+    b.eq Lstmt_fail
+    LOAD_ADDR x13, list_pool_values
+    ldr x23, [x13, x12, lsl #3]
+    LOAD_ADDR x14, list_pool_lengths
+    lsr x24, x11, #32
+    ldr x25, [x14, x12, lsl #3]
+    sub x12, x12, #1
+    and x11, x11, #0xFFFFFFFF00000000
+    orr x11, x11, x12
+    mov x0, x9
+    mov x1, x12
+    mov x2, x11
+    bl _set_variable_full
+    mov x0, #4
+    mov x1, x23
+    mov x2, x24
+    mov x3, x25
+    bl _record_print_value
+    bl _consume_optional_semicolon
+    mov x0, #0
+    b Lstmt_return
+
+Lstmt_unknown_var:
+    LOAD_ADDR x0, msg_unknown_var
+    bl _report_error_prefix
+    b Lstmt_fail
 
 Lstmt_assign_set:
     bl _advance_char
@@ -3236,73 +3514,28 @@ _parse_for_iterable_value:
     stp x19, x20, [sp, #-16]!
     stp x21, x22, [sp, #-16]!
     stp x23, x24, [sp, #-16]!
-
-    LOAD_ADDR x9, cursor_pos
-    ldr x19, [x9]
-    LOAD_ADDR x9, current_line
-    ldr x20, [x9]
-
-    mov x0, #-1
-    bl _parse_list_literal_value
-    cbnz x0, Lfor_iterable_ok
-
-    LOAD_ADDR x9, cursor_pos
-    str x19, [x9]
-    LOAD_ADDR x9, current_line
-    str x20, [x9]
-
-    bl _parse_identifier
+    bl _parse_expr_value
     cbz x0, Lfor_iterable_fail
-    mov x21, x0
-    mov x22, x1
-    mov x0, x21
-    mov x1, x22
-    bl _lookup_variable
-    cbz x0, Lfor_iterable_fail
-
     mov x23, x1 // list start index
-    mov x24, x3 // metadata
-    
-    cmp x2, #4 // unified list type ID
+    mov x24, x2 // list type
+    mov x22, x3 // list metadata
+
+    cmp x24, #4 // list<T>
     b.eq Lfor_iterable_list_unified
-    cmp x2, #20 // nullable unified list type ID
-    b.eq Lfor_iterable_list_unified
+    cmp x24, #20 // list<T>?
+    b.eq Lfor_iterable_nullable_list_unified
     b Lfor_iterable_fail
+
+Lfor_iterable_nullable_list_unified:
+    cmp x23, #-1
+    b.eq Lfor_iterable_fail
 
 Lfor_iterable_list_unified:
     mov x0, #1
     mov x1, x23 // start index
-    and x2, x24, #0xFFFFFFFF // count
-    lsr x3, x24, #32 // element type
+    and x2, x22, #0xFFFFFFFF // count
+    lsr x3, x22, #32 // element type
     b Lfor_iterable_return
-    b Lfor_iterable_return
-
-Lfor_iterable_list_str:
-    mov x0, #1
-    mov x1, x23
-    mov x2, x24
-    mov x3, #2
-    b Lfor_iterable_return
-
-Lfor_iterable_nullable_list_int:
-    cmp x23, #-1
-    b.eq Lfor_iterable_fail
-    mov x0, #1
-    mov x1, x23
-    mov x2, x24
-    mov x3, #0
-    b Lfor_iterable_return
-
-Lfor_iterable_nullable_list_str:
-    cmp x23, #-1
-    b.eq Lfor_iterable_fail
-    mov x0, #1
-    mov x1, x23
-    mov x2, x24
-    mov x3, #2
-    b Lfor_iterable_return
-
-Lfor_iterable_ok:
     b Lfor_iterable_return
 
 Lfor_iterable_fail:
@@ -4512,12 +4745,34 @@ _parse_primary_value:
 
     cmp w0, #'"'
     b.eq Lprimary_string
+    cmp w0, #'+'
+    b.eq Lprimary_unary_plus
+
+    cmp w0, #'-'
+    b.eq Lprimary_unary_minus
 
     cmp w0, #'0'
     b.lt Lprimary_identifier
     cmp w0, #'9'
     b.le Lprimary_number
     b Lprimary_identifier
+
+Lprimary_unary_plus:
+    bl _advance_char
+    bl _skip_whitespace
+    bl _parse_numeric_literal
+    cbz x0, Lprimary_fail
+    mov x4, #-1
+    b Lprimary_suffix_loop
+
+Lprimary_unary_minus:
+    bl _advance_char
+    bl _skip_whitespace
+    bl _parse_numeric_literal
+    cbz x0, Lprimary_fail
+    neg x1, x1
+    mov x4, #-1
+    b Lprimary_suffix_loop
 
 Lprimary_group:
     bl _advance_char
@@ -4618,6 +4873,289 @@ Lprimary_str_length_val:
     mov x25, x27
     mov x26, #0
     mov x27, #0
+    mov x28, #-1
+    b Lprimary_suffix_loop_start
+
+Lprimary_member_push:
+    mov x0, x21
+    mov x1, x22
+    LOAD_ADDR x2, kw_push
+    bl _match_cstr_span
+    cbz x0, Lprimary_member_pop
+    cmp x26, #4
+    b.ne Lprimary_fail
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lprimary_fail
+    bl _parse_expr_value
+    cbz x0, Lprimary_fail
+    mov x19, x0
+    mov x20, x1
+    mov x21, x2
+    mov x22, x3
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lprimary_fail
+    and x9, x27, #0xFFFFFFFF
+    LOAD_ADDR x10, list_pool_values
+    LOAD_ADDR x11, list_pool_lengths
+    add x12, x9, #1
+    and x27, x27, #0xFFFFFFFF00000000
+    orr x27, x27, x12
+    str x19, [x10, x9, lsl #3]
+    str x20, [x11, x9, lsl #3]
+    mov x25, x9
+    mov x26, #0
+    mov x28, #-1
+    b Lprimary_suffix_loop_start
+
+Lprimary_member_pop:
+    mov x0, x21
+    mov x1, x22
+    LOAD_ADDR x2, kw_pop
+    bl _match_cstr_span
+    cbz x0, Lprimary_member_contains
+    cmp x26, #4
+    b.ne Lprimary_fail
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lprimary_fail
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lprimary_fail
+    and x9, x27, #0xFFFFFFFF
+    cmp x9, #0
+    b.eq Lprimary_fail
+    sub x9, x9, #1
+    LOAD_ADDR x10, list_pool_values
+    ldr x25, [x10, x9, lsl #3]
+    LOAD_ADDR x11, list_pool_lengths
+    lsr x26, x27, #32
+    ldr x27, [x11, x9, lsl #3]
+    add x12, x9, #1
+    and x27, x27, #0xFFFFFFFF00000000
+    orr x27, x27, x12
+    mov x28, #-1
+    b Lprimary_suffix_loop_start
+
+Lprimary_member_contains:
+    mov x0, x21
+    mov x1, x22
+    LOAD_ADDR x2, kw_contains
+    bl _match_cstr_span
+    cbz x0, Lprimary_member_has
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lprimary_fail
+    bl _parse_expr_value
+    cbz x0, Lprimary_fail
+    mov x19, x0
+    mov x20, x1
+    mov x21, x2
+    mov x22, x3
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lprimary_fail
+    cmp x26, #4
+    b.eq Lprimary_list_contains
+    cmp x26, #8
+    b.eq Lprimary_map_contains
+    b Lprimary_fail
+
+Lprimary_list_contains:
+    and x9, x27, #0xFFFFFFFF
+    LOAD_ADDR x10, list_pool_values
+    LOAD_ADDR x11, list_pool_lengths
+    lsr x23, x27, #32
+    mov x24, #0
+Llist_contains_loop:
+    cmp x24, x9
+    b.ge Llist_contains_not_found
+    ldr x28, [x10, x24, lsl #3]
+    ldr x25, [x11, x24, lsl #3]
+    cmp x23, x20
+    b.ne Llist_contains_next
+    cmp x28, x19
+    b.ne Llist_contains_next
+    cmp x25, x21
+    b.ne Llist_contains_next
+    mov x25, #1
+    mov x26, #1
+    mov x27, #0
+    mov x28, #-1
+    b Lprimary_suffix_loop_start
+Llist_contains_next:
+    add x24, x24, #1
+    b Llist_contains_loop
+Llist_contains_not_found:
+    mov x25, #0
+    mov x26, #1
+    mov x27, #0
+    mov x28, #-1
+    b Lprimary_suffix_loop_start
+
+Lprimary_map_contains:
+    and x9, x27, #0xFFFFFFFF
+    cbz x9, Lmap_contains_not_found
+    lsr x23, x27, #40
+    mov x24, #0
+Lmap_contains_loop:
+    cmp x24, x9
+    b.ge Lmap_contains_not_found
+    LOAD_ADDR x10, map_pool_keys
+    ldr x28, [x10, x24, lsl #3]
+    LOAD_ADDR x11, map_pool_key_lengths
+    ldr x25, [x11, x24, lsl #3]
+    cmp x23, x20
+    b.ne Lmap_contains_next
+    cbz x20, Lmap_contains_int_cmp
+    cmp x25, x21
+    b.ne Lmap_contains_next
+    LOAD_ADDR x10, map_pool_key_ptrs
+    ldr x28, [x10, x24, lsl #3]
+    mov x0, x28
+    mov x1, x25
+    mov x2, x19
+    bl _compare_cstr
+    cbz x0, Lmap_contains_found
+    b Lmap_contains_next
+Lmap_contains_int_cmp:
+    cmp x28, x19
+    b.eq Lmap_contains_found
+    b Lmap_contains_next
+Lmap_contains_found:
+    mov x25, #1
+    mov x26, #1
+    mov x27, #0
+    mov x28, #-1
+    b Lprimary_suffix_loop_start
+Lmap_contains_next:
+    add x24, x24, #1
+    b Lmap_contains_loop
+Lmap_contains_not_found:
+    mov x25, #0
+    mov x26, #1
+    mov x27, #0
+    mov x28, #-1
+    b Lprimary_suffix_loop_start
+
+Lprimary_member_has:
+    mov x0, x21
+    mov x1, x22
+    LOAD_ADDR x2, kw_has
+    bl _match_cstr_span
+    cbz x0, Lprimary_member_keys
+    cmp x26, #8
+    b.ne Lprimary_fail
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lprimary_fail
+    bl _parse_expr_value
+    cbz x0, Lprimary_fail
+    mov x19, x0
+    mov x20, x1
+    mov x21, x2
+    mov x22, x3
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lprimary_fail
+    and x9, x27, #0xFFFFFFFF
+    cbz x9, Lmap_has_not_found
+    lsr x23, x27, #40
+    mov x24, #0
+Lmap_has_loop:
+    cmp x24, x9
+    b.ge Lmap_has_not_found
+    LOAD_ADDR x10, map_pool_keys
+    ldr x28, [x10, x24, lsl #3]
+    LOAD_ADDR x11, map_pool_key_lengths
+    ldr x25, [x11, x24, lsl #3]
+    cmp x23, x20
+    b.ne Lmap_has_next
+    cbz x20, Lmap_has_int_cmp
+    cmp x25, x21
+    b.ne Lmap_has_next
+    LOAD_ADDR x10, map_pool_key_ptrs
+    ldr x28, [x10, x24, lsl #3]
+    mov x0, x28
+    mov x1, x25
+    mov x2, x19
+    bl _compare_cstr
+    cbz x0, Lmap_has_found
+    b Lmap_has_next
+Lmap_has_int_cmp:
+    cmp x28, x19
+    b.eq Lmap_has_found
+    b Lmap_has_next
+Lmap_has_found:
+    mov x25, #1
+    mov x26, #1
+    mov x27, #0
+    mov x28, #-1
+    b Lprimary_suffix_loop_start
+Lmap_has_next:
+    add x24, x24, #1
+    b Lmap_has_loop
+Lmap_has_not_found:
+    mov x25, #0
+    mov x26, #1
+    mov x27, #0
+    mov x28, #-1
+    b Lprimary_suffix_loop_start
+
+Lprimary_member_keys:
+    mov x0, x21
+    mov x1, x22
+    LOAD_ADDR x2, kw_keys
+    bl _match_cstr_span
+    cbz x0, Lprimary_member_values
+    cmp x26, #8
+    b.ne Lprimary_fail
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lprimary_fail
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lprimary_fail
+    and x9, x27, #0xFFFFFFFF
+    mov x25, #0
+    mov x26, #4
+    lsl x9, x9, #32
+    orr x27, x25, x9
+    mov x28, #-1
+    b Lprimary_suffix_loop_start
+
+Lprimary_member_values:
+    mov x0, x21
+    mov x1, x22
+    LOAD_ADDR x2, kw_values
+    bl _match_cstr_span
+    cbz x0, Lprimary_indexing
+    cmp x26, #8
+    b.ne Lprimary_fail
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lprimary_fail
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lprimary_fail
+    and x9, x27, #0xFFFFFFFF
+    mov x25, #0
+    mov x26, #4
+    lsl x9, x9, #32
+    orr x27, x25, x9
     mov x28, #-1
     b Lprimary_suffix_loop_start
 
@@ -4766,9 +5304,28 @@ Lprimary_identifier:
 
     mov x0, x19
     mov x1, x20
+    LOAD_ADDR x2, kw_address
+    bl _match_cstr_span
+    cbnz x0, Lprimary_address
+
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_value
+    bl _match_cstr_span
+    cbnz x0, Lprimary_value
+
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_alloc
+    bl _match_cstr_span
+    cbnz x0, Lprimary_alloc
+
+    mov x0, x19
+    mov x1, x20
     bl _lookup_variable
     cbz x0, Lprimary_try_fn_call
     b Lprimary_suffix_loop
+
 
 Lprimary_try_fn_call:
     bl _skip_whitespace
@@ -4855,7 +5412,104 @@ Lprimary_string:
     mov x4, #-1
     b Lprimary_suffix_loop
 
+// address(varname) — takes address of a named variable
+// Returns type=9 (ref), value=var_slot_idx, metadata=element_type
+Lprimary_address:
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lprimary_fail
+
+    bl _skip_whitespace
+    bl _parse_identifier
+    cbz x0, Lprimary_fail
+    mov x21, x0   // var name ptr
+    mov x22, x1   // var name len
+
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lprimary_fail
+
+    // Look up the variable to get its type
+    mov x0, x21
+    mov x1, x22
+    bl _lookup_variable
+    cbz x0, Lprimary_fail
+    // x4 = var_idx, x2 = type, x3 = length (metadata)
+    mov x19, x4   // var_idx
+    mov x23, x2   // element type
+
+    // Emit op_address (75): result var, src var idx
+    // We need a temp var to hold the ref; emit op and store in new var slot
+    // Actually, return the var_idx as the "value" with type=9
+    // The codegen for address() will emit lea of stack slot
+    mov x0, #1
+    mov x1, x19   // var slot as value (codegen knows how to turn this into &stack_slot)
+    mov x2, #9    // ref type
+    mov x3, x23   // element type
+    mov x4, #-1
+    b Lprimary_suffix_loop
+
+// value(ptr_var) — dereference a ref<T>
+// Returns type=element_type, value=<dereferenced>
+Lprimary_value:
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lprimary_fail
+
+    bl _parse_expr_value
+    cbz x0, Lprimary_fail
+    cmp x2, #9    // must be ref type
+    b.ne Lprimary_fail
+    mov x21, x1   // pointer value (var_idx or immediate)
+    mov x23, x3   // element type stored in metadata
+
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lprimary_fail
+
+    // Emit a special deref operation at codegen time via a store+load trick
+    // For now, represent as type=element_type, value=pointer_value, special var
+    // We'll use op 76 to create a temp holding the dereffed value
+    mov x0, #1
+    mov x1, x21   // the ref var slot / address
+    mov x2, x23   // element type
+    mov x3, #0
+    mov x4, #-1   // signal it's an expression result
+    b Lprimary_suffix_loop
+
+// alloc(size_expr) — malloc wrapper, returns ref<byte>
+Lprimary_alloc:
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lprimary_fail
+
+    bl _parse_expr_value
+    cbz x0, Lprimary_fail
+    cmp x2, #0    // must be int
+    b.ne Lprimary_fail
+    mov x21, x1   // size value
+    mov x22, x4   // size var idx
+
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lprimary_fail
+
+    // alloc returns ref<byte> (type 9, element type 3 = byte)
+    mov x0, #1
+    mov x1, x21   // size (as value, codegen will pass to malloc)
+    mov x2, #9    // ref type
+    mov x3, #3    // element type = byte
+    mov x4, #-1
+    b Lprimary_suffix_loop
+
 Lprimary_missing:
+
     LOAD_ADDR x0, msg_expected_expr
     bl _report_error_prefix
     b Lprimary_fail
@@ -4977,6 +5631,12 @@ _parse_type_spec:
     bl _match_cstr_span
     cbnz x0, Lparse_type_map
 
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_ref
+    bl _match_cstr_span
+    cbnz x0, Lparse_type_ref
+
 Lparse_type_fail:
     mov x0, #0
     ldp x19, x20, [sp], #16
@@ -5030,6 +5690,26 @@ Lparse_type_list:
     mov x0, #1
     mov x1, #4 // base list type
     mov x2, x19 // store element type in length field
+    b Lparse_type_return
+
+Lparse_type_ref:
+    bl _skip_whitespace
+    mov w0, #'<'
+    bl _expect_char
+    cbz x0, Lparse_type_fail
+    bl _skip_whitespace
+    
+    bl _parse_type_spec
+    cbz x0, Lparse_type_fail
+    mov x19, x1 // element type
+    
+    bl _skip_whitespace
+    mov w0, #'>'
+    bl _expect_char
+    cbz x0, Lparse_type_fail
+    mov x0, #1
+    mov x1, #9 // base ref type
+    mov x2, x19 // store element type
     b Lparse_type_return
 
 Lparse_type_map:
