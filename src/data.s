@@ -32,7 +32,11 @@
 .global msg_wrong_arg_count
 .global msg_expected_arrow
 .global msg_missing_return
+.global msg_index_out_of_bounds
+.global msg_key_not_found
 .global kw_print
+.global kw_print_noline
+.global kw_printx
 .global kw_let
 .global kw_int
 .global kw_bool
@@ -116,7 +120,9 @@
 .global asm_data_value_suffix_str
 .global asm_align_3
 .global asm_print_fmt_int_adrp
+.global asm_print_fmt_int_noline_adrp
 .global asm_print_fmt_str_adrp
+.global asm_print_fmt_str_noline_adrp
 .global asm_store_val_adrp
 .global asm_store_val_ldr
 .global asm_store_var_adrp
@@ -218,6 +224,7 @@
 .global current_line
 .global var_count
 .global print_count
+.global print_noline_flag
 .global op_count
 .global var_name_ptrs
 .global var_name_lens
@@ -237,6 +244,7 @@
 .global print_values
 .global print_lengths
 .global print_types
+.global print_noline
 .global op_kinds
 .global op_arg0
 .global op_arg1
@@ -302,7 +310,11 @@ msg_unknown_fn:    .asciz "error: unknown function on "
 msg_wrong_arg_count: .asciz "error: wrong number of arguments on "
 msg_expected_arrow: .asciz "error: expected -> on "
 msg_missing_return: .asciz "error: missing return in typed function on "
+msg_index_out_of_bounds: .asciz "error: list index out of bounds on "
+msg_key_not_found: .asciz "error: map key not found on "
 kw_print:          .asciz "print"
+kw_print_noline:   .asciz "printn"
+kw_printx:        .asciz "printx"
 kw_let:            .asciz "let"
 kw_int:            .asciz "int"
 kw_bool:           .asciz "bool"
@@ -372,11 +384,23 @@ asm_print_fmt_int_adrp:
 #else
     .asciz "    adrp x0, print_fmt_int@PAGE\n    add x0, x0, print_fmt_int@PAGEOFF\n"
 #endif
+asm_print_fmt_int_noline_adrp:
+#ifdef _WIN32
+    .asciz "    adrp x0, print_fmt_int_noline\n    add x0, x0, :lo12:print_fmt_int_noline\n"
+#else
+    .asciz "    adrp x0, print_fmt_int_noline@PAGE\n    add x0, x0, print_fmt_int_noline@PAGEOFF\n"
+#endif
 asm_print_fmt_str_adrp:
 #ifdef _WIN32
     .asciz "    adrp x0, print_fmt_str\n    add x0, x0, :lo12:print_fmt_str\n"
 #else
     .asciz "    adrp x0, print_fmt_str@PAGE\n    add x0, x0, print_fmt_str@PAGEOFF\n"
+#endif
+asm_print_fmt_str_noline_adrp:
+#ifdef _WIN32
+    .asciz "    adrp x0, print_fmt_str_noline\n    add x0, x0, :lo12:print_fmt_str_noline\n"
+#else
+    .asciz "    adrp x0, print_fmt_str_noline@PAGE\n    add x0, x0, print_fmt_str_noline@PAGEOFF\n"
 #endif
 asm_print_val_adrp:
     .asciz "    adrp x9, print_val_"
@@ -423,6 +447,35 @@ asm_print_dec_call_stack:
     .asciz "    sub sp, sp, #32\n    stp x1, x2, [sp]\n    stp x3, x4, [sp, #16]\n    bl printf\n    add sp, sp, #32\n"
 #else
     .asciz "    sub sp, sp, #32\n    stp x1, x2, [sp]\n    stp x3, x4, [sp, #16]\n    bl _printf\n    add sp, sp, #32\n"
+#endif
+
+.global asm_print_noline_call_stack
+.global asm_print_noline_call_suffix
+.global asm_print_noline_call_suffix_stack
+.global asm_print_noline_stack_only
+asm_print_noline_call_stack:
+#ifdef _WIN32
+    .asciz "@PAGEOFF\n    sub sp, sp, #16\n    str x1, [sp]\n    bl printf\n    add sp, sp, #16\n"
+#else
+    .asciz "@PAGEOFF\n    sub sp, sp, #16\n    str x1, [sp]\n    bl _printf\n    add sp, sp, #16\n"
+#endif
+asm_print_noline_call_suffix:
+#ifdef _WIN32
+    .asciz "]    sub sp, sp, #16\n    str x1, [sp]\n    bl printf\n    add sp, sp, #16\n"
+#else
+    .asciz "@PAGEOFF]    sub sp, sp, #16\n    str x1, [sp]\n    bl _printf\n    add sp, sp, #16\n"
+#endif
+asm_print_noline_call_suffix_stack:
+#ifdef _WIN32
+    .asciz "]    sub sp, sp, #16\n    str x1, [sp]\n    bl printf\n    add sp, sp, #16\n"
+#else
+    .asciz "@PAGEOFF]    sub sp, sp, #16\n    str x1, [sp]\n    bl _printf\n    add sp, sp, #16\n"
+#endif
+asm_print_noline_stack_only:
+#ifdef _WIN32
+    .asciz "    sub sp, sp, #16\n    str x1, [sp]\n    bl printf\n    add sp, sp, #16\n"
+#else
+    .asciz "    sub sp, sp, #16\n    str x1, [sp]\n    bl _printf\n    add sp, sp, #16\n"
 #endif
 asm_store_val_adrp:
     .asciz "    adrp x9, store_val_"
@@ -578,7 +631,7 @@ asm_logic_or_x11_x10:
 asm_logic_not_x11:
     .asciz "    cmp x11, #0\n    cset x11, eq\n"
 asm_data_intro:
-    .asciz "    mov w0, #0\n    mov sp, x29\n    ldp x29, x30, [sp], #16\n    ret\n\n.data\nprint_fmt_int:\n    .asciz \"%lld\\n\"\nprint_fmt_str:\n    .asciz \"%s\\n\"\nprint_fmt_dec:\n    .asciz \"%s%lld.%0*lld\\n\"\ndec_sign_empty:\n    .asciz \"\"\ndec_sign_minus:\n    .asciz \"-\"\n.align 3\n"
+    .asciz "    mov w0, #0\n    mov sp, x29\n    ldp x29, x30, [sp], #16\n    ret\n\n.data\nprint_fmt_int:\n    .asciz \"%lld\\n\"\nprint_fmt_str:\n    .asciz \"%s\\n\"\nprint_fmt_dec:\n    .asciz \"%s%lld.%0*lld\\n\"\nprint_fmt_int_noline:\n    .asciz \"%lld\"\nprint_fmt_str_noline:\n    .asciz \"%s\"\nprint_fmt_dec_noline:\n    .asciz \"%s%lld.%0*lld\"\ndec_sign_empty:\n    .asciz \"\"\ndec_sign_minus:\n    .asciz \"-\"\n.align 3\n"
 asm_data_value_prefix:
     .asciz "print_val_"
 asm_data_value_mid:
@@ -724,6 +777,7 @@ cursor_pos:     .space 8
 current_line:   .space 8
 var_count:      .space 8
 print_count:    .space 8
+print_noline_flag: .space 8
 op_count:       .space 8
 current_loop_start: .space 8
 current_loop_end: .space 8
@@ -746,6 +800,7 @@ map_pool_lengths: .space 32768
 print_values:   .space 16384       // 2048 prints
 print_lengths:  .space 16384
 print_types:    .space 16384
+print_noline:   .space 2048         // 2048 noline flags (1 byte each)
 op_kinds:       .space 32768       // 4096 operations
 op_arg0:        .space 32768
 op_arg1:        .space 32768

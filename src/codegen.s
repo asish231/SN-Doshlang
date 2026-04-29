@@ -1634,6 +1634,61 @@ _emit_print_call:
     LOAD_ADDR x20, print_types
     ldr x21, [x20, x19, lsl #3]
 
+    // Check print_noline from array
+    LOAD_ADDR x22, print_noline
+    ldrb w22, [x22, x19]
+    cmp w22, #1
+    b.ne Lemit_print_normal
+
+    // No-newline path
+    cmp x21, #2
+    b.eq Lemit_print_noline_str
+    cmp x21, #6
+    b.eq Lemit_print_noline_str
+
+    // noline int - set up format string then call
+    LOAD_ADDR x0, asm_print_fmt_int_noline_adrp
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x0, asm_print_val_adrp
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, x19
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_print_val_ldr
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, x19
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_print_call_suffix
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_print_call_done
+
+Lemit_print_noline_str:
+    LOAD_ADDR x0, asm_print_fmt_str_noline_adrp
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x0, asm_print_str_val_adrp
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, x19
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_print_str_val_add
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, x19
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_print_noline_call_stack
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_print_call_done
+
+Lemit_print_normal:
     cmp x21, #2 // type 2 is string
     b.eq Lemit_print_str_fmt
     cmp x21, #6 // decimal prints via generated string data

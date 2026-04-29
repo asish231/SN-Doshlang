@@ -342,6 +342,9 @@ _record_print_value:
     str x21, [x10, x9, lsl #3]
     LOAD_ADDR x10, print_lengths
     str x22, [x10, x9, lsl #3]
+    // Store noline flag (x3) - use strb for single byte
+    LOAD_ADDR x10, print_noline
+    strb w3, [x10, x9]
     mov x19, x9
     add x9, x9, #1
     str x9, [x20]

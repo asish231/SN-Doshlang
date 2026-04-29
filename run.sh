@@ -39,8 +39,13 @@ get_time_ms() {
             echo $(($(date +%s) * 1000))
         fi
     else
-        # GNU date supports %N, but sanitize in case it is unavailable.
-        date +%s%3N 2>/dev/null || echo $(($(date +%s) * 1000))
+        # GNU date supports %N, but sanitize in case it is unavailable or returns literal %N
+        local t=$(date +%s%3N 2>/dev/null)
+        if [[ "$t" == *"%3N"* ]] || [ -z "$t" ]; then
+            echo $(($(date +%s) * 1000))
+        else
+            echo "$t"
+        fi
     fi
 }
 
@@ -232,9 +237,10 @@ if [ "$1" = "@" ]; then
                 fi
             fi
         fi
-        echo -e "${RED}❌ Invalid selection.${NC}"
+        [ "$INPUT" != "@" ] && echo -e "${RED}❌ Invalid selection.${NC}"
     done
-elif [ -n "$1" ]; then
+    exit 0
+elif [ -n "$1" ] && [ "$1" != "@" ]; then
     # Standard CLI run
     run_and_time "$1"
 else

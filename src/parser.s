@@ -126,6 +126,18 @@ _parse_statement:
 
     mov x0, x19
     mov x1, x20
+    LOAD_ADDR x2, kw_print_noline
+    bl _match_cstr_span
+    cbnz x0, Lstmt_print_noline
+
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_printx
+    bl _match_cstr_span
+    cbnz x0, Lstmt_print_noline
+
+    mov x0, x19
+    mov x1, x20
     LOAD_ADDR x2, kw_print
     bl _match_cstr_span
     cbnz x0, Lstmt_print
@@ -1154,6 +1166,12 @@ Lstmt_const_store_done:
     mov x0, #0
     b Lstmt_return
 
+Lstmt_print_noline:
+    LOAD_ADDR x9, print_noline_flag
+    mov x10, #1
+    str x10, [x9]
+    b Lstmt_print
+
 Lstmt_print:
     bl _skip_whitespace
     bl _peek_char
@@ -1245,9 +1263,13 @@ Lstmt_print_immediate:
     mov x0, x19 // value
     mov x1, x22 // type
     mov x2, x23 // length
+    LOAD_ADDR x3, print_noline_flag
+    ldr x3, [x3]
     bl _record_print_value
 
 Lstmt_print_done:
+    LOAD_ADDR x9, print_noline_flag
+    str xzr, [x9]
     cbnz x0, Lstmt_fail
     mov x0, #0
     b Lstmt_return
@@ -1605,7 +1627,7 @@ Lstmt_index_map_key_ready:
     mov x15, #0
 Lstmt_index_map_loop:
     cmp x15, x14
-    b.ge Lstmt_fail
+    b.ge Lstmt_index_map_insert_new
     add x16, x9, x15
     LOAD_ADDR x17, map_pool_keys
     ldr x18, [x17, x16, lsl #3]
@@ -1615,6 +1637,30 @@ Lstmt_index_map_loop:
     cmp x18, x21
     b.eq Lstmt_index_map_store
     b Lstmt_index_map_next
+
+Lstmt_index_map_insert_new:
+    // Key not found - insert new key
+    cmp x14, #4096
+    b.ge Lstmt_fail
+    mov x16, x14
+    LOAD_ADDR x17, map_pool_keys
+    str x21, [x17, x16, lsl #3]
+    LOAD_ADDR x17, map_pool_key_lengths
+    str x23, [x17, x16, lsl #3]
+    // Store key pointer for string keys
+    cmp x12, #2
+    b.ne Lstmt_index_map_insert_skip_ptr
+    LOAD_ADDR x17, map_pool_key_ptrs
+    str x21, [x17, x16, lsl #3]
+Lstmt_index_map_insert_skip_ptr:
+    LOAD_ADDR x17, map_pool_values
+    str x25, [x17, x16, lsl #3]
+    LOAD_ADDR x17, map_pool_lengths
+    str x27, [x17, x16, lsl #3]
+    LOAD_ADDR x17, map_pool_count
+    add x14, x14, #1
+    str x14, [x17]
+    b Lstmt_index_map_store
 
 Lstmt_index_map_cmp_str:
     LOAD_ADDR x17, map_pool_key_lengths
@@ -1793,7 +1839,7 @@ Lstmt_method_pop:
     mov x0, #4
     mov x1, x23
     mov x2, x24
-    mov x3, x25
+    mov x3, #0
     bl _record_print_value
     bl _consume_optional_semicolon
     mov x0, #0
@@ -6423,6 +6469,7 @@ _parse_string_literal:
     stp x29, x30, [sp, #-16]!
     mov x29, sp
     stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
 
     bl _skip_whitespace
     bl _peek_char
@@ -6433,21 +6480,33 @@ _parse_string_literal:
     bl _get_cursor_ptr
     mov x19, x0
     mov x20, #0
+    mov x21, #0
 
 Lstr_lit_loop:
     bl _peek_char
     cbz w0, Lstr_lit_fail
     cmp w0, #'"'
     b.eq Lstr_lit_done
+    cmp w0, #'{'          // Check for interpolation start
+    b.ne Lstr_lit_advance
+    mov x21, #1           // Mark interpolation found
+
+Lstr_lit_advance:
     bl _advance_char
     add x20, x20, #1
     b Lstr_lit_loop
 
 Lstr_lit_done:
     bl _advance_char
+    // x0 = success flag (bit 0)
+    // x1 = string pointer
+    // x2 = string length
+    // x3 = interpolation flag (bit 0)
     mov x0, #1
     mov x1, x19
     mov x2, x20
+    mov x3, x21
+    ldp x21, x22, [sp], #16
     ldp x19, x20, [sp], #16
     ldp x29, x30, [sp], #16
     ret
@@ -6455,6 +6514,7 @@ Lstr_lit_done:
 Lstr_lit_fail:
     mov x0, #0
     ldp x19, x20, [sp], #16
+    ldp x21, x22, [sp], #16
     ldp x29, x30, [sp], #16
     ret
 

@@ -86,6 +86,7 @@ Supported today:
 - `int name = expression`
 - `let name = expression;` legacy syntax
 - `print(expression)`
+- `printn(expression)` (print without newline)
 - `print expression;` legacy syntax
 - integer numbers
 - variables

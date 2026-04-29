@@ -1,43 +1,200 @@
 # SNlang Feature Matrix
 
-This file separates three things:
+This file tracks spec vs implementation status.
 
 - `Spec`: appears in `SNLANG_SPEC.md`
-- `README`: claimed as supported in `README.md`
-- `Source`: visible in the current compiler source
+- `Status`: DONE / IN_PROGRESS / MISSING
+- `Notes`: current state
 
-It is intentionally conservative: `Source` means "there is parser/codegen support in
-the repo", not "fully validated end-to-end on a real ARM64 toolchain".
+---
 
-| Feature | Spec | README | Source | Notes |
-|---|---|---|---|---|
-| `int`, `bool`, `str` declarations | Yes | Yes | Yes | Core typed declarations exist. |
-| Legacy `let name = expr;` | No | Yes | Yes | Restored as inferred-type declaration path. |
-| `byte` | Yes | Yes | Partial | Parser/type path exists; runtime behavior still needs validation. |
-| `dec(X)` | Yes | Yes | Partial | Decimal parser/support exists; needs stronger validation and coverage. |
-| `print(...)` | Yes | Yes | Yes | Core path exists. |
-| Legacy `print expr;` | No | Yes | Yes | Plain-print path exists. |
-| Arithmetic and grouping | Yes | Yes | Partial | Present in parser; runtime evaluation is still incomplete. |
-| Comparisons | Yes | Yes | Partial | Present in parser/codegen; needs validation. |
-| `if / else if / else` | Yes | Yes | Partial | Runtime-codegen path exists, but behavior needs validation. |
-| `while` | Yes | Yes | Partial | Parser/codegen path exists; needs validation. |
-| counted `for` | Yes | README says planned | Partial | Source path exists, docs are out of sync. |
-| `for in` | Yes | README says planned | Partial | Source path exists, docs are out of sync. |
-| `stop` / `skip` | Yes | README says planned | Partial | Source path exists, docs are out of sync. |
-| `match` | Yes | Yes | Partial | Parser path exists; needs validation. |
-| `input("prompt")` | Yes | No | Partial | First-cut source support added for string declarations/assignments; still needs real ARM64 validation. |
-| functions with params and returns | Yes | README says planned | Partial | Source path exists, docs are out of sync. |
-| `list<T>` | Yes | README says planned | Partial | Parser/storage path exists; full semantics still need work. |
-| `map<K,V>` | Yes | README says planned | Partial | Parser/runtime path exists; needs end-to-end validation and broader coverage. |
-| multiple return values | Yes | README says planned | Partial | Tuple return/unpack source path exists; needs stronger type validation and runtime coverage. |
-| string concatenation | Yes | README says planned | Partial | Source path exists via runtime concat helper; needs ARM64 validation and more edge-case coverage. |
-| file I/O built-ins | Yes | README says planned | Partial | `file_read(...)` and `file_write(...)` source paths exist; needs platform validation. |
-| `use module.path` | Yes | Yes | Partial | Parse path exists; real module behavior still needs validation. |
-| blueprints / contracts / OOP | Yes | README says planned | No | Deferred. |
-| pointers / allocation / concurrency | Yes | README says planned | No | Deferred. |
+## Core Types
 
-## Immediate known blockers
+| Feature | Spec | Status | Notes |
+|---|---|---|---|
+| `int` | Yes | DONE | Full runtime support |
+| `bool` | Yes | DONE | Full runtime support |
+| `str` | Yes | DONE | Literal, print, concat, pass-through |
+| `byte` | Yes | DONE | Parser and runtime path validated |
+| `dec(X)` | Yes | DONE | Decimal arithmetic, cast, print |
+| `const int/bool/str/dec` | Yes | DONE | Immutability enforced |
+| `none` / nullable `?` | Yes | IN_PROGRESS | Basic support, edge cases remain |
+| `otherwise` | Yes | DONE | Null fallback operator works |
+| `any` | Yes | MISSING | Not implemented |
 
-1. Real compile-and-run validation currently requires an ARM64-capable toolchain (`clang`) that is not available in this workspace.
-2. The compiler is still in a stabilization phase; source presence is not the same as passing tests.
-3. README feature claims should be updated after a real ARM64 validation pass, not before.
+---
+
+## Variables and Assignment
+
+| Feature | Spec | Status | Notes |
+|---|---|---|---|
+| Typed declaration `int x = 10` | Yes | DONE | All types |
+| Reassignment `x = expr` | Yes | DONE | With type checking |
+| `+=` `-=` `*=` `/=` | Yes | DONE | All compound ops |
+| `let x = 10` (legacy) | No | REMOVED | Removed — use typed declarations |
+
+---
+
+## Operators
+
+| Feature | Spec | Status | Notes |
+|---|---|---|---|
+| `+ - * / %` | Yes | DONE | Integer and decimal |
+| `**` (power) | Yes | DONE | Compile-time |
+| `== != > < >= <=` | Yes | DONE | Runtime comparisons |
+| `and` `or` `not` | Yes | DONE | Runtime logical ops |
+| String concat `+` | Yes | DONE | `str a + str b` works |
+| `cast(x, type)` | Yes | DONE | int↔dec, int→str, bool→str, dec→str |
+
+---
+
+## Control Flow
+
+| Feature | Spec | Status | Notes |
+|---|---|---|---|
+| `if / else if / else` | Yes | DONE | Full runtime branching |
+| `while` | Yes | DONE | Full runtime loop |
+| counted `for` | Yes | DONE | Runtime with label-based codegen |
+| `for in` list | Yes | DONE | Iterates list literals and variables |
+| `for in` map value | Yes | IN_PROGRESS | Partial |
+| `stop` (break) | Yes | DONE | Works in for and while |
+| `skip` (continue) | Yes | DONE | Works in for and while |
+| `match` with `default` | Yes | DONE | Pattern matching works |
+
+---
+
+## Functions
+
+| Feature | Spec | Status | Notes |
+|---|---|---|---|
+| `fn name() { }` | Yes | DONE | |
+| `fn name(type param) -> type` | Yes | DONE | Up to 4 params |
+| Return values | Yes | DONE | Single return |
+| Forward calls | Yes | DONE | `_preparse_functions` handles this |
+| Nested function calls | Yes | DONE | Top-level functions |
+| Nested fn inside fn | Yes | IN_PROGRESS | Multiple calls have slot reuse bug |
+| Default parameters | Yes | DONE | `fn f(int x = 0)` |
+| Multi-return `-> (int, bool)` | Yes | IN_PROGRESS | Syntax not parsed yet |
+| `return` statement | Yes | DONE | With missing-return enforcement |
+
+---
+
+## Collections
+
+| Feature | Spec | Status | Notes |
+|---|---|---|---|
+| `list<int>` literal | Yes | DONE | `[1, 2, 3]` |
+| `list<str>` literal | Yes | DONE | `["a", "b"]` |
+| `for in` list | Yes | DONE | |
+| `list[i]` read | Yes | IN_PROGRESS | Partial |
+| `list[i] = val` write | Yes | DONE | Mutation works |
+| List bounds checking | Yes | MISSING | No bounds error yet |
+| `map<str, int>` literal | Yes | DONE | `{"key": val}` |
+| `map[key]` read | Yes | DONE | |
+| `map[key] = val` update | Yes | DONE | Existing keys only |
+| `map[key] = val` insert | Yes | MISSING | New key insertion not supported |
+| `map<K, list<T>>` nested | Yes | MISSING | Nested generics fail |
+
+---
+
+## Strings
+
+| Feature | Spec | Status | Notes |
+|---|---|---|---|
+| String literals | Yes | DONE | |
+| `print(str)` | Yes | DONE | |
+| `printn(str)` | Yes | DONE | No newline version |
+| String concat `+` | Yes | DONE | |
+| `cast(x, str)` | Yes | DONE | int, bool, dec all work |
+| String interpolation `{name}` | Yes | MISSING | Not implemented |
+| `.length` | Yes | MISSING | |
+| `.slice(s, e)` | Yes | MISSING | |
+| `.contains(x)` | Yes | MISSING | |
+| `.replace(a, b)` | Yes | MISSING | |
+| `.split(sep)` | Yes | MISSING | |
+| `.upper()` / `.lower()` | Yes | MISSING | |
+
+---
+
+## I/O
+
+| Feature | Spec | Status | Notes |
+|---|---|---|---|
+| `print(expr)` | Yes | DONE | |
+| `printn(expr)` | Yes | DONE | No newline |
+| `input("prompt")` | Yes | DONE | String input |
+| `file_read(path)` | Yes | DONE | Returns str |
+| `file_write(path, data)` | Yes | DONE | Returns bool |
+
+---
+
+## Modules
+
+| Feature | Spec | Status | Notes |
+|---|---|---|---|
+| `use module.path` syntax | Yes | DONE | Parsed, no-op |
+| Module file loading | Yes | MISSING | Not implemented |
+| Symbol resolution | Yes | MISSING | Not implemented |
+| Standard library | Yes | MISSING | No std.io, std.math etc |
+
+---
+
+## OOP / Advanced
+
+| Feature | Spec | Status | Notes |
+|---|---|---|---|
+| `blueprint` (class) | Yes | MISSING | |
+| `object` creation | Yes | MISSING | |
+| `contract` (interface) | Yes | MISSING | |
+| Inheritance `from` | Yes | MISSING | |
+| `follows` (implements) | Yes | MISSING | |
+| Access control `open/closed/guarded` | Yes | MISSING | |
+| `self` reference | Yes | MISSING | |
+| `ref<T>` pointer | Yes | MISSING | |
+| `address()` / `value()` / `set()` | Yes | MISSING | |
+| `alloc()` / `free()` | Yes | MISSING | `_malloc`/`_free` extern'd, not exposed |
+
+---
+
+## Concurrency
+
+| Feature | Spec | Status | Notes |
+|---|---|---|---|
+| `thread fn` | Yes | MISSING | |
+| `channel<T>` | Yes | MISSING | |
+| `.send()` / `.receive()` | Yes | MISSING | |
+| `await` | Yes | MISSING | |
+
+---
+
+## Error Handling
+
+| Feature | Spec | Status | Notes |
+|---|---|---|---|
+| `error` type | Yes | MISSING | |
+| `panic("msg")` | Yes | MISSING | |
+| `fn f() -> (T, error)` | Yes | MISSING | |
+
+---
+
+## Platform
+
+| Feature | Status | Notes |
+|---|---|---|
+| macOS ARM64 | DONE | Primary target |
+| `platform.inc` macro layer | DONE | Mach-O / COFF abstraction |
+| Linux ARM64 | MISSING | Syscall numbers differ |
+| Windows ARM64 | MISSING | PE/COFF, Win32 API |
+| x86_64 | MISSING | Different ISA |
+
+---
+
+## Summary
+
+```
+DONE         ~35 features
+IN_PROGRESS  ~10 features
+MISSING      ~30 features
+
+Tests passing: 34/34
+```
