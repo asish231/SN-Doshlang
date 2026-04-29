@@ -1308,6 +1308,8 @@ Lstmt_assign:
     // Tuple assignment: a, b = expr
     cmp w0, #','
     b.eq Lstmt_tuple_assign
+    cmp w0, #'['
+    b.eq Lstmt_index_assign
     cmp w0, #'='
     b.eq Lstmt_assign_set
     cmp w0, #'+'
@@ -1323,6 +1325,150 @@ Lstmt_assign:
     cmp w0, #'('
     b.eq Lstmt_fn_call
     b Lstmt_unknown
+
+Lstmt_index_assign:
+    // Parse target index/key: name[expr] = expr
+    bl _advance_char // consume '['
+    bl _parse_expr_value
+    cbz x0, Lstmt_fail
+    mov x21, x1 // key/index value
+    mov x22, x2 // key/index type
+    mov x23, x3 // key/index length
+    mov x24, x4 // key/index var id
+
+    bl _skip_whitespace
+    mov w0, #']'
+    bl _expect_char
+    cbz x0, Lstmt_fail
+    bl _skip_whitespace
+    mov w0, #'='
+    bl _expect_char
+    cbz x0, Lstmt_fail
+
+    bl _parse_expr_value
+    cbz x0, Lstmt_fail
+    mov x25, x1 // rhs value
+    mov x26, x2 // rhs type
+    mov x27, x3 // rhs length
+    mov x28, x4 // rhs var id
+
+    // Resolve target variable
+    mov x0, x19
+    mov x1, x20
+    bl _lookup_variable
+    cbz x0, Lstmt_unknown_var_assign
+    mov x9, x1  // target start index in pool
+    mov x10, x2 // target type
+    mov x11, x3 // target metadata
+
+    // If rhs comes from var/temp, load concrete value+len now.
+    cmn x28, #1
+    b.eq Lstmt_index_rhs_ready
+    LOAD_ADDR x12, var_values
+    ldr x25, [x12, x28, lsl #3]
+    LOAD_ADDR x12, var_lengths
+    ldr x27, [x12, x28, lsl #3]
+Lstmt_index_rhs_ready:
+
+    // list/list? index assignment
+    cmp x10, #4
+    b.eq Lstmt_index_assign_list
+    cmp x10, #20
+    b.eq Lstmt_index_assign_list
+
+    // map assignment
+    cmp x10, #8
+    b.eq Lstmt_index_assign_map
+    b Lstmt_type_mismatch
+
+Lstmt_index_assign_list:
+    // index must be int
+    cmp x22, #0
+    b.ne Lstmt_type_mismatch
+
+    // If index came from a variable, read actual index value.
+    cmn x24, #1
+    b.eq Lstmt_index_list_idx_ready
+    LOAD_ADDR x12, var_values
+    ldr x21, [x12, x24, lsl #3]
+Lstmt_index_list_idx_ready:
+
+    and x12, x11, #0xFFFFFFFF // count
+    cmp x21, x12
+    b.ge Lstmt_fail
+
+    lsr x13, x11, #32 // element type
+    cmp x26, x13
+    b.ne Lstmt_type_mismatch
+
+    add x14, x9, x21
+    LOAD_ADDR x15, list_pool_values
+    str x25, [x15, x14, lsl #3]
+    LOAD_ADDR x15, list_pool_lengths
+    str x27, [x15, x14, lsl #3]
+
+    bl _consume_optional_semicolon
+    mov x0, #0
+    b Lstmt_return
+
+Lstmt_index_assign_map:
+    // key type + value type
+    lsr x12, x11, #40         // key type
+    ubfx x13, x11, #32, #8    // value type
+    and x14, x11, #0xFFFFFFFF // count
+
+    cmp x22, x12
+    b.ne Lstmt_type_mismatch
+    cmp x26, x13
+    b.ne Lstmt_type_mismatch
+
+    // If key came from a variable, read actual key value+len.
+    cmn x24, #1
+    b.eq Lstmt_index_map_key_ready
+    LOAD_ADDR x15, var_values
+    ldr x21, [x15, x24, lsl #3]
+    LOAD_ADDR x15, var_lengths
+    ldr x23, [x15, x24, lsl #3]
+Lstmt_index_map_key_ready:
+
+    // Update existing key only.
+    mov x15, #0
+Lstmt_index_map_loop:
+    cmp x15, x14
+    b.ge Lstmt_fail
+    add x16, x9, x15
+    LOAD_ADDR x17, map_pool_keys
+    ldr x18, [x17, x16, lsl #3]
+
+    cmp x12, #2 // string key?
+    b.eq Lstmt_index_map_cmp_str
+    cmp x18, x21
+    b.eq Lstmt_index_map_store
+    b Lstmt_index_map_next
+
+Lstmt_index_map_cmp_str:
+    LOAD_ADDR x17, map_pool_key_lengths
+    ldr x0, [x17, x16, lsl #3]
+    cmp x0, x23
+    b.ne Lstmt_index_map_next
+    mov x0, x18
+    mov x1, x23
+    mov x2, x21
+    bl _match_span_span
+    cbnz x0, Lstmt_index_map_store
+
+Lstmt_index_map_next:
+    add x15, x15, #1
+    b Lstmt_index_map_loop
+
+Lstmt_index_map_store:
+    LOAD_ADDR x17, map_pool_values
+    str x25, [x17, x16, lsl #3]
+    LOAD_ADDR x17, map_pool_lengths
+    str x27, [x17, x16, lsl #3]
+    bl _consume_optional_semicolon
+    mov x0, #0
+    b Lstmt_return
 
 Lstmt_tuple_assign:
     // x19=name ptr, x20=name len (first var) already set by identifier parse
@@ -3757,11 +3903,15 @@ Lexpr_add_str:
     b.ne Lexpr_add_str_runtime
     
     // Both are literals. Concatenate at compile-time.
+    sub sp, sp, #16
+    str x3, [sp]
     mov x0, x19   // left ptr
     mov x2, x1    // right ptr (save it before overwriting x1)
     mov x1, x21   // left len
     // x3 is already right_len
     bl _str_concat_len
+    ldr x3, [sp]
+    add sp, sp, #16
     cbz x0, Lexpr_fail
     mov x19, x0   // new heap ptr
     add x21, x21, x3 // new length
@@ -4994,10 +5144,10 @@ Lcast_int_to_str:
     cbz x0, Lcast_fail
     mov x19, x0
     bl _cstring_length
+    mov x3, x0
     mov x0, #1
     mov x1, x19
     mov x2, #2
-    mov x3, x0
     mov x4, #-1
     b Lcast_return
 
@@ -5023,26 +5173,39 @@ Lcast_int_to_str_runtime:
     b Lcast_return
 
 Lcast_bool_to_str:
-    // Convert bool to string
-    cmp x19, #0
-    mov x19, #0
+    // Convert bool to "true"/"false" string literals.
+    cmp x24, #-1
+    b.eq Lcast_bool_value_ready
+    LOAD_ADDR x9, var_values
+    ldr x19, [x9, x24, lsl #3]
+Lcast_bool_value_ready:
     mov x0, #1
-    mov x1, x19
     mov x2, #2
-    mov x3, #5  // "false" length
-    b.eq Lcast_bool_str_done
-    mov x19, #1
-    mov x3, #4  // "true" length
+    cmp x19, #0
+    b.eq Lcast_bool_false
+    LOAD_ADDR x1, kw_true
+    mov x3, #4
+    b Lcast_bool_str_done
+Lcast_bool_false:
+    LOAD_ADDR x1, kw_false
+    mov x3, #5
 Lcast_bool_str_done:
     mov x4, #-1
     b Lcast_return
 
 Lcast_dec_to_str:
-    // Convert decimal to string
+    // Convert decimal scaled value to a real string.
+    mov x0, x19
+    mov x1, x21
+    bl _dec_to_cstr
+    cbz x0, Lcast_fail
+    mov x19, x0
+    mov x0, x19
+    bl _cstring_length
+    mov x3, x0
     mov x0, #1
     mov x1, x19
     mov x2, #2
-    mov x3, x21
     mov x4, #-1
     b Lcast_return
 
@@ -6215,6 +6378,10 @@ Lfn_call_default_len_ready:
     b Lfn_call_fill_defaults
 
 Lfn_call_args_ready:
+    // Save declared return type for missing-return validation.
+    LOAD_ADDR x9, fn_return_types
+    ldr x11, [x9, x21, lsl #3]
+    str x11, [sp, #8]
 
     // Save current cursor position (after the call site)
     LOAD_ADDR x9, cursor_pos
@@ -6280,6 +6447,18 @@ Lfn_call_skip_nested:
     b Lfn_call_body_returned
 
 Lfn_call_body_done:
+    // Typed functions must set a return value before closing body.
+    ldr x11, [sp, #8]
+    cmp x11, #-1
+    b.eq Lfn_call_body_done_ok
+    LOAD_ADDR x9, fn_return_flag
+    ldr x10, [x9]
+    cbnz x10, Lfn_call_body_done_ok
+    LOAD_ADDR x0, msg_missing_return
+    bl _report_error_prefix
+    bl _write_newline_stderr
+    b Lfn_call_fail
+Lfn_call_body_done_ok:
     bl _advance_char // consume '}'
 
     LOAD_ADDR x9, fn_exec_depth

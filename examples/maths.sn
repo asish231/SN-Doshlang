@@ -1,0 +1,15 @@
+fn maths(int type) -> int {
+    match (type) {
+        1 {
+            print("it was 1")
+            return 1
+        }
+        default {
+            return 0
+        }
+    }
+}
+fn main() {
+    int result = maths(1)
+    print(result)
+}

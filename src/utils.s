@@ -12,6 +12,7 @@
  .global _write_decimal_raw_fd
  .global _cstring_length
  .global _i64_to_cstr
+ .global _dec_to_cstr
 
 _match_cstr_span:
     stp x29, x30, [sp, #-16]!
@@ -367,6 +368,121 @@ Li64_to_cstr_fail:
     mov x0, #0
 
 Li64_to_cstr_return:
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+// x0 = scaled decimal value, x1 = scale
+// returns x0 = cstring pointer (heap)
+_dec_to_cstr:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+    stp x25, x26, [sp, #-16]!
+    stp x27, x28, [sp, #-16]!
+
+    mov x19, x0 // scaled value
+    mov x20, x1 // scale
+
+    mov x21, #0 // negative flag
+    cmp x19, #0
+    b.ge Ldec_to_cstr_abs_ready
+    mov x21, #1
+    neg x19, x19
+
+Ldec_to_cstr_abs_ready:
+    mov x22, #1 // denominator 10^scale
+    mov x23, x20
+Ldec_to_cstr_pow_loop:
+    cbz x23, Ldec_to_cstr_pow_done
+    mov x9, #10
+    mul x22, x22, x9
+    sub x23, x23, #1
+    b Ldec_to_cstr_pow_loop
+Ldec_to_cstr_pow_done:
+
+    // int_part = scaled / denom
+    // frac_part = scaled % denom
+    udiv x23, x19, x22
+    msub x24, x23, x22, x19
+
+    mov x0, x23
+    bl _i64_to_cstr
+    cbz x0, Ldec_to_cstr_fail
+    mov x25, x0 // int string ptr
+
+    mov x0, x25
+    bl _cstring_length
+    mov x26, x0 // int length
+
+    mov x27, x26
+    cbz x21, Ldec_to_cstr_len_sign_done
+    add x27, x27, #1
+Ldec_to_cstr_len_sign_done:
+    cbz x20, Ldec_to_cstr_len_done
+    add x27, x27, #1 // dot
+    add x27, x27, x20 // fractional digits
+Ldec_to_cstr_len_done:
+
+    add x0, x27, #1 // + nul
+    bl _malloc
+    cbz x0, Ldec_to_cstr_fail
+    mov x28, x0 // out ptr
+
+    mov x9, #0 // out idx
+    cbz x21, Ldec_to_cstr_copy_int
+    mov w10, #'-'
+    strb w10, [x28, x9]
+    add x9, x9, #1
+
+Ldec_to_cstr_copy_int:
+    mov x10, #0
+Ldec_to_cstr_copy_int_loop:
+    cmp x10, x26
+    b.ge Ldec_to_cstr_after_int
+    ldrb w11, [x25, x10]
+    strb w11, [x28, x9]
+    add x10, x10, #1
+    add x9, x9, #1
+    b Ldec_to_cstr_copy_int_loop
+
+Ldec_to_cstr_after_int:
+    cbz x20, Ldec_to_cstr_terminate
+
+    mov w10, #'.'
+    strb w10, [x28, x9]
+    add x9, x9, #1
+
+    mov x10, x20
+Ldec_to_cstr_frac_loop:
+    cbz x10, Ldec_to_cstr_terminate
+    mov x11, #10
+    udiv x12, x24, x11
+    msub x13, x12, x11, x24
+    add w13, w13, #'0'
+    sub x14, x10, #1
+    add x15, x9, x14
+    strb w13, [x28, x15]
+    mov x24, x12
+    sub x10, x10, #1
+    b Ldec_to_cstr_frac_loop
+
+Ldec_to_cstr_terminate:
+    add x9, x9, x20
+    strb wzr, [x28, x9]
+    mov x0, x28
+    b Ldec_to_cstr_return
+
+Ldec_to_cstr_fail:
+    mov x0, #0
+
+Ldec_to_cstr_return:
+    ldp x27, x28, [sp], #16
+    ldp x25, x26, [sp], #16
     ldp x23, x24, [sp], #16
     ldp x21, x22, [sp], #16
     ldp x19, x20, [sp], #16

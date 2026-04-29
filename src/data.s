@@ -31,6 +31,7 @@
 .global msg_unknown_fn
 .global msg_wrong_arg_count
 .global msg_expected_arrow
+.global msg_missing_return
 .global kw_print
 .global kw_let
 .global kw_int
@@ -287,6 +288,7 @@ msg_too_many_params: .asciz "error: too many parameters on "
 msg_unknown_fn:    .asciz "error: unknown function on "
 msg_wrong_arg_count: .asciz "error: wrong number of arguments on "
 msg_expected_arrow: .asciz "error: expected -> on "
+msg_missing_return: .asciz "error: missing return in typed function on "
 kw_print:          .asciz "print"
 kw_let:            .asciz "let"
 kw_int:            .asciz "int"

@@ -1,0 +1,4 @@
+fn main() {
+    dec(2) d = 10.50
+    print("d=" + cast(d, str))
+}
