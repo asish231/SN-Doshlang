@@ -4934,6 +4934,7 @@ _parse_cast_expression:
     mov x19, x1
     mov x20, x2
     mov x21, x3
+    mov x24, x4
 
     bl _skip_whitespace
     mov w0, #','
@@ -4986,12 +4987,39 @@ Lcast_to_str:
     b Lcast_type_mismatch
 
 Lcast_int_to_str:
-    // Store integer as string representation in print buffer
+    cmp x24, #-1
+    b.ne Lcast_int_to_str_runtime
+    mov x0, x19
+    bl _i64_to_cstr
+    cbz x0, Lcast_fail
+    mov x19, x0
+    bl _cstring_length
     mov x0, #1
     mov x1, x19
-    mov x2, #0
-    mov x3, #0
+    mov x2, #2
+    mov x3, x0
     mov x4, #-1
+    b Lcast_return
+
+Lcast_int_to_str_runtime:
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+    bl _allocate_temp_var
+    mov x25, x0
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    mov x0, #73
+    mov x1, x25
+    mov x2, x24
+    bl _record_operation
+    cbnz x0, Lcast_fail
+    mov x0, #1
+    mov x1, #0
+    mov x2, #2
+    mov x3, #0
+    mov x4, x25
     b Lcast_return
 
 Lcast_bool_to_str:

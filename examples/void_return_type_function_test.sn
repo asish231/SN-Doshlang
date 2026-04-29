@@ -6,4 +6,8 @@ fn check(int num1, int b) {
         print("Odd")
     }
 }
-fn main 
+
+fn main() {
+    check(2, 0)
+    check(3, 0)
+}

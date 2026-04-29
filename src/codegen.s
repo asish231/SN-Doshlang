@@ -177,6 +177,8 @@ _emit_operation:
     b.eq Lemit_op_file_write
     cmp x21, #72
     b.eq Lemit_op_store_str_lit
+    cmp x21, #73
+    b.eq Lemit_op_cast_int_to_str
 
     b Lemit_op_done
 
@@ -1096,6 +1098,34 @@ Lemit_file_write_call:
     mov x1, #1
     bl _write_cstr_fd
     
+    LOAD_ADDR x0, asm_store_x0_var
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, op_arg0
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_stack_offset_fd
+    LOAD_ADDR x0, asm_close_bracket
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_op_done
+
+Lemit_op_cast_int_to_str:
+    LOAD_ADDR x0, asm_load_x0_var
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, op_arg1
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_stack_offset_fd
+    LOAD_ADDR x0, asm_close_bracket
+    mov x1, #1
+    bl _write_cstr_fd
+
+    LOAD_ADDR x0, asm_call_int_to_cstr
+    mov x1, #1
+    bl _write_cstr_fd
+
     LOAD_ADDR x0, asm_store_x0_var
     mov x1, #1
     bl _write_cstr_fd

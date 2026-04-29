@@ -11,6 +11,7 @@
  .global _write_i64_fd
  .global _write_decimal_raw_fd
  .global _cstring_length
+ .global _i64_to_cstr
 
 _match_cstr_span:
     stp x29, x30, [sp, #-16]!
@@ -306,6 +307,66 @@ Lwrite_dec_int_only:
     bl _write_u64_fd
 
 Lwrite_dec_done:
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+_i64_to_cstr:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+
+    mov x19, x0
+    mov x0, #32
+    bl _malloc
+    cbz x0, Li64_to_cstr_fail
+    mov x20, x0
+    add x21, x20, #31
+    strb wzr, [x21]
+    sub x21, x21, #1
+
+    mov x22, #0
+    cmp x19, #0
+    b.ge Li64_to_cstr_abs_ready
+    mov x22, #1
+    neg x19, x19
+
+Li64_to_cstr_abs_ready:
+    cbnz x19, Li64_to_cstr_digits
+    mov w9, #'0'
+    strb w9, [x21]
+    sub x21, x21, #1
+    b Li64_to_cstr_sign
+
+Li64_to_cstr_digits:
+    mov x23, #10
+Li64_to_cstr_loop:
+    udiv x24, x19, x23
+    msub x9, x24, x23, x19
+    add w9, w9, #'0'
+    strb w9, [x21]
+    sub x21, x21, #1
+    mov x19, x24
+    cbnz x19, Li64_to_cstr_loop
+
+Li64_to_cstr_sign:
+    cbz x22, Li64_to_cstr_done
+    mov w9, #'-'
+    strb w9, [x21]
+    sub x21, x21, #1
+
+Li64_to_cstr_done:
+    add x0, x21, #1
+    b Li64_to_cstr_return
+
+Li64_to_cstr_fail:
+    mov x0, #0
+
+Li64_to_cstr_return:
     ldp x23, x24, [sp], #16
     ldp x21, x22, [sp], #16
     ldp x19, x20, [sp], #16

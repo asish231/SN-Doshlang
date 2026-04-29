@@ -1,0 +1,5 @@
+fn main() {
+    int k = 2
+    int j = 5
+    print("k=" + cast(k, str) + ", j=" + cast(j, str))
+}

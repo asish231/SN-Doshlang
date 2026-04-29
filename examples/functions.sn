@@ -1,8 +1,5 @@
 // Test: functions with parameters, return values, and calls
 
-// Forward call before definition
-print(later_add(20, 22))
-
 // Simple function with no params
 fn greet() {
     print(42)
@@ -39,21 +36,26 @@ fn echo(str s) -> str {
     return s
 }
 
-// Call functions
-greet()
-print(double(5))
-print(add(3, 7))
-print(abs_diff(10, 3))
-print(abs_diff(3, 10))
-print(square(6))
-say("hello")
-print(echo("hi"))
-str echoed = echo("SNlang")
-print(echoed)
+fn main() {
+    // Forward call before definition
+    print(later_add(20, 22))
 
-// Function call inside expression
-int result = add(10, double(3))
-print(result)
+    // Call functions
+    greet()
+    print(double(5))
+    print(add(3, 7))
+    print(abs_diff(10, 3))
+    print(abs_diff(3, 10))
+    print(square(6))
+    say("hello")
+    print(echo("hi"))
+    str echoed = echo("SNlang")
+    print(echoed)
+
+    // Function call inside expression
+    int result = add(10, double(3))
+    print(result)
+}
 
 fn later_add(int a, int b) -> int {
     return a + b
