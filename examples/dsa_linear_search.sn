@@ -1,0 +1,18 @@
+fn contains(list<int> values, int target) -> bool {
+    bool found = false
+    for (v in values) {
+        if (v == target) {
+            found = true
+            stop
+        }
+    }
+    return found
+}
+
+fn main() {
+    list<int> nums = [4, 9, 2, 7, 1]
+    bool has7 = contains(nums, 7)
+    bool has8 = contains(nums, 8)
+    print(has7)
+    print(has8)
+}

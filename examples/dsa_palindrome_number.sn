@@ -1,0 +1,23 @@
+fn isPalindrome(int n) -> bool {
+    if (n < 0) {
+        return false
+    }
+
+    int original = n
+    int reversed = 0
+
+    while (n > 0) {
+        int digit = n % 10
+        reversed = (reversed * 10) + digit
+        n = n / 10
+    }
+
+    return original == reversed
+}
+
+fn main() {
+    print(isPalindrome(121))
+    print(isPalindrome(12321))
+    print(isPalindrome(123))
+    print(isPalindrome(-121))
+}

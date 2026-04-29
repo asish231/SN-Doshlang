@@ -1,0 +1,15 @@
+fn main() {
+    int rows = 5
+    int i = 1
+
+    while (i <= rows) {
+        int j = 1
+        str line = ""
+        while (j <= i) {
+            line = line + "*"
+            j += 1
+        }
+        print(line)
+        i += 1
+    }
+}

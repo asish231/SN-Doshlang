@@ -1,0 +1,24 @@
+fn toBinaryDigits(int n) -> int {
+    if (n == 0) {
+        return 0
+    }
+
+    int value = n
+    int place = 1
+    int binaryDigits = 0
+
+    while (value > 0) {
+        int bit = value % 2
+        binaryDigits = binaryDigits + (bit * place)
+        place = place * 10
+        value = value / 2
+    }
+
+    return binaryDigits
+}
+
+fn main() {
+    print(toBinaryDigits(5))   // 101
+    print(toBinaryDigits(10))  // 1010
+    print(toBinaryDigits(19))  // 10011
+}

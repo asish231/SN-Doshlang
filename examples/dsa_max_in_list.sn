@@ -1,0 +1,15 @@
+fn findMax(list<int> values) -> int {
+    int best = -999999999
+    for (v in values) {
+        if (v > best) {
+            best = v
+        }
+    }
+    return best
+}
+
+fn main() {
+    list<int> nums = [10, 3, 25, 7, 19]
+    int answer = findMax(nums)
+    print(answer)
+}
