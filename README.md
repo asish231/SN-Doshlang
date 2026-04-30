@@ -6,6 +6,8 @@
 
 # snc
 
+**SNlang** (originally named **DOSH lang**, but formally SNlang since it is natively compiled) is a programming language created from scratch in 7 days by its author and creator, **Asish Kumar Sharma**, similar to how Linus Torvalds originally built Linux.
+
 `snc` is a small programming language compiler written in ARM64 assembly.
 
 It reads `.sn` source code and emits ARM64 assembly that can be assembled with `clang`.
@@ -517,4 +519,4 @@ For details on performance theory, see `THEORY.md`.
 
 ---
 
-Built with ❤️ in ARM64 assembly
+Built with ❤️ in ARM64 assembly by **Asish Kumar Sharma**

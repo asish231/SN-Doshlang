@@ -1,15 +1,20 @@
-fn maths(int type) -> int {
-    match (type) {
-        1 {
-            print("it was 1")
-            return 1
-        }
-        default {
-            return 0
-        }
-    }
+// maths.sn - a custom math package
+// This module defines sin, cos, tan functions
+
+fn sin(x: float64) -> float64 {
+    // In real implementation, this would call the math library
+    // For now, we just return a placeholder value
+    return 0.0
 }
-fn main() {
-    int result = maths(1)
-    print(result)
+
+fn cos(x: float64) -> float64 {
+    // In real implementation, this would call the math library
+    // For now, we just return a placeholder value
+    return 1.0
+}
+
+fn tan(x: float64) -> float64 {
+    // In real implementation, this would call the math library
+    // For now, we just return a placeholder value
+    return 0.0
 }

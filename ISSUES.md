@@ -10,7 +10,6 @@ Resolved work lives in `RESOLVED_ISSUES.md`.
   — key insertion semantics, clearer missing-key diagnostics, nested generic edge cases
 - stronger runtime reliability
 - better compiler diagnostics
-- small stdlib
 - hardened strings and file I/O
 - fuller multi-return support
 
@@ -23,14 +22,12 @@ Resolved work lives in `RESOLVED_ISSUES.md`.
 - ✅ Imported functions callable from importing file
 - ✅ Duplicate `use` handled safely
 - ✅ Module search paths (`.` and `stdlib` by default)
-- ❌ Symbol resolution across multiple chained modules
-- ❌ Standard library modules (`std.math`, `std.io` etc.)
+- ❌ Symbol resolution across multiple chained modules (cannot access symbols from transitive imports; must import each module directly)
 
 See `ANTIGRAVITY_ISSUE.md` — RESOLVED.
 
 ## Next concrete milestone
 
-- Standard library module stubs (`std.math`, `std.io`, `std.string`)
 - Expand test coverage for module imports with multiple functions
 - Diagnostics for typed returns, cast paths, list/map edge cases, file I/O
 

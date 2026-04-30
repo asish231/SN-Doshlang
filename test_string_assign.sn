@@ -1,0 +1,2 @@
+str msg = "hello from strings!"
+print(msg)

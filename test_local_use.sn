@@ -1,0 +1,4 @@
+use math_local
+fn main() {
+    print(local_abs(-10))
+}

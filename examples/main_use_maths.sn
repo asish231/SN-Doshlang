@@ -1,0 +1,17 @@
+// main.sn - using the maths package
+
+use maths
+
+fn main() {
+    let angle = 3.14  // example angle in radians
+
+    // Using functions directly from maths package
+    let sine = maths.sin(angle)
+    let cosine = maths.cos(angle)
+    let tangent = maths.tan(angle)
+
+    // This works because we directly imported maths
+    printn(sine)
+    printn(cosine)
+    printn(tangent)
+}

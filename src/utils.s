@@ -1534,6 +1534,9 @@ _register_imported_function:
     cmp x9, #512
     b.ge Lregister_function_limit
     
+    // Preserve x9 across _malloc call (caller-saved register)
+    str x9, [sp, #-16]!
+    
     // Allocate memory for function name copy
     add x0, x20, #1  // + null terminator
 #ifdef _WIN32
@@ -1542,6 +1545,9 @@ _register_imported_function:
     bl _malloc
 #endif
     cbz x0, Lregister_function_alloc_error
+    
+    // Restore x9 after _malloc
+    ldr x9, [sp], #16
     
     mov x10, x0  // allocated buffer
     

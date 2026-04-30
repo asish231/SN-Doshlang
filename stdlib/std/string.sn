@@ -1,0 +1,6 @@
+fn isEmpty(str s) -> bool {
+    if (length(s) == 0) {
+        return true
+    }
+    return false
+}

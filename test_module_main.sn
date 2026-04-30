@@ -1,0 +1,3 @@
+use "test_module_lib.sn"
+print("from main")
+test_func()

@@ -17,10 +17,10 @@
 _main:
     stp x29, x30, [sp, #-16]!
     mov x29, sp
-    adrp x0, print_fmt_int@PAGE
-    add x0, x0, print_fmt_int@PAGEOFF
-    adrp x9, print_val_0@PAGE
-    ldr x1, [x9, print_val_0@PAGEOFF]
+    adrp x0, print_fmt_str@PAGE
+    add x0, x0, print_fmt_str@PAGEOFF
+    adrp x1, print_val_0@PAGE
+    add x1, x1, print_val_0@PAGEOFF
     sub sp, sp, #16
     str x1, [sp]
     bl _printf
@@ -50,7 +50,7 @@ dec_sign_minus:
 .align 3
 .align 3
 print_val_0:
-    .quad 333
+    .asciz "no use"
 .align 3
 list_pool_values:
 list_pool_lengths:

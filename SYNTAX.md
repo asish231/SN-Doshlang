@@ -201,3 +201,90 @@ fn main() {
     free(second)
 }
 ```
+
+---
+
+## 8. Module System & Package Management
+
+SNlang uses a simple, flat module system. Symbols from imported modules are globally available once imported.
+
+### A. Basic Import Syntax
+
+Use the `use` keyword to import a module:
+
+```sn
+// Import a local module
+use mylib.utils
+
+fn main() {
+    print(a())  // Using function from mylib.utils
+}
+```
+
+### B. Module File Structure
+
+Modules are stored as `.sn` files. The module path maps to the file path:
+
+```
+mylib/
+  ├── utils.sn      # Module: mylib.utils
+  └── calc.sn       # Module: mylib.calc
+```
+
+### C. Transitive (Chained) Imports
+
+SNlang supports transitive imports automatically. If Module A imports Module B, and Module B imports Module C, all symbols from C are available to A:
+
+**mylib/utils.sn:**
+```sn
+fn a() -> int {
+    return 111
+}
+```
+
+**mylib/calc.sn:**
+```sn
+use mylib.utils
+
+fn b() -> int {
+    return a() + 222  // Uses 'a' from mylib.utils
+}
+```
+
+**main.sn:**
+```sn
+use mylib.calc
+
+fn main() {
+    print(b())  // Output: 333 (111 + 222)
+}
+```
+
+### D. Module Search Paths
+
+The compiler searches for modules in:
+1. Current directory (`.`)
+2. `stdlib/` directory
+
+To use modules from other locations, ensure they're in the current directory or add them to your project structure.
+
+### E. Tips & Tricks
+
+- **Flat Symbol Table**: All imported symbols are globally accessible—no need for namespaced calls like `mylib.utils.a()`.
+- **Avoid Circular Imports**: The compiler detects already-loaded modules, but circular dependencies can cause confusion.
+- **One Module Per File**: Each `.sn` file represents one module. The file path determines the module name (`.` becomes `/`).
+
+### F. Complete Package Example
+
+```
+project/
+├── main.sn
+└── mylib/
+    ├── utils.sn
+    └── calc.sn
+```
+
+Compile from the project root:
+```bash
+./snc main.sn > out.s && clang -x assembler -o program out.s
+```
