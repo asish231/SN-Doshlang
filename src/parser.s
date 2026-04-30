@@ -5744,13 +5744,14 @@ Lprimary_interp_expr_concat_real:
 
 
 Lprimary_interp_update_offset:
+    // cursor_pos is an offset from source_ptr (= buffer base).
+    // x19 is an absolute pointer into buffer.
+    // x21 must be the new offset relative to x19 (the string content start).
     LOAD_ADDR x9, cursor_pos
-    ldr x11, [x9]
+    ldr x11, [x9]              // x11 = current cursor offset from buffer base
     LOAD_ADDR x9, buffer
-    mov x10, x9
-    sub x11, x11, x10
-    sub x10, x19, x10
-    sub x21, x11, x10
+    sub x10, x19, x9           // x10 = offset of string content start from buffer base
+    sub x21, x11, x10          // x21 = cursor offset relative to string content start
     b Lprimary_interp_loop
 
 Lprimary_interp_last_part:
