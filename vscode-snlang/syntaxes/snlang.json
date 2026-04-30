@@ -1,0 +1,105 @@
+{
+  "scopeName": "source.snlang",
+  "patterns": [
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#types"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#functions"
+    },
+    {
+      "include": "#operators"
+    }
+  ],
+  "repository": {
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.snlang",
+          "match": "\\b(fn|if|else|while|for|in|stop|skip|return|match|default|use|const|let)\\b"
+        },
+        {
+          "name": "keyword.operator.snlang",
+          "match": "\\b(and|or|not)\\b"
+        },
+        {
+          "name": "keyword.other.snlang",
+          "match": "\\b(true|false|none|otherwise)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "storage.type.snlang",
+          "match": "\\b(int|str|bool|byte|dec|list|map)\\b"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.snlang",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": ["\\."]
+        },
+        {
+          "name": "string.quoted.single.snlang",
+          "begin": "'",
+          "end": "'",
+          "patterns": ["\\."]
+        }
+      ]
+    },
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.snlang",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.snlang",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.snlang",
+          "match": "\\b\\d+(\\.\\d+)?\\b"
+        }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        {
+          "name": "entity.name.function.snlang",
+          "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*(?=\\s*\\()"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.snlang",
+          "match": "[+\\-*/%=<>!&|^~?:]+"
+        }
+      ]
+    }
+  }
+}

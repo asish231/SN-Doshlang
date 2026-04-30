@@ -452,16 +452,19 @@ Lstmt_int_name:
 
     bl _parse_expr_value
     cbz x0, Lstmt_fail
-    cmp x2, #0
+    mov x21, x1 // value
+    mov x22, x2 // type
+    mov x25, x4 // source var id
+
+    cmp x22, #0
     b.eq Lstmt_int_value_ok
     cmp x23, #16
     b.ne Lstmt_type_mismatch
-    cmp x2, #16
+    cmp x22, #16
     b.eq Lstmt_int_value_ok
-    cmp x2, #7
+    cmp x22, #7
     b.ne Lstmt_type_mismatch
-Lstmt_int_value_ok:
-    mov x21, x1
+    Lstmt_int_value_ok:
 
     bl _consume_optional_semicolon
 
@@ -472,22 +475,27 @@ Lstmt_int_value_ok:
     mov x4, x23
     bl _define_variable
     cbnz x0, Lstmt_fail
-    mov x0, x19
-    mov x1, x20
-    bl _lookup_variable
-    cbz x0, Lstmt_fail
-    mov x0, x4
+    mov x26, x4 // target slot id
+
+    cmn x25, #1
+    b.ne Lstmt_int_store_var
+
+    mov x0, x26
     mov x1, x21
     bl _record_store_variable
     cbnz x0, Lstmt_fail
+    b Lstmt_int_done
 
+    Lstmt_int_store_var:
+    mov x0, #45
+    mov x1, x26
+    mov x2, x25
+    bl _record_operation
+    cbnz x0, Lstmt_fail
+
+    Lstmt_int_done:
     mov x0, #0
     b Lstmt_return
-
-Lstmt_int_done:
-    mov x0, #0
-    b Lstmt_return
-
 Lstmt_bool:
     bl _skip_whitespace
     mov x23, #1
@@ -509,16 +517,19 @@ Lstmt_bool_name:
 
     bl _parse_expr_value
     cbz x0, Lstmt_fail
-    cmp x2, #1
+    mov x21, x1 // value
+    mov x22, x2 // type
+    mov x25, x4 // source var id
+
+    cmp x22, #1
     b.eq Lstmt_bool_value_ok
     cmp x23, #17
     b.ne Lstmt_type_mismatch
-    cmp x2, #17
+    cmp x22, #17
     b.eq Lstmt_bool_value_ok
-    cmp x2, #7
+    cmp x22, #7
     b.ne Lstmt_type_mismatch
-Lstmt_bool_value_ok:
-    mov x21, x1
+    Lstmt_bool_value_ok:
 
     bl _consume_optional_semicolon
 
@@ -530,23 +541,30 @@ Lstmt_bool_value_ok:
     mov x5, #0
     bl _define_variable
     cbnz x0, Lstmt_fail
-    mov x0, x19
-    mov x1, x20
-    bl _lookup_variable
-    cbz x0, Lstmt_fail
-    mov x0, x4
+    mov x26, x4 // target slot id
+
+    cmn x25, #1
+    b.ne Lstmt_bool_store_var
+
+    mov x0, x26
     mov x1, x21
     bl _record_store_variable
     cbnz x0, Lstmt_fail
+    b Lstmt_bool_done
 
-    mov x0, #0
-    b Lstmt_return
+    Lstmt_bool_store_var:
+    mov x0, #45
+    mov x1, x26
+    mov x2, x25
+    bl _record_operation
+    cbnz x0, Lstmt_fail
 
-Lstmt_bool_done:
-    mov x0, #0
-    b Lstmt_return
+    Lstmt_bool_done:
+        mov x0, #0
+        b Lstmt_return
 
-Lstmt_byte:
+    Lstmt_byte:
+
     bl _skip_whitespace
     mov x23, #3
     bl _peek_char
@@ -632,24 +650,28 @@ Lstmt_dec_name:
 
     bl _parse_expr_value
     cbz x0, Lstmt_fail
+    mov x21, x1 // value
+    mov x22, x2 // type
+    mov x27, x3 // source scale
+    mov x25, x4 // source var id
+
     cmp x24, #22
     b.eq Lstmt_dec_check_nullable
-    cmp x2, #6
+    cmp x22, #6
     b.ne Lstmt_type_mismatch
     b Lstmt_dec_check_scale
-Lstmt_dec_check_nullable:
-    cmp x2, #7
+    Lstmt_dec_check_nullable:
+    cmp x22, #7
     b.eq Lstmt_dec_value_ok
-    cmp x2, #22
+    cmp x22, #22
     b.eq Lstmt_dec_check_scale
-    cmp x2, #6
+    cmp x22, #6
     b.ne Lstmt_type_mismatch
     b Lstmt_dec_check_scale
-Lstmt_dec_check_scale:
-    cmp x3, x23
+    Lstmt_dec_check_scale:
+    cmp x27, x23
     b.ne Lstmt_decimal_scale_error
-Lstmt_dec_value_ok:
-    mov x21, x1
+    Lstmt_dec_value_ok:
 
     bl _consume_optional_semicolon
 
@@ -661,22 +683,27 @@ Lstmt_dec_value_ok:
     mov x5, x23 // scale
     bl _define_variable
     cbnz x0, Lstmt_fail
-    mov x0, x19
-    mov x1, x20
-    bl _lookup_variable
-    cbz x0, Lstmt_fail
-    mov x0, x4
+    mov x26, x4 // target slot id
+
+    cmn x25, #1
+    b.ne Lstmt_dec_store_var
+
+    mov x0, x26
     mov x1, x21
     bl _record_store_variable
     cbnz x0, Lstmt_fail
+    b Lstmt_dec_done
 
+    Lstmt_dec_store_var:
+    mov x0, #45
+    mov x1, x26
+    mov x2, x25
+    bl _record_operation
+    cbnz x0, Lstmt_fail
+
+    Lstmt_dec_done:
     mov x0, #0
     b Lstmt_return
-
-Lstmt_dec_done:
-    mov x0, #0
-    b Lstmt_return
-
 Lstmt_str:
     bl _skip_whitespace
     mov x23, #2
@@ -1640,13 +1667,17 @@ Lstmt_index_map_loop:
 
 Lstmt_index_map_insert_new:
     // Key not found - insert new key
-    cmp x14, #4096
+    LOAD_ADDR x17, map_pool_count
+    ldr x18, [x17]
+    cmp x18, #4096
     b.ge Lstmt_fail
-    mov x16, x14
+    mov x16, x18 // Use current global count for the new entry
+
     LOAD_ADDR x17, map_pool_keys
     str x21, [x17, x16, lsl #3]
     LOAD_ADDR x17, map_pool_key_lengths
     str x23, [x17, x16, lsl #3]
+
     // Store key pointer for string keys
     cmp x12, #2
     b.ne Lstmt_index_map_insert_skip_ptr
@@ -1657,11 +1688,25 @@ Lstmt_index_map_insert_skip_ptr:
     str x25, [x17, x16, lsl #3]
     LOAD_ADDR x17, map_pool_lengths
     str x27, [x17, x16, lsl #3]
-    LOAD_ADDR x17, map_pool_count
-    add x14, x14, #1
-    str x14, [x17]
-    b Lstmt_index_map_store
 
+    LOAD_ADDR x17, map_pool_count
+    add x18, x18, #1
+    str x18, [x17]
+
+    // Update local variable metadata (count)
+    mov x0, x19
+    mov x1, x20
+    bl _lookup_variable
+    cbz x0, Lstmt_fail
+    mov x11, x3 // current metadata
+    add x11, x11, #1 // increment count (lower 32 bits)
+
+    mov x0, x19
+    mov x1, x20
+    mov x2, x11
+    bl _set_variable_metadata
+
+    b Lstmt_index_map_store
 Lstmt_index_map_cmp_str:
     LOAD_ADDR x17, map_pool_key_lengths
     ldr x0, [x17, x16, lsl #3]

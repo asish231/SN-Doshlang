@@ -186,6 +186,50 @@ Lset_return:
     ldp x29, x30, [sp], #16
     ret
 
+.global _set_variable_metadata
+_set_variable_metadata:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+
+    mov x19, x0 // name ptr
+    mov x20, x1 // name len
+    mov x21, x2 // metadata
+
+    LOAD_ADDR x22, var_count
+    ldr x22, [x22]
+    cbz x22, Lset_meta_fail
+    sub x22, x22, #1
+Lset_meta_loop:
+    cmp x22, #-1
+    b.eq Lset_meta_fail
+    LOAD_ADDR x9, var_name_lens
+    ldr x10, [x9, x22, lsl #3]
+    cmp x10, x20
+    b.ne Lset_meta_next
+    LOAD_ADDR x9, var_name_ptrs
+    ldr x11, [x9, x22, lsl #3]
+    mov x0, x19
+    mov x1, x20
+    mov x2, x11
+    bl _match_span_span
+    cbnz x0, Lset_meta_found
+Lset_meta_next:
+    sub x22, x22, #1
+    b Lset_meta_loop
+Lset_meta_found:
+    LOAD_ADDR x9, var_lengths
+    str x21, [x9, x22, lsl #3]
+    mov x0, #0
+    b Lset_meta_ret
+Lset_meta_fail:
+    mov x0, #1
+Lset_meta_ret:
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
 _lookup_variable:
     stp x29, x30, [sp, #-16]!
     mov x29, sp

@@ -26,9 +26,8 @@ _main:
     mov x0, x10
     bl _cstr_to_int
     stur x0, [x29, #-24]
-    adrp x9, store_val_2@PAGE
-    ldr x10, [x9, store_val_2@PAGEOFF]
-    stur x10, [x29, #-32]
+    ldur x10, [x29, #-24]
+    stur x10, [x29, #-8]
     adrp x0, print_fmt_int@PAGE
     add x0, x0, print_fmt_int@PAGEOFF
     ldur x1, [x29, #-32]
@@ -75,9 +74,6 @@ dec_sign_minus:
 .align 3
 print_val_0:
     .asciz "2"
-.align 3
-store_val_2:
-    .quad 0
 .align 3
 list_pool_values:
     .quad 10
