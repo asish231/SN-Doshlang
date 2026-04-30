@@ -1,0 +1,21 @@
+fn main() {
+    print("--- List Indexing ---")
+    list<int> l = [10, 20, 30]
+    let x = l[1]
+    print(x) // Should be 20
+
+    print("--- Map Key Insertion ---")
+    map<str, int> m = {"Alice": 25}
+    m["Bob"] = 30
+    print(m["Alice"]) // 25
+    print(m["Bob"])   // 30
+
+    print("--- Runtime Map Update ---")
+    let name = "Bob"
+    m[name] = 31
+    print(m["Bob"])   // 31
+
+    print("--- Map Lookup with variable ---")
+    let lookup = "Alice"
+    print(m[lookup])  // 25
+}

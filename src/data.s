@@ -197,6 +197,13 @@
 .global asm_load_pool_len_x10
 .global asm_mov_x12_x10
 .global asm_mov_x10_x12
+.global asm_mov_x0_imm
+.global asm_mov_x1_imm
+.global asm_mov_x4_imm
+.global asm_call_map_lookup
+.global asm_mov_x4_x10
+.global asm_call_cstring_length
+.global asm_mov_x4_x0
 .global asm_mov_x0_x10
 .global asm_mov_x2_x10
 .global asm_mov_x3_imm
@@ -352,6 +359,8 @@
 .global fn_return_extra
 .global fn_return_extra_type
 .global fn_exec_depth
+.global fn_op_starts
+.global fn_op_counts
 .global var_scope_base
 .global max_var_count
 .global saved_var_count
@@ -919,8 +928,26 @@ asm_input_store_x10_str:
     .asciz "    stur x10, [x29, #-"
 asm_input_store_x0_str:
     .asciz "    stur x0, [x29, #-"
+asm_call_cstring_length:
+#ifdef _WIN32
+    .asciz "    bl cstring_length\n"
+#else
+    .asciz "    bl _cstring_length\n"
+#endif
+asm_mov_x4_x0:
+    .asciz "    mov x4, x0\n"
 asm_mov_x0_x10:
     .asciz "    mov x0, x10\n"
+asm_mov_x0_imm:
+    .asciz "    mov x0, #"
+asm_mov_x1_imm:
+    .asciz "    mov x1, #"
+asm_mov_x4_imm:
+    .asciz "    mov x4, #"
+asm_call_map_lookup:
+    .asciz "    bl _map_lookup\n"
+asm_mov_x4_x10:
+    .asciz "    mov x4, x10\n"
 asm_mov_x2_x10:
     .asciz "    mov x2, x10\n"
 asm_mov_x3_imm:
@@ -964,7 +991,11 @@ source_ptr:     .space 8
 source_len:     .space 8
 cursor_pos:     .space 8
 current_line:   .space 8
+.global stmt_target_name
+.global stmt_target_len
 var_count:      .space 8
+stmt_target_name: .quad 0
+stmt_target_len: .quad 0
 print_count:    .space 8
 print_noline_flag: .space 8
 op_count:       .space 8
@@ -1012,7 +1043,10 @@ fn_source_ptrs: .space 512
 fn_source_lens: .space 512
 fn_param_counts: .space 512
 fn_return_types: .space 512
-fn_param_types: .space 2048        // 64 fns * 4 params * 8 bytes
+fn_op_starts:    .space 512         // 64 functions * 8 bytes
+fn_op_counts:    .space 512
+fn_param_types: .space 2048
+        // 64 fns * 4 params * 8 bytes
 fn_param_lengths: .space 2048
 fn_param_name_ptrs: .space 2048
 fn_param_name_lens: .space 2048

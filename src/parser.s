@@ -70,7 +70,7 @@ Lpreparse_loop:
     mov x1, x22
     LOAD_ADDR x2, kw_blueprint
     bl _match_cstr_span
-    cbnz x0, Lpreparse_skip_decl_block
+    cbnz x0, Lpreparse_blueprint_label
     mov x0, x21
     mov x1, x22
     LOAD_ADDR x2, kw_contract
@@ -95,6 +95,11 @@ Lpreparse_non_ident:
 
 Lpreparse_skip_decl_block:
     bl _skip_decl_block
+    cbnz x0, Lpreparse_fail
+    b Lpreparse_loop
+
+Lpreparse_blueprint_label:
+    bl _preparse_blueprint_methods
     cbnz x0, Lpreparse_fail
     b Lpreparse_loop
 
@@ -422,6 +427,10 @@ Lstmt_let:
     bl _try_parse_input_call
     cbnz x0, Lstmt_let_input
 
+    // Try runtime binary expression first (var op var, var op imm)
+    bl _try_parse_runtime_var_bin_expr
+    cbnz x0, Lstmt_let_runtime_expr
+
     bl _parse_expr_value
     cbz x0, Lstmt_fail
     mov x21, x1
@@ -440,25 +449,151 @@ Lstmt_let:
     bl _define_variable
     cbnz x0, Lstmt_fail
 
-    cmp x22, #2
-    b.eq Lstmt_let_done
-    cmp x22, #4
-    b.eq Lstmt_let_done
-    cmp x22, #5
-    b.eq Lstmt_let_done
-
     mov x0, x19
     mov x1, x20
     bl _lookup_variable
     cbz x0, Lstmt_fail
-    mov x0, x4
+    mov x26, x4 // target slot
+
+    cmp x22, #2 // str
+    b.eq Lstmt_let_str
+    cmp x22, #4 // list
+    b.eq Lstmt_let_collection
+    cmp x22, #8 // map
+    b.eq Lstmt_let_collection
+    cmp x22, #5 // dec
+    b.eq Lstmt_let_done
+
+    cmn x24, #1
+    b.eq Lstmt_let_store_imm
+    // Variable source: emit op 45 (store_var_var) for runtime copy
+    mov x0, #45
+    mov x1, x26
+    mov x2, x24
+    bl _record_operation
+    cbnz x0, Lstmt_fail
+    b Lstmt_let_done
+Lstmt_let_store_imm:
+    mov x0, x26
     mov x1, x21
     bl _record_store_variable
     cbnz x0, Lstmt_fail
+    b Lstmt_let_done
+
+Lstmt_let_str:
+    // Op 72 for constant string literal
+    cmn x24, #1
+    b.ne Lstmt_let_store_var_var
+    mov x0, #72
+    mov x1, x26
+    mov x2, x21
+    bl _record_operation
+    b Lstmt_let_done
+
+Lstmt_let_collection:
+    // Just use Op 1 for collection base index?
+    // Actually collections are just an index into the pool.
+    mov x0, x26
+    mov x1, x21
+    bl _record_store_variable
+    b Lstmt_let_done
+
+Lstmt_let_store_var_var:
+    mov x0, #45
+    mov x1, x26
+    mov x2, x24
+    bl _record_operation
+    b Lstmt_let_done
 
 Lstmt_let_done:
     mov x0, #0
     b Lstmt_return
+
+Lstmt_let_runtime_expr:
+    // _try_parse_runtime_var_bin_expr returned:
+    // x1 = lhs var index, x2 = op (1=add,2=sub,3=mul,4=div,5=mod)
+    // x3 = rhs (var idx or imm), x4 = 1 if rhs is var, 0 if imm
+    mov x21, x1  // lhs var index
+    mov x22, x2  // op type
+    mov x23, x3  // rhs operand
+    mov x24, x4  // rhs_is_var flag
+
+    bl _consume_optional_semicolon
+
+    // Compute compile-time value for define_variable
+    LOAD_ADDR x9, var_values
+    ldr x25, [x9, x21, lsl #3]  // lhs compile-time value
+    mov x26, x23
+    cbz x24, Lstmt_let_rt_rhs_ready
+    ldr x26, [x9, x23, lsl #3]  // rhs compile-time value
+Lstmt_let_rt_rhs_ready:
+    cmp x22, #1
+    b.eq Lstmt_let_rt_eval_add
+    cmp x22, #2
+    b.eq Lstmt_let_rt_eval_sub
+    cmp x22, #3
+    b.eq Lstmt_let_rt_eval_mul
+    cmp x22, #4
+    b.eq Lstmt_let_rt_eval_div
+    cmp x22, #5
+    b.eq Lstmt_let_rt_eval_mod
+    b Lstmt_fail
+Lstmt_let_rt_eval_add:
+    add x28, x25, x26
+    b Lstmt_let_rt_define
+Lstmt_let_rt_eval_sub:
+    sub x28, x25, x26
+    b Lstmt_let_rt_define
+Lstmt_let_rt_eval_mul:
+    mul x28, x25, x26
+    b Lstmt_let_rt_define
+Lstmt_let_rt_eval_div:
+    cbz x26, Lstmt_fail
+    udiv x28, x25, x26
+    b Lstmt_let_rt_define
+Lstmt_let_rt_eval_mod:
+    cbz x26, Lstmt_fail
+    udiv x9, x25, x26
+    msub x28, x9, x26, x25
+
+Lstmt_let_rt_define:
+    // Define variable with compile-time value x28
+    mov x0, x19
+    mov x1, x20
+    mov x2, x28
+    mov x3, #0    // not const
+    mov x4, #0    // int type
+    mov x5, #0    // no length
+    bl _define_variable
+    cbnz x0, Lstmt_fail
+
+    // Look up new var slot
+    mov x0, x19
+    mov x1, x20
+    bl _lookup_variable
+    cbz x0, Lstmt_fail
+    mov x27, x4  // dest var index
+
+    // Record runtime operation
+    cbz x24, Lstmt_let_rt_record_imm
+    // Both operands are vars: op = x22 + 27
+    add x0, x22, #27
+    mov x1, x27
+    mov x2, x21
+    mov x3, x23
+    bl _record_operation3
+    cbnz x0, Lstmt_fail
+    b Lstmt_let_done
+Lstmt_let_rt_record_imm:
+    // LHS is var, RHS is immediate: op = x22 + 22
+    add x0, x22, #22
+    mov x1, x27
+    mov x2, x21
+    mov x3, #0
+    mov x4, x23
+    bl _record_operation4
+    cbnz x0, Lstmt_fail
+    b Lstmt_let_done
 
 Lstmt_let_input:
     mov x21, x1 // prompt ptr
@@ -1731,6 +1866,10 @@ Lstmt_object_method_call:
 
 Lstmt_index_assign:
     // Parse target index/key: name[expr] = expr
+    LOAD_ADDR x9, stmt_target_name
+    str x19, [x9]
+    LOAD_ADDR x9, stmt_target_len
+    str x20, [x9]
     bl _advance_char // consume '['
     bl _parse_expr_value
     cbz x0, Lstmt_fail
@@ -1748,14 +1887,22 @@ Lstmt_index_assign:
     bl _expect_char
     cbz x0, Lstmt_fail
 
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
     bl _parse_expr_value
     cbz x0, Lstmt_fail
     mov x25, x1 // rhs value
     mov x26, x2 // rhs type
     mov x27, x3 // rhs length
     mov x28, x4 // rhs var id
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
 
     // Resolve target variable
+    LOAD_ADDR x9, stmt_target_name
+    ldr x19, [x9]
+    LOAD_ADDR x9, stmt_target_len
+    ldr x20, [x9]
     mov x0, x19
     mov x1, x20
     bl _lookup_variable
@@ -2634,6 +2781,17 @@ Lstmt_assign_do_store:
     cbz x0, Lstmt_fail
     cmp x2, #2
     b.eq Lstmt_assign_store_done
+    // Check if source is a variable (x28 != -1)
+    cmn x28, #1
+    b.eq Lstmt_assign_do_store_imm
+    // Source is a variable: emit op 45 (store_var_var) for runtime copy
+    mov x0, #45
+    mov x1, x4     // dest var idx
+    mov x2, x28    // src var idx
+    bl _record_operation
+    cbnz x0, Lstmt_fail
+    b Lstmt_assign_store_done
+Lstmt_assign_do_store_imm:
     mov x0, x4
     mov x1, x21
     bl _record_store_variable
@@ -5604,7 +5762,7 @@ Lprimary_indexing:
     // op 80: list_load(dest, index_var, base_idx, load_len)
     mov x0, #80
     mov x1, x19 // dest
-    mov x2, x23 // use index VALUE (which is the slot id for runtime vars)
+    mov x2, x22 // use index slot id
     mov x3, x25 // base pool index
 
     lsr x9, x27, #32 // element type
@@ -5699,7 +5857,7 @@ Lprimary_map_lookup_runtime:
     // op 82: map_load(dest, key_var, base_idx, count | flags)
     mov x0, #82
     mov x1, x19 // dest
-    mov x2, x23 // key var id
+    mov x2, x22 // use key var slot id
     mov x3, x25 // base pool index
     and x4, x27, #0xFFFFFFFF // count
     lsr x9, x27, #40 // key type
@@ -8252,6 +8410,195 @@ Lfn_call_return:
     ldp x29, x30, [sp], #16
     ret
 
+// _preparse_blueprint_methods: register blueprint + all its methods with
+// synthesized names (Blueprint__method) so forward calls resolve correctly.
+// Called during preparse pass. Leaves cursor after the closing '}'.
+_preparse_blueprint_methods:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+    stp x25, x26, [sp, #-16]!
+
+    // Save cursor — restore at end so main pass re-parses fully
+    LOAD_ADDR x9, cursor_pos
+    ldr x19, [x9]
+    LOAD_ADDR x9, current_line
+    ldr x20, [x9]
+
+    bl _skip_whitespace
+    bl _parse_identifier
+    cbz x0, Lpreparse_bp_fail
+    mov x23, x0  // bp name ptr
+    mov x24, x1  // bp name len
+    bl _skip_generic_suffix
+
+    // Register blueprint (name only, counts stay 0)
+    LOAD_ADDR x9, blueprint_count
+    ldr x21, [x9]  // bp id
+    cmp x21, #64
+    b.ge Lpreparse_bp_fail
+    LOAD_ADDR x10, blueprint_name_ptrs
+    str x23, [x10, x21, lsl #3]
+    LOAD_ADDR x10, blueprint_name_lens
+    str x24, [x10, x21, lsl #3]
+    LOAD_ADDR x10, blueprint_parent_ids
+    mov x11, #-1
+    str x11, [x10, x21, lsl #3]
+    LOAD_ADDR x10, blueprint_field_counts
+    str xzr, [x10, x21, lsl #3]
+    LOAD_ADDR x10, blueprint_method_counts
+    str xzr, [x10, x21, lsl #3]
+    add x22, x21, #1
+    str x22, [x9]
+
+    // Skip to '{'
+Lpreparse_bp_skip_to_brace:
+    bl _skip_whitespace
+    bl _peek_char
+    cbz w0, Lpreparse_bp_fail
+    cmp w0, #'{'
+    b.eq Lpreparse_bp_body
+    bl _advance_char
+    b Lpreparse_bp_skip_to_brace
+
+Lpreparse_bp_body:
+    bl _advance_char  // consume '{'
+    mov x22, #0  // brace depth for nested blocks
+
+Lpreparse_bp_scan_loop:
+    bl _skip_whitespace
+    bl _peek_char
+    cbz w0, Lpreparse_bp_fail
+    cmp w0, #'}'
+    b.eq Lpreparse_bp_body_done
+
+    // Look for 'fn' keyword to find method names
+    bl _parse_identifier
+    cbz x0, Lpreparse_bp_scan_advance
+    mov x25, x0  // token ptr
+    mov x26, x1  // token len
+
+    // Skip access modifiers
+    mov x0, x25
+    mov x1, x26
+    LOAD_ADDR x2, kw_open
+    bl _match_cstr_span
+    cbnz x0, Lpreparse_bp_after_mod
+    mov x0, x25
+    mov x1, x26
+    LOAD_ADDR x2, kw_closed
+    bl _match_cstr_span
+    cbnz x0, Lpreparse_bp_after_mod
+    mov x0, x25
+    mov x1, x26
+    LOAD_ADDR x2, kw_guarded
+    bl _match_cstr_span
+    cbnz x0, Lpreparse_bp_after_mod
+    b Lpreparse_bp_check_fn_kw
+
+Lpreparse_bp_after_mod:
+    bl _skip_whitespace
+    bl _parse_identifier
+    cbz x0, Lpreparse_bp_scan_loop
+    mov x25, x0
+    mov x26, x1
+
+Lpreparse_bp_check_fn_kw:
+    mov x0, x25
+    mov x1, x26
+    LOAD_ADDR x2, kw_fn
+    bl _match_cstr_span
+    cbz x0, Lpreparse_bp_scan_loop  // not fn — skip to next line
+
+    // Found 'fn' — read method name
+    bl _skip_whitespace
+    bl _parse_identifier
+    cbz x0, Lpreparse_bp_fail
+    mov x25, x0  // method name ptr
+    mov x26, x1  // method name len
+
+    // Get current method count for this blueprint
+    LOAD_ADDR x9, blueprint_method_counts
+    ldr x22, [x9, x21, lsl #3]
+    cmp x22, #8
+    b.ge Lpreparse_bp_scan_loop
+
+    // Compute flat slot index: bp_id*8 + method_idx
+    mov x10, x21
+    lsl x10, x10, #3
+    add x10, x10, x22
+
+    // Build Blueprint__methodname synth name
+    mov x0, x21   // blueprint id
+    mov x1, x25   // method name ptr
+    mov x2, x26   // method name len
+    mov x3, x22   // slot index (for storage)
+    bl _build_method_synth_name
+    // x0=synth ptr, x1=synth len
+
+    // Register a stub fn entry with the synth name
+    // so _call_function can resolve it during main parse
+    LOAD_ADDR x9, fn_count
+    ldr x11, [x9]
+    cmp x11, #64
+    b.ge Lpreparse_bp_scan_loop
+    LOAD_ADDR x12, fn_name_ptrs
+    str x0, [x12, x11, lsl #3]
+    LOAD_ADDR x12, fn_name_lens
+    str x1, [x12, x11, lsl #3]
+    // Zero out param count for stub
+    LOAD_ADDR x12, fn_param_counts
+    str xzr, [x12, x11, lsl #3]
+    add x11, x11, #1
+    str x11, [x9]
+    sub x11, x11, #1  // fn id = fn_count - 1
+
+    // Store method name and fn id in blueprint tables
+    LOAD_ADDR x9, blueprint_method_names
+    str x25, [x9, x10, lsl #3]
+    LOAD_ADDR x9, blueprint_method_name_lens
+    str x26, [x9, x10, lsl #3]
+    LOAD_ADDR x9, blueprint_method_fn_ids
+    str x11, [x9, x10, lsl #3]
+    LOAD_ADDR x9, blueprint_method_counts
+    add x22, x22, #1
+    str x22, [x9, x21, lsl #3]
+
+    // Skip rest of this line (past the fn signature)
+    b Lpreparse_bp_scan_loop
+
+Lpreparse_bp_scan_advance:
+    bl _advance_char
+    b Lpreparse_bp_scan_loop
+
+Lpreparse_bp_body_done:
+    bl _advance_char  // consume '}'
+
+    // Restore cursor so main pass re-parses the blueprint fully
+    LOAD_ADDR x9, cursor_pos
+    str x19, [x9]
+    LOAD_ADDR x9, current_line
+    str x20, [x9]
+    mov x0, #0
+    b Lpreparse_bp_return
+
+Lpreparse_bp_fail:
+    LOAD_ADDR x9, cursor_pos
+    str x19, [x9]
+    LOAD_ADDR x9, current_line
+    str x20, [x9]
+    mov x0, #1
+
+Lpreparse_bp_return:
+    ldp x25, x26, [sp], #16
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
 _parse_blueprint:
     stp x29, x30, [sp, #-16]!
     mov x29, sp
@@ -8266,6 +8613,12 @@ _parse_blueprint:
     mov x19, x0 // name ptr
     mov x20, x1 // name len
     bl _skip_generic_suffix
+
+    // Check if already registered by preparse
+    mov x0, x19
+    mov x1, x20
+    bl _lookup_blueprint_id
+    cbnz x0, Lblueprint_already_registered
 
     // Register blueprint name
     LOAD_ADDR x9, blueprint_count
@@ -8288,6 +8641,18 @@ _parse_blueprint:
 
     add x10, x10, #1
     str x10, [x9]
+    b Lblueprint_register_done
+
+Lblueprint_already_registered:
+    // Blueprint was pre-registered; get its id and reset field/method counts
+    // so the main parse can re-populate them correctly
+    mov x23, x1  // blueprint id from lookup
+    LOAD_ADDR x11, blueprint_field_counts
+    str xzr, [x11, x23, lsl #3]
+    LOAD_ADDR x11, blueprint_method_counts
+    str xzr, [x11, x23, lsl #3]
+
+Lblueprint_register_done:
 
     bl _skip_whitespace
     LOAD_ADDR x0, kw_from
@@ -9056,11 +9421,31 @@ Lblueprint_member_method:
     str x26, [x9, x10, lsl #3]
     sub sp, sp, #16
     str x10, [sp]
+
+    // Build Blueprint__methodname and set fn_name_override
+    mov x0, x21   // blueprint id
+    mov x1, x25   // method name ptr
+    mov x2, x26   // method name len
+    mov x3, x22   // method slot index (for storage offset)
+    bl _build_method_synth_name
+    // x0=synth name ptr, x1=synth name len
+    LOAD_ADDR x9, fn_name_override_ptr
+    str x0, [x9]
+    LOAD_ADDR x9, fn_name_override_len
+    str x1, [x9]
+
     LOAD_ADDR x9, cursor_pos
     str x23, [x9]
     LOAD_ADDR x9, current_line
     str x24, [x9]
     bl _parse_fn_definition
+
+    // Clear fn_name_override
+    LOAD_ADDR x9, fn_name_override_ptr
+    str xzr, [x9]
+    LOAD_ADDR x9, fn_name_override_len
+    str xzr, [x9]
+
     ldr x10, [sp]
     add sp, sp, #16
     cbnz x0, Lblueprint_member_fail
@@ -9444,12 +9829,13 @@ _call_object_method:
     stp x25, x26, [sp, #-16]!
     sub sp, sp, #32
 
-    mov x19, x0
-    mov x20, x1
-    mov x21, x2
-    mov x22, x3
-    mov x23, x4
+    mov x19, x0  // instance id
+    mov x20, x1  // obj type (10=stack, 11=heap)
+    mov x21, x2  // blueprint id
+    mov x22, x3  // method name ptr
+    mov x23, x4  // method name len
 
+    // Save current self
     LOAD_ADDR x9, current_self_instance
     ldr x25, [x9]
     str x25, [sp]
@@ -9460,6 +9846,7 @@ _call_object_method:
     ldr x10, [x9]
     str x10, [sp, #16]
 
+    // Set self to this object
     LOAD_ADDR x9, current_self_instance
     str x19, [x9]
     LOAD_ADDR x9, current_self_type
@@ -9467,10 +9854,17 @@ _call_object_method:
     LOAD_ADDR x9, current_self_meta
     str x21, [x9]
 
-    mov x0, x22
-    mov x1, x23
+    // Build Blueprint__methodname for dispatch
+    mov x0, x21   // blueprint id
+    mov x1, x22   // method name ptr
+    mov x2, x23   // method name len
+    mov x3, #63   // use dedicated call-time slot (slot 63)
+    bl _build_method_synth_name
+    // x0=synth name ptr, x1=synth name len
+
     bl _call_function
 
+    // Restore self
     LOAD_ADDR x9, current_self_instance
     ldr x10, [sp]
     str x10, [x9]

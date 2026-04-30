@@ -1,0 +1,8 @@
+fn main() {
+    map<str, int> m = {"A": 1}
+    m["B"] = 2
+    let k = "A"
+    print(m[k]) // Should be 1
+    let k2 = "B"
+    print(m[k2]) // Should be 2
+}

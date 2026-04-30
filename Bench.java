@@ -4,7 +4,7 @@ public class Bench {
         int i = 0;
         while (i < 100000000) {
             sum = sum + 1;
-            i++;
+            i = i + 1;
         }
         System.out.println(sum);
     }

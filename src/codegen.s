@@ -1576,23 +1576,10 @@ Lemit_op_cast_str_to_int:
     b Lemit_op_done
 
 Lemit_op_map_load:
-    // arg0: dest, arg1: key_var, arg2: base_idx, arg3: count
-    // Uses _map_lookup(base_idx, count, key, key_type, key_len)
-    // Actually, we need to pass key_type and key_len too.
-    // Let's pack them into arg3: (key_type << 56) | (key_len_var << 48) | count
-    // Wait, key_len might be an immediate if key_var is -1.
-    // For now, let's keep it simple: assume key_var is a variable.
+    // arg0: dest, arg1: key_var, arg2: base_idx, arg3: packed
+    // packed: (key_type << 56) | (val_type << 48) | count
     
-    // x0 = base_idx
-    LOAD_ADDR x20, op_arg2
-    ldr x0, [x20, x19, lsl #3]
-    
-    // x1 = count
-    LOAD_ADDR x20, op_arg3
-    ldr x9, [x20, x19, lsl #3]
-    and x1, x9, #0xFFFFFFFF
-    
-    // x2 = key value
+    // 1. Load key value from stack into x10
     LOAD_ADDR x0, asm_math_var_x10_ldr
     mov x1, #1
     bl _write_cstr_fd
@@ -1604,19 +1591,92 @@ Lemit_op_map_load:
     mov x1, #1
     bl _write_cstr_fd
     
+    // mov x2, x10
     LOAD_ADDR x0, asm_mov_x2_x10
     mov x1, #1
     bl _write_cstr_fd
     
-    // x3 = key type
-    lsr x10, x9, #56
-    mov x0, x10
-    mov x1, #1
-    bl _write_u64_fd // wait, I need "mov x3, #imm"
-    // I need asm_mov_x3_imm
+    // Unpack arg3
+    LOAD_ADDR x20, op_arg3
+    ldr x22, [x20, x19, lsl #3]
+    and x23, x22, #0xFFFFFFFF // count
+    lsr x24, x22, #56 // key type
     
-    // This is getting complex. Let's simplify.
-    // Pack key_type into x22 for _map_lookup.
+    // 2. If key_type is 2 (str), get length into x4
+    cmp x24, #2
+    b.ne Lemit_map_load_no_str_len
+    
+    LOAD_ADDR x0, asm_mov_x0_x10
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x0, asm_call_cstring_length
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x0, asm_mov_x4_x0
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_map_load_ready
+
+Lemit_map_load_no_str_len:
+    LOAD_ADDR x0, asm_mov_x4_imm
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, #0
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_newline
+    mov x1, #1
+    bl _write_cstr_fd
+
+Lemit_map_load_ready:
+    // 3. Set up x0 (base_idx), x1 (count), x3 (key_type)
+    LOAD_ADDR x0, asm_mov_x0_imm
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, op_arg2
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_newline
+    mov x1, #1
+    bl _write_cstr_fd
+    
+    LOAD_ADDR x0, asm_mov_x1_imm
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, x23
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_newline
+    mov x1, #1
+    bl _write_cstr_fd
+    
+    LOAD_ADDR x0, asm_mov_x3_imm
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, x24
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_newline
+    mov x1, #1
+    bl _write_cstr_fd
+    
+    // 4. Call _map_lookup
+    LOAD_ADDR x0, asm_call_map_lookup
+    mov x1, #1
+    bl _write_cstr_fd
+    
+    // 5. Store result x0 into dest variable slot
+    LOAD_ADDR x0, asm_input_store_x0_str
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, op_arg0
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_stack_offset_fd
+    LOAD_ADDR x0, asm_close_bracket
+    mov x1, #1
+    bl _write_cstr_fd
     
     b Lemit_op_done
 

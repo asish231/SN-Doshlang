@@ -1,0 +1,23 @@
+fn fib(int n) -> int {
+    if (n <= 1) {
+        return n
+    }
+    return fib(n - 1) + fib(n - 2)
+}
+
+fn main() {
+    int result = fib(20)
+    print(result)
+}
+
+fn fib2(int n) -> int {
+    if (n <= 1) {
+        return n
+    }
+    return fib2(n - 1) + fib2(n - 2)
+}
+
+fn main2() {
+    int result = fib2(20)
+    print(result)
+}
