@@ -482,8 +482,14 @@ Lstmt_let_store_imm:
 
 Lstmt_let_str:
     // Op 72 for constant string literal
-    cmn x24, #1
+    cmn x24, #-1
     b.ne Lstmt_let_store_var_var
+    // Intern the string into the print/data table to get a stable ID
+    mov x0, x21
+    mov x1, #2
+    mov x2, x23
+    bl _record_data_value
+    mov x21, x0 // data id
     mov x0, #72
     mov x1, x26
     mov x2, x21
@@ -4254,6 +4260,7 @@ Lmap_return:
     ldp x29, x30, [sp], #16
     ret
 
+.global _parse_use_statement_after_keyword
 _parse_use_statement_after_keyword:
     stp x29, x30, [sp, #-16]!
     mov x29, sp

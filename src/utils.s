@@ -1333,7 +1333,7 @@ Lparse_module_loop:
     mov x1, x10
     LOAD_ADDR x2, kw_fn
     bl _match_cstr_span
-    cbz x0, Lparse_module_skip_line
+    cbz x0, Lparse_module_check_use
 
     LOAD_ADDR x21, fn_count
     ldr x22, [x21]  // fn_count before parsing this definition
@@ -1353,6 +1353,20 @@ Lparse_module_loop:
     mov x2, x9
     bl _register_imported_function
     cbz x0, Lparse_module_error
+
+    b Lparse_module_loop
+
+Lparse_module_check_use:
+    // Check if it's 'use'
+    mov x0, x9
+    mov x1, x10
+    LOAD_ADDR x2, kw_use
+    bl _match_cstr_span
+    cbz x0, Lparse_module_skip_line
+
+    // Parse 'use' statement
+    bl _parse_use_statement_after_keyword
+    cbnz x0, Lparse_module_error
 
     b Lparse_module_loop
 
