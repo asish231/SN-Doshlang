@@ -29,6 +29,13 @@ _main:
     adrp x9, store_val_2@PAGE
     ldr x10, [x9, store_val_2@PAGEOFF]
     stur x10, [x29, #-32]
+    adrp x0, print_fmt_int@PAGE
+    add x0, x0, print_fmt_int@PAGEOFF
+    ldur x1, [x29, #-32]
+    sub sp, sp, #16
+    str x1, [sp]
+    bl _printf
+    add sp, sp, #16
     ldur x10, [x29, #-8]
     add x10, x10, #0
     adrp x11, list_pool_values@PAGE

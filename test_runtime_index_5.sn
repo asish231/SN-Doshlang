@@ -1,0 +1,11 @@
+fn main() {
+    list<int> nums = [10, 20, 30]
+    int x = 10
+    int i = 0
+    if (x == 10) {
+        i = 2
+    }
+    // Now i=2 is determined at runtime (mostly).
+    // Actually, x=10 might still be tracked.
+    // Let's use a nested function to hide it?
+}

@@ -5268,18 +5268,47 @@ Lprimary_indexing:
     cmp x24, #0
     b.ne Lprimary_fail
 
-    // If index expression came from a variable/temp slot, load its value.
+    // If index expression came from a variable/temp slot, emit runtime load.
     cmn x22, #1
-    b.eq Lprimary_list_index_value_ready
-    LOAD_ADDR x11, var_values
-    ldr x23, [x11, x22, lsl #3]
-Lprimary_list_index_value_ready:
-    
+    b.ne Lprimary_list_index_runtime
+
     and x9, x27, #0xFFFFFFFF // count
     cmp x23, x9
     b.ge Lprimary_fail
-    
+
     add x10, x25, x23 // pool index
+    b Lprimary_list_index_load_pool
+
+    Lprimary_list_index_runtime:
+    // x25 = list pool base index
+    // x22 = index var slot id
+    // x27 = list metadata
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+    bl _allocate_temp_var
+    mov x19, x0 // dest var id
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+
+    // op 80: list_load(dest, index_var, base_idx, load_len)
+    mov x0, #80
+    mov x1, x19 // dest
+    mov x2, x23 // use index VALUE (which is the slot id for runtime vars)
+    mov x3, x25 // base pool index
+
+    lsr x9, x27, #32 // element type
+    cmp x9, #2 // str
+    cset x4, eq
+    bl _record_operation4
+    cbnz x0, Lprimary_fail
+
+    mov x25, #0 // runtime value unknown
+    lsr x26, x27, #32 // element type
+    mov x27, #0 // runtime length unknown
+    mov x28, x19 // var index
+    b Lprimary_suffix_loop_start
+
+    Lprimary_list_index_load_pool:
     LOAD_ADDR x11, list_pool_values
     ldr x25, [x11, x10, lsl #3]
     LOAD_ADDR x11, list_pool_lengths
@@ -5288,7 +5317,6 @@ Lprimary_list_index_value_ready:
     mov x27, x9 // element length
     mov x28, #-1
     b Lprimary_suffix_loop_start
-
 Lprimary_map_lookup_val:
     lsr x9, x27, #40 // expected key type
     cmp x24, x9
@@ -5492,8 +5520,20 @@ Lprimary_number:
 Lprimary_string:
     bl _parse_string_literal
     cbz x0, Lprimary_fail
+    // x1=ptr, x2=len, x3=interpolated flag
+    cbnz x3, Lprimary_string_interpolated
     mov x3, x2 // length
     mov x2, #2 // type str
+    mov x0, #1
+    mov x4, #-1
+    b Lprimary_suffix_loop
+
+Lprimary_string_interpolated:
+    // x1 = ptr, x2 = len
+    // For now, let's just treat it as a normal string to avoid breaking things,
+    // until we have the full interpolation logic.
+    mov x3, x2
+    mov x2, #2
     mov x0, #1
     mov x4, #-1
     b Lprimary_suffix_loop
@@ -6072,11 +6112,43 @@ Lcast_to_int:
     cmp x20, #0
     b.eq Lcast_int_same
     cmp x20, #6
-    b.ne Lcast_type_mismatch
+    b.eq Lcast_dec_to_int
+    cmp x20, #2
+    b.eq Lcast_str_to_int_runtime
+    b Lcast_type_mismatch
+
+Lcast_dec_to_int:
     mov x0, x21
     bl _pow10_u64
     sdiv x19, x19, x0
+    b Lcast_int_same
+
+Lcast_str_to_int_runtime:
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+    bl _allocate_temp_var
+    mov x25, x0
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+
+    // op 78: cast_str_to_int(dest, src_var)
+    mov x0, #78
+    mov x1, x25
+    mov x2, x24
+    bl _record_operation
+    cbnz x0, Lcast_fail
+
+    mov x0, #1
+    mov x1, #0
+    mov x2, #0
+    mov x3, #0
+    mov x4, x25
+    b Lcast_return
+
 Lcast_int_same:
+
     mov x0, #1
     mov x1, x19
     mov x2, #0

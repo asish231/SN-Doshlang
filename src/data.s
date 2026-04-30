@@ -149,7 +149,29 @@
 .global asm_math_var_x10_ldr
 .global asm_math_store_x11_adrp
 .global asm_math_store_x11_str
+.global asm_input_store_x10_str
+.global asm_input_store_x0_str
+.global asm_load_list_pool_x11
+.global asm_load_map_pool_x11
+.global asm_add_x10_imm
+.global asm_load_pool_val_x10
+.global asm_load_pool_len_x10
+.global asm_mov_x12_x10
+.global asm_mov_x10_x12
+.global asm_mov_x0_x10
+.global asm_load_pool_val_x10_from_x12
+.global asm_load_list_pool_lens_x11
+.global asm_load_map_pool_lens_x11
+.global asm_call_cstr_to_int
+.global asm_newline
 .global asm_math_add_x11_x10
+.global asm_list_pool_values_label
+.global asm_list_pool_lengths_label
+.global asm_map_pool_keys_label
+.global asm_map_pool_key_lengths_label
+.global asm_map_pool_values_label
+.global asm_map_pool_lengths_label
+.global asm_quad_prefix
 .global asm_math_sub_x11_x10
 .global asm_math_mul_x11_x10
 .global asm_math_div_x11_x10
@@ -376,7 +398,7 @@ asm_runtime_helpers:
 #ifdef _WIN32
     .asciz "\n\n.text\n.align 4\n.global cstring_length\ncstring_length:\n    mov x1, x0\n    mov x0, #0\nL_snl_strlen_loop:\n    ldrb w9, [x1, x0]\n    cbz w9, L_snl_strlen_done\n    add x0, x0, #1\n    b L_snl_strlen_loop\nL_snl_strlen_done:\n    ret\n\n.align 4\n.global str_concat_len\nstr_concat_len:\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    stp x19, x20, [sp, #-16]!\n    stp x21, x22, [sp, #-16]!\n    stp x23, x24, [sp, #-16]!\n    stp x25, x26, [sp, #-16]!\n\n    mov x19, x0\n    mov x20, x1\n    mov x21, x2\n    mov x22, x3\n\n    add x0, x20, x22\n    add x0, x0, #1\n    bl malloc\n    cbz x0, L_snl_str_concat_len_fail\n    mov x23, x0\n\n    mov x24, #0\nL_snl_str_concat_len_copy1:\n    cmp x24, x20\n    b.ge L_snl_str_concat_len_copy2_start\n    ldrb w9, [x19, x24]\n    strb w9, [x23, x24]\n    add x24, x24, #1\n    b L_snl_str_concat_len_copy1\n\nL_snl_str_concat_len_copy2_start:\n    mov x9, #0\nL_snl_str_concat_len_copy2:\n    cmp x9, x22\n    b.ge L_snl_str_concat_len_done\n    ldrb w10, [x21, x9]\n    add x11, x24, x9\n    strb w10, [x23, x11]\n    add x9, x9, #1\n    b L_snl_str_concat_len_copy2\n\nL_snl_str_concat_len_done:\n    add x11, x24, x22\n    strb wzr, [x23, x11]\n    mov x0, x23\n    b L_snl_str_concat_len_return\n\nL_snl_str_concat_len_fail:\n    mov x0, #0\n\nL_snl_str_concat_len_return:\n    ldp x25, x26, [sp], #16\n    ldp x23, x24, [sp], #16\n    ldp x21, x22, [sp], #16\n    ldp x19, x20, [sp], #16\n    ldp x29, x30, [sp], #16\n    ret\n\n.align 4\n.global str_concat\nstr_concat:\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    stp x19, x20, [sp, #-16]!\n\n    mov x19, x0\n    mov x20, x1\n\n    mov x0, x19\n    bl cstring_length\n    mov x2, x0\n\n    mov x0, x20\n    bl cstring_length\n    mov x3, x0\n\n    mov x0, x19\n    mov x1, x2\n    mov x2, x20\n    bl str_concat_len\n\n    ldp x19, x20, [sp], #16\n    ldp x29, x30, [sp], #16\n    ret\n\n.align 4\n.global int_to_cstr\nint_to_cstr:\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    stp x19, x20, [sp, #-16]!\n    stp x21, x22, [sp, #-16]!\n    stp x23, x24, [sp, #-16]!\n\n    mov x19, x0\n    mov x0, #32\n    bl malloc\n    cbz x0, L_snl_int_to_cstr_fail\n    mov x20, x0\n    add x21, x20, #31\n    strb wzr, [x21]\n    sub x21, x21, #1\n\n    mov x22, #0\n    cmp x19, #0\n    b.ge L_snl_int_to_cstr_abs_ready\n    mov x22, #1\n    neg x19, x19\n\nL_snl_int_to_cstr_abs_ready:\n    cbnz x19, L_snl_int_to_cstr_digits\n    mov w9, #'0'\n    strb w9, [x21]\n    sub x21, x21, #1\n    b L_snl_int_to_cstr_sign\n\nL_snl_int_to_cstr_digits:\n    mov x23, #10\nL_snl_int_to_cstr_loop:\n    udiv x24, x19, x23\n    msub x9, x24, x23, x19\n    add w9, w9, #'0'\n    strb w9, [x21]\n    sub x21, x21, #1\n    mov x19, x24\n    cbnz x19, L_snl_int_to_cstr_loop\n\nL_snl_int_to_cstr_sign:\n    cbz x22, L_snl_int_to_cstr_done\n    mov w9, #'-'\n    strb w9, [x21]\n    sub x21, x21, #1\n\nL_snl_int_to_cstr_done:\n    add x0, x21, #1\n    b L_snl_int_to_cstr_return\n\nL_snl_int_to_cstr_fail:\n    mov x0, #0\nL_snl_int_to_cstr_return:\n    ldp x23, x24, [sp], #16\n    ldp x21, x22, [sp], #16\n    ldp x19, x20, [sp], #16\n    ldp x29, x30, [sp], #16\n    ret\n\n.align 4\n.global file_read\nfile_read:\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    stp x19, x20, [sp, #-16]!\n    stp x21, x22, [sp, #-16]!\n\n    mov x19, x0\n    mov x0, x19\n    mov x1, #0\n    bl open\n    cmp x0, #0\n    b.lt L_snl_file_read_fail\n    mov x20, x0\n\n    mov x0, x20\n    mov x1, #0\n    mov x2, #2\n    bl lseek\n    cmp x0, #0\n    b.lt L_snl_file_read_fail_close\n    mov x21, x0\n\n    mov x0, x20\n    mov x1, #0\n    mov x2, #0\n    bl lseek\n\n    add x0, x21, #1\n    bl malloc\n    cbz x0, L_snl_file_read_fail_close\n    mov x22, x0\n\n    mov x0, x20\n    mov x1, x22\n    mov x2, x21\n    bl read\n\n    add x9, x22, x21\n    strb wzr, [x9]\n\n    mov x0, x20\n    bl close\n\n    mov x0, x22\n    b L_snl_file_read_return\n\nL_snl_file_read_fail_close:\n    mov x0, x20\n    bl close\nL_snl_file_read_fail:\n    mov x0, #0\nL_snl_file_read_return:\n    ldp x21, x22, [sp], #16\n    ldp x19, x20, [sp], #16\n    ldp x29, x30, [sp], #16\n    ret\n\n.align 4\n.global file_write\nfile_write:\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    stp x19, x20, [sp, #-16]!\n    stp x21, x22, [sp, #-16]!\n\n    mov x19, x0\n    mov x20, x1\n    mov x21, x2\n\n    mov x0, x19\n    mov x1, #0x601\n    mov x2, #0644\n    bl open\n    cmp x0, #0\n    b.lt L_snl_file_write_fail\n    mov x22, x0\n\n    mov x0, x22\n    mov x1, x20\n    mov x2, x21\n    bl write\n\n    mov x0, x22\n    bl close\n\n    mov x0, #1\n    b L_snl_file_write_return\n\nL_snl_file_write_fail:\n    mov x0, #0\nL_snl_file_write_return:\n    ldp x21, x22, [sp], #16\n    ldp x19, x20, [sp], #16\n    ldp x29, x30, [sp], #16\n    ret\n"
 #else
-    .asciz "\n\n.text\n.align 4\n.global _cstring_length\n_cstring_length:\n    mov x1, x0\n    mov x0, #0\nL_snl_strlen_loop:\n    ldrb w9, [x1, x0]\n    cbz w9, L_snl_strlen_done\n    add x0, x0, #1\n    b L_snl_strlen_loop\nL_snl_strlen_done:\n    ret\n\n.align 4\n.global _str_concat_len\n_str_concat_len:\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    stp x19, x20, [sp, #-16]!\n    stp x21, x22, [sp, #-16]!\n    stp x23, x24, [sp, #-16]!\n    stp x25, x26, [sp, #-16]!\n\n    mov x19, x0\n    mov x20, x1\n    mov x21, x2\n    mov x22, x3\n\n    add x0, x20, x22\n    add x0, x0, #1\n    bl _malloc\n    cbz x0, L_snl_str_concat_len_fail\n    mov x23, x0\n\n    mov x24, #0\nL_snl_str_concat_len_copy1:\n    cmp x24, x20\n    b.ge L_snl_str_concat_len_copy2_start\n    ldrb w9, [x19, x24]\n    strb w9, [x23, x24]\n    add x24, x24, #1\n    b L_snl_str_concat_len_copy1\n\nL_snl_str_concat_len_copy2_start:\n    mov x9, #0\nL_snl_str_concat_len_copy2:\n    cmp x9, x22\n    b.ge L_snl_str_concat_len_done\n    ldrb w10, [x21, x9]\n    add x11, x24, x9\n    strb w10, [x23, x11]\n    add x9, x9, #1\n    b L_snl_str_concat_len_copy2\n\nL_snl_str_concat_len_done:\n    add x11, x24, x22\n    strb wzr, [x23, x11]\n    mov x0, x23\n    b L_snl_str_concat_len_return\n\nL_snl_str_concat_len_fail:\n    mov x0, #0\n\nL_snl_str_concat_len_return:\n    ldp x25, x26, [sp], #16\n    ldp x23, x24, [sp], #16\n    ldp x21, x22, [sp], #16\n    ldp x19, x20, [sp], #16\n    ldp x29, x30, [sp], #16\n    ret\n\n.align 4\n.global _str_concat\n_str_concat:\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    stp x19, x20, [sp, #-16]!\n\n    mov x19, x0\n    mov x20, x1\n\n    mov x0, x19\n    bl _cstring_length\n    mov x2, x0\n\n    mov x0, x20\n    bl _cstring_length\n    mov x3, x0\n\n    mov x0, x19\n    mov x1, x2\n    mov x2, x20\n    bl _str_concat_len\n\n    ldp x19, x20, [sp], #16\n    ldp x29, x30, [sp], #16\n    ret\n\n.align 4\n.global _int_to_cstr\n_int_to_cstr:\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    stp x19, x20, [sp, #-16]!\n    stp x21, x22, [sp, #-16]!\n    stp x23, x24, [sp, #-16]!\n\n    mov x19, x0\n    mov x0, #32\n    bl _malloc\n    cbz x0, L_snl_int_to_cstr_fail\n    mov x20, x0\n    add x21, x20, #31\n    strb wzr, [x21]\n    sub x21, x21, #1\n\n    mov x22, #0\n    cmp x19, #0\n    b.ge L_snl_int_to_cstr_abs_ready\n    mov x22, #1\n    neg x19, x19\n\nL_snl_int_to_cstr_abs_ready:\n    cbnz x19, L_snl_int_to_cstr_digits\n    mov w9, #'0'\n    strb w9, [x21]\n    sub x21, x21, #1\n    b L_snl_int_to_cstr_sign\n\nL_snl_int_to_cstr_digits:\n    mov x23, #10\nL_snl_int_to_cstr_loop:\n    udiv x24, x19, x23\n    msub x9, x24, x23, x19\n    add w9, w9, #'0'\n    strb w9, [x21]\n    sub x21, x21, #1\n    mov x19, x24\n    cbnz x19, L_snl_int_to_cstr_loop\n\nL_snl_int_to_cstr_sign:\n    cbz x22, L_snl_int_to_cstr_done\n    mov w9, #'-'\n    strb w9, [x21]\n    sub x21, x21, #1\n\nL_snl_int_to_cstr_done:\n    add x0, x21, #1\n    b L_snl_int_to_cstr_return\n\nL_snl_int_to_cstr_fail:\n    mov x0, #0\nL_snl_int_to_cstr_return:\n    ldp x23, x24, [sp], #16\n    ldp x21, x22, [sp], #16\n    ldp x19, x20, [sp], #16\n    ldp x29, x30, [sp], #16\n    ret\n\n.align 4\n.global _file_read\n_file_read:\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    stp x19, x20, [sp, #-16]!\n    stp x21, x22, [sp, #-16]!\n\n    mov x19, x0\n    mov x0, x19\n    mov x1, #0\n    bl _open\n    cmp x0, #0\n    b.lt L_snl_file_read_fail\n    mov x20, x0\n\n    mov x0, x20\n    mov x1, #0\n    mov x2, #2\n    bl _lseek\n    cmp x0, #0\n    b.lt L_snl_file_read_fail_close\n    mov x21, x0\n\n    mov x0, x20\n    mov x1, #0\n    mov x2, #0\n    bl _lseek\n\n    add x0, x21, #1\n    bl _malloc\n    cbz x0, L_snl_file_read_fail_close\n    mov x22, x0\n\n    mov x0, x20\n    mov x1, x22\n    mov x2, x21\n    bl _read\n\n    add x9, x22, x21\n    strb wzr, [x9]\n\n    mov x0, x20\n    bl _close\n\n    mov x0, x22\n    b L_snl_file_read_return\n\nL_snl_file_read_fail_close:\n    mov x0, x20\n    bl _close\nL_snl_file_read_fail:\n    mov x0, #0\nL_snl_file_read_return:\n    ldp x21, x22, [sp], #16\n    ldp x19, x20, [sp], #16\n    ldp x29, x30, [sp], #16\n    ret\n\n.align 4\n.global _file_write\n_file_write:\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    stp x19, x20, [sp, #-16]!\n    stp x21, x22, [sp, #-16]!\n\n    mov x19, x0\n    mov x20, x1\n    mov x21, x2\n\n    mov x0, x19\n    mov x1, #0x601\n    mov x2, #0644\n    bl _open\n    cmp x0, #0\n    b.lt L_snl_file_write_fail\n    mov x22, x0\n\n    mov x0, x22\n    mov x1, x20\n    mov x2, x21\n    bl _write\n\n    mov x0, x22\n    bl _close\n\n    mov x0, #1\n    b L_snl_file_write_return\n\nL_snl_file_write_fail:\n    mov x0, #0\nL_snl_file_write_return:\n    ldp x21, x22, [sp], #16\n    ldp x19, x20, [sp], #16\n    ldp x29, x30, [sp], #16\n    ret\n"
+    .asciz "\n\n.text\n.align 4\n.global _cstring_length\n_cstring_length:\n    mov x1, x0\n    mov x0, #0\nL_snl_strlen_loop:\n    ldrb w9, [x1, x0]\n    cbz w9, L_snl_strlen_done\n    add x0, x0, #1\n    b L_snl_strlen_loop\nL_snl_strlen_done:\n    ret\n\n.align 4\n.global _str_concat_len\n_str_concat_len:\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    stp x19, x20, [sp, #-16]!\n    stp x21, x22, [sp, #-16]!\n    stp x23, x24, [sp, #-16]!\n    stp x25, x26, [sp, #-16]!\n\n    mov x19, x0\n    mov x20, x1\n    mov x21, x2\n    mov x22, x3\n\n    add x0, x20, x22\n    add x0, x0, #1\n    bl _malloc\n    cbz x0, L_snl_str_concat_len_fail\n    mov x23, x0\n\n    mov x24, #0\nL_snl_str_concat_len_copy1:\n    cmp x24, x20\n    b.ge L_snl_str_concat_len_copy2_start\n    ldrb w9, [x19, x24]\n    strb w9, [x23, x24]\n    add x24, x24, #1\n    b L_snl_str_concat_len_copy1\n\nL_snl_str_concat_len_copy2_start:\n    mov x9, #0\nL_snl_str_concat_len_copy2:\n    cmp x9, x22\n    b.ge L_snl_str_concat_len_done\n    ldrb w10, [x21, x9]\n    add x11, x24, x9\n    strb w10, [x23, x11]\n    add x9, x9, #1\n    b L_snl_str_concat_len_copy2\n\nL_snl_str_concat_len_done:\n    add x11, x24, x22\n    strb wzr, [x23, x11]\n    mov x0, x23\n    b L_snl_str_concat_len_return\n\nL_snl_str_concat_len_fail:\n    mov x0, #0\n\nL_snl_str_concat_len_return:\n    ldp x25, x26, [sp], #16\n    ldp x23, x24, [sp], #16\n    ldp x21, x22, [sp], #16\n    ldp x19, x20, [sp], #16\n    ldp x29, x30, [sp], #16\n    ret\n\n.align 4\n.global _str_concat\n_str_concat:\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    stp x19, x20, [sp, #-16]!\n\n    mov x19, x0\n    mov x20, x1\n\n    mov x0, x19\n    bl _cstring_length\n    mov x2, x0\n\n    mov x0, x20\n    bl _cstring_length\n    mov x3, x0\n\n    mov x0, x19\n    mov x1, x2\n    mov x2, x20\n    bl _str_concat_len\n\n    ldp x19, x20, [sp], #16\n    ldp x29, x30, [sp], #16\n    ret\n\n.align 4\n.global _int_to_cstr\n_int_to_cstr:\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    stp x19, x20, [sp, #-16]!\n    stp x21, x22, [sp, #-16]!\n    stp x23, x24, [sp, #-16]!\n\n    mov x19, x0\n    mov x0, #32\n    bl _malloc\n    cbz x0, L_snl_int_to_cstr_fail\n    mov x20, x0\n    add x21, x20, #31\n    strb wzr, [x21]\n    sub x21, x21, #1\n\n    mov x22, #0\n    cmp x19, #0\n    b.ge L_snl_int_to_cstr_abs_ready\n    mov x22, #1\n    neg x19, x19\n\nL_snl_int_to_cstr_abs_ready:\n    cbnz x19, L_snl_int_to_cstr_digits\n    mov w9, #'0'\n    strb w9, [x21]\n    sub x21, x21, #1\n    b L_snl_int_to_cstr_sign\n\nL_snl_int_to_cstr_digits:\n    mov x23, #10\nL_snl_int_to_cstr_loop:\n    udiv x24, x19, x23\n    msub x9, x24, x23, x19\n    add w9, w9, #'0'\n    strb w9, [x21]\n    sub x21, x21, #1\n    mov x19, x24\n    cbnz x19, L_snl_int_to_cstr_loop\n\nL_snl_int_to_cstr_sign:\n    cbz x22, L_snl_int_to_cstr_done\n    mov w9, #'-'\n    strb w9, [x21]\n    sub x21, x21, #1\n\nL_snl_int_to_cstr_done:\n    add x0, x21, #1\n    b L_snl_int_to_cstr_return\n\nL_snl_int_to_cstr_fail:\n    mov x0, #0\nL_snl_int_to_cstr_return:\n    ldp x23, x24, [sp], #16\n    ldp x21, x22, [sp], #16\n    ldp x19, x20, [sp], #16\n    ldp x29, x30, [sp], #16\n    ret\n\n.align 4\n.global _file_read\n_file_read:\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    stp x19, x20, [sp, #-16]!\n    stp x21, x22, [sp, #-16]!\n\n    mov x19, x0\n    mov x0, x19\n    mov x1, #0\n    bl _open\n    cmp x0, #0\n    b.lt L_snl_file_read_fail\n    mov x20, x0\n\n    mov x0, x20\n    mov x1, #0\n    mov x2, #2\n    bl _lseek\n    cmp x0, #0\n    b.lt L_snl_file_read_fail_close\n    mov x21, x0\n\n    mov x0, x20\n    mov x1, #0\n    mov x2, #0\n    bl _lseek\n\n    add x0, x21, #1\n    bl _malloc\n    cbz x0, L_snl_file_read_fail_close\n    mov x22, x0\n\n    mov x0, x20\n    mov x1, x22\n    mov x2, x21\n    bl _read\n\n    add x9, x22, x21\n    strb wzr, [x9]\n\n    mov x0, x20\n    bl _close\n\n    mov x0, x22\n    b L_snl_file_read_return\n\nL_snl_file_read_fail_close:\n    mov x0, x20\n    bl _close\nL_snl_file_read_fail:\n    mov x0, #0\nL_snl_file_read_return:\n    ldp x21, x22, [sp], #16\n    ldp x19, x20, [sp], #16\n    ldp x29, x30, [sp], #16\n    ret\n\n.align 4\n.global _file_write\n_file_write:\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    stp x19, x20, [sp, #-16]!\n    stp x21, x22, [sp, #-16]!\n\n    mov x19, x0\n    mov x20, x1\n    mov x21, x2\n\n    mov x0, x19\n    mov x1, #0x601\n    mov x2, #0644\n    bl _open\n    cmp x0, #0\n    b.lt L_snl_file_write_fail\n    mov x22, x0\n\n    mov x0, x22\n    mov x1, x20\n    mov x2, x21\n    bl _write\n\n    mov x0, x22\n    bl _close\n\n    mov x0, #1\n    b L_snl_file_write_return\n\nL_snl_file_write_fail:\n    mov x0, #0\nL_snl_file_write_return:\n    ldp x21, x22, [sp], #16\n    ldp x19, x20, [sp], #16\n    ldp x29, x30, [sp], #16\n    ret\n\n.align 4\n.global _cstr_to_int\n_cstr_to_int:\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    mov x1, x0\n    mov x0, #0\n    mov x2, #0\n    ldrb w3, [x1]\n    cmp w3, #'-'\n    b.ne L_snl_cstr_to_int_loop\n    mov x2, #1\n    add x1, x1, #1\nL_snl_cstr_to_int_loop:\n    ldrb w3, [x1], #1\n    cbz w3, L_snl_cstr_to_int_done\n    sub w3, w3, #'0'\n    cmp w3, #9\n    b.hi L_snl_cstr_to_int_done\n    mov x4, #10\n    mul x0, x0, x4\n    add x0, x0, x3\n    b L_snl_cstr_to_int_loop\nL_snl_cstr_to_int_done:\n    cbz x2, L_snl_cstr_to_int_ret\n    neg x0, x0\nL_snl_cstr_to_int_ret:\n    ldp x29, x30, [sp], #16\n    ret\n\n.align 4\n.global _runtime_match_span_span\n_runtime_match_span_span:\n    cbz x1, L_rmss_match\nL_rmss_loop:\n    ldrb w9, [x0], #1\n    ldrb w10, [x2], #1\n    cmp w9, w10\n    b.ne L_rmss_fail\n    sub x1, x1, #1\n    cbnz x1, L_rmss_loop\nL_rmss_match:\n    mov x0, #1\n    ret\nL_rmss_fail:\n    mov x0, #0\n    ret\n\n.align 4\n.global _map_lookup\n_map_lookup:\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    stp x19, x20, [sp, #-16]!\n    stp x21, x22, [sp, #-16]!\n    stp x23, x24, [sp, #-16]!\n    stp x25, x26, [sp, #-16]!\n    mov x19, x0\n    mov x20, x1\n    mov x21, x2\n    mov x22, x3\n    mov x23, x4\n    mov x24, #0\nL_map_lookup_loop:\n    cmp x24, x20\n    b.ge L_map_lookup_fail\n    add x25, x19, x24\n    adrp x26, map_pool_keys@PAGE\n    add x26, x26, map_pool_keys@PAGEOFF\n    ldr x9, [x26, x25, lsl #3]\n    cmp x22, #2\n    b.eq L_map_lookup_str\n    cmp x9, x21\n    b.eq L_map_lookup_found\n    b L_map_lookup_next\nL_map_lookup_str:\n    adrp x26, map_pool_key_lengths@PAGE\n    add x26, x26, map_pool_key_lengths@PAGEOFF\n    ldr x10, [x26, x25, lsl #3]\n    cmp x10, x23\n    b.ne L_map_lookup_next\n    mov x0, x9\n    mov x1, x10\n    mov x2, x21\n    bl _runtime_match_span_span\n    cbnz x0, L_map_lookup_found\nL_map_lookup_next:\n    add x24, x24, #1\n    b L_map_lookup_loop\nL_map_lookup_found:\n    adrp x26, map_pool_values@PAGE\n    add x26, x26, map_pool_values@PAGEOFF\n    ldr x19, [x26, x25, lsl #3]\n    adrp x26, map_pool_lengths@PAGE\n    add x26, x26, map_pool_lengths@PAGEOFF\n    ldr x20, [x26, x25, lsl #3]\n    mov x0, x19\n    mov x1, x20\n    mov x2, #1\n    b L_map_lookup_ret\nL_map_lookup_fail:\n    mov x0, #0\n    mov x1, #0\n    mov x2, #0\nL_map_lookup_ret:\n    ldp x25, x26, [sp], #16\n    ldp x23, x24, [sp], #16\n    ldp x21, x22, [sp], #16\n    ldp x19, x20, [sp], #16\n    ldp x29, x30, [sp], #16\n    ret\n"
 #endif
 asm_print_fmt_int_adrp:
 #ifdef _WIN32
@@ -636,6 +658,20 @@ asm_data_value_prefix:
     .asciz "print_val_"
 asm_data_value_mid:
     .asciz ":\n    .quad "
+asm_list_pool_values_label:
+    .asciz "list_pool_values:\n"
+asm_list_pool_lengths_label:
+    .asciz "list_pool_lengths:\n"
+asm_map_pool_keys_label:
+    .asciz "map_pool_keys:\n"
+asm_map_pool_key_lengths_label:
+    .asciz "map_pool_key_lengths:\n"
+asm_map_pool_values_label:
+    .asciz "map_pool_values:\n"
+asm_map_pool_lengths_label:
+    .asciz "map_pool_lengths:\n"
+asm_quad_prefix:
+    .asciz "    .quad "
 asm_data_value_mid_str:
     .asciz ":\n    .asciz \""
 asm_data_value_suffix:
@@ -702,6 +738,12 @@ asm_call_int_to_cstr:
 #else
     .asciz "    bl _int_to_cstr\n"
 #endif
+asm_call_cstr_to_int:
+#ifdef _WIN32
+    .asciz "    bl cstr_to_int\n"
+#else
+    .asciz "    bl _cstr_to_int\n"
+#endif
 asm_call_file_read:
 #ifdef _WIN32
     .asciz "    bl file_read\n"
@@ -758,6 +800,12 @@ asm_input_null_body:
     .asciz "    add x11, x10, x9\n    strb wzr, [x11]\n"
 asm_input_store_x10_str:
     .asciz "    stur x10, [x29, #-"
+asm_input_store_x0_str:
+    .asciz "    stur x0, [x29, #-"
+asm_mov_x0_x10:
+    .asciz "    mov x0, x10\n"
+asm_newline:
+    .asciz "\n"
 asm_load_list_pool_x11:
     .asciz "    adrp x11, list_pool_values@PAGE\n    add x11, x11, list_pool_values@PAGEOFF\n"
 asm_load_map_pool_x11:
@@ -766,8 +814,14 @@ asm_add_x10_imm:
     .asciz "    add x10, x10, #"
 asm_load_pool_val_x10:
     .asciz "    ldr x10, [x11, x10, lsl #3]\n"
-asm_load_pool_len_x12:
-    .asciz "    ldr x12, [x11, x10, lsl #3]\n"
+asm_load_pool_len_x10:
+    .asciz "    ldr x10, [x11, x10, lsl #3]\n"
+asm_mov_x12_x10:
+    .asciz "    mov x12, x10\n"
+asm_mov_x10_x12:
+    .asciz "    mov x10, x12\n"
+asm_load_pool_val_x10_from_x12:
+    .asciz "    ldr x10, [x11, x12, lsl #3]\n"
 asm_load_list_pool_lens_x11:
     .asciz "    adrp x11, list_pool_lengths@PAGE\n    add x11, x11, list_pool_lengths@PAGEOFF\n"
 asm_load_map_pool_lens_x11:
