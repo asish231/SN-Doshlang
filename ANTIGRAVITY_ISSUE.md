@@ -1,122 +1,234 @@
 # Antigravity Issue — Module Loading Crash
 
 ## Status
-OPEN
+RESOLVED
+
+## Short Answer
+
+Yes, the issue and its remaining follow-up work are fixed.
+
+What is fixed:
+- The compiler no longer segfaults when a `use` statement is present.
+- Missing modules no longer crash the compiler.
+- Duplicate `use` statements no longer crash the compiler.
+- Module file parsing no longer corrupts the main source buffer.
+- Imported functions are now callable from the importing file.
+- Imported functions keep the correct source buffer when executed.
+
+---
 
 ## Summary
 
-The compiler crashes (segfault) when any `use` statement is present and the full
-`_load_module` implementation is active. The crash is isolated to inside
-`_load_module` — stubbing it to `mov x0, #0 / ret` makes everything work.
+The original crash described in this issue is fixed. The root problem was not a
+single fault inside `_load_module`, but a combination of module parser and
+helper bugs:
+
+- `_parse_use_statement_after_keyword` passed the wrong registers as the module
+  span to `_load_module`
+- `_module_path_to_file` kept heap pointers in caller-saved registers across
+  helper calls
+- `_find_module` also used an unsafe caller-saved loop register
+- `_parse_module_content` treated `_parse_fn_definition` success/error backwards
+- `_load_and_parse_module_file` reused the shared global source buffer, which
+  corrupted the original file after parsing an imported module
+
+Those crashes and corruption issues are fixed now, and imported functions are
+resolved and callable end-to-end.
 
 ---
 
-## What Works
+## Current Behavior
 
-- `use module.path` syntax parsing ✅
-- Multiple `use` statements ✅
-- Module name tracking ✅
-- `_init_default_search_paths` ✅
-- `_find_module` ✅
-- Everything when `_load_module` is a no-op stub ✅
+## Works
 
-## What Crashes
+- `use module.path` syntax parses correctly
+- `use` with missing modules does not segfault
+- repeated `use` of the same module does not segfault
+- module files can be loaded and parsed without overwriting the main source
+- the original antigravity repro now exits cleanly
 
-- `_load_module` with real implementation → segfault
-- Crash happens inside `_load_module` before reaching `_module_path_to_file`
-  or `_file_exists` (confirmed by binary stubbing)
+## Also Works Now
 
----
-
-## Root Cause (Suspected)
-
-`_load_module` calls `_module_path_to_file` which calls `_malloc` and
-`_cstring_length` on search path pointers stored in `module_search_paths`.
-
-The search paths are initialized by `_init_default_search_paths` which stores
-pointers to static `.data` strings (`"."` and `"stdlib"`) into the BSS
-`module_search_paths` array.
-
-The suspected issue is a **register clobber** inside `_module_path_to_file`
-during the search path loop — `x21` is used both as the `module_search_count`
-value and later overwritten with the `_cstring_length` result, causing a bad
-pointer dereference on the next iteration.
-
-A rewrite of `_module_path_to_file` was attempted with clean register
-allocation (`x19-x24` for all persistent values) but the crash persists,
-suggesting the issue may be earlier — possibly in how `_find_module` interacts
-with the `_match_span_span` call when the module name pointer points into the
-source buffer (which may not be null-terminated at the exact right offset).
+- functions discovered during module parsing are retained in function metadata
+- imported functions resolve through function lookup
+- imported function calls execute against the correct module source buffer
+- end-to-end imported calls run successfully
 
 ---
 
-## Reproduction
+## Root Cause Fixed
+
+The crash was caused by multiple low-level bugs rather than the original single
+suspected clobber alone.
+
+### Fixed causes
+
+1. `use` parsing bug
+
+`_parse_use_statement_after_keyword` was reading `_parse_identifier` results as
+if they were in `x1/x2`, but `_parse_identifier` returns pointer/length in
+`x0/x1`.
+
+2. Caller-saved register misuse in module helpers
+
+`_module_path_to_file` and `_find_module` both relied on caller-saved registers
+across `bl` calls, which made module lookup unstable and could lead to invalid
+pointer use.
+
+3. Main source corruption during module load
+
+Imported module contents were loaded into the shared global `buffer`, then
+parsed, and only parser state was restored. That restored the old pointer/len
+metadata, but the original source bytes had already been overwritten.
+
+4. Reversed success check in module parsing
+
+`_parse_module_content` treated a successful `_parse_fn_definition` as failure.
+
+---
+
+## Files Changed
+
+| File | Change |
+|------|--------|
+| `src/parser.s` | fixed `use` module span handling and function call source switching |
+| `src/utils.s` | fixed module helper register safety, module parse flow, module file buffer ownership, and imported function registration |
+| `src/data.s` | added per-function source metadata storage |
+| `tests/compile_test.sh` | added import regression coverage |
+| `tests/runtime_test.sh` | added end-to-end imported function call coverage |
+
+---
+
+## Agent Verification
+
+Agents can verify the current state directly with the commands below.
+
+### 1. Verify the original crash is fixed
 
 ```sh
-cat > /tmp/test.sn << 'EOF'
+cat >/tmp/antigravity_repro.sn <<'EOF'
 use math
 
 fn main() {
     print("hello")
 }
 EOF
-./snc /tmp/test.sn
-# → Segmentation fault: 11
+
+./snc /tmp/antigravity_repro.sn >/tmp/antigravity_repro.out 2>/tmp/antigravity_repro.err
+echo "exit=$?"
+cat /tmp/antigravity_repro.err
 ```
 
-Without `use`:
+Expected now:
+- exit code `0`
+- no segfault
+- stderr empty
+
+### 2. Verify a real module import no longer corrupts the main file
+
 ```sh
-cat > /tmp/test.sn << 'EOF'
+cat >__agent_verify_math.sn <<'EOF'
+fn helper() -> int {
+    return 42
+}
+EOF
+
+cat >/tmp/agent_verify_import.sn <<'EOF'
+use __agent_verify_math
+
 fn main() {
     print("hello")
 }
 EOF
-./snc /tmp/test.sn
-# → works fine
+
+./snc /tmp/agent_verify_import.sn >/tmp/agent_verify_import.out 2>/tmp/agent_verify_import.err
+echo "exit=$?"
+cat /tmp/agent_verify_import.err
+rm -f __agent_verify_math.sn
 ```
 
+Expected now:
+- exit code `0`
+- no parse corruption errors after the import
+
+### 3. Verify duplicate `use` is stable
+
+```sh
+cat >__agent_verify_math.sn <<'EOF'
+fn helper() -> int {
+    return 42
+}
+EOF
+
+cat >/tmp/agent_verify_duplicate.sn <<'EOF'
+use __agent_verify_math
+use __agent_verify_math
+
+fn main() {
+    print("hello")
+}
+EOF
+
+./snc /tmp/agent_verify_duplicate.sn >/tmp/agent_verify_duplicate.out 2>/tmp/agent_verify_duplicate.err
+echo "exit=$?"
+cat /tmp/agent_verify_duplicate.err
+rm -f __agent_verify_math.sn
+```
+
+Expected now:
+- exit code `0`
+- no segfault
+- no module-load failure
+
+### 4. Verify imported function calls end-to-end
+
+```sh
+cat >__agent_verify_math.sn <<'EOF'
+fn helper() -> int {
+    return 42
+}
+EOF
+
+cat >/tmp/agent_verify_call.sn <<'EOF'
+use __agent_verify_math
+
+fn main() {
+    print(helper())
+}
+EOF
+
+./snc /tmp/agent_verify_call.sn >/tmp/agent_verify_call.s 2>/tmp/agent_verify_call.err
+echo "compile_exit=$?"
+cat /tmp/agent_verify_call.err
+cc /tmp/agent_verify_call.s -o /tmp/agent_verify_call_bin
+/tmp/agent_verify_call_bin
+rm -f __agent_verify_math.sn
+```
+
+Expected now:
+- compile exit code `0`
+- stderr empty
+- program output `42`
+
 ---
 
-## Files Involved
+## Regression Check
 
-| File | Relevance |
-|------|-----------|
-| `src/utils.s` | `_load_module`, `_find_module`, `_module_path_to_file`, `_file_exists` |
-| `src/parser.s` | `_parse_use_statement_after_keyword` — calls `_load_module` |
-| `src/main.s` | calls `_init_default_search_paths` before `_parse_program` |
-| `src/data.s` | `module_names`, `module_paths`, `module_search_paths`, `module_count` |
+Quick automated check:
 
----
+```sh
+bash tests/compile_test.sh
+bash tests/runtime_test.sh
+```
 
-## Current Workaround
-
-`_load_module` is stubbed to `mov x0, #0 / ret` so that:
-- `use` statements parse and compile without crashing
-- Module names are NOT tracked
-- No file loading or symbol resolution happens
-
-This means multiple `use` statements work syntactically but imported functions
-are not callable.
+Expected now:
+- all compile regression tests pass
+- runtime regression tests pass, including imported function call
 
 ---
 
-## Next Steps to Fix
+## Conclusion
 
-1. Add `write` debug output at the start of `_load_module` to confirm it is
-   being entered (rules out crash in `_init_default_search_paths`)
-2. Add debug output after `_find_module` call to confirm it returns cleanly
-3. Add debug output after `_module_path_to_file` call
-4. Narrow crash to exact instruction using `lldb`
-
-The most likely fix once narrowed:
-- Ensure `_find_module` is called with `x0=x19, x1=x20` explicitly set
-  (not relying on registers being preserved from before the save)
-- Ensure `_module_path_to_file` uses only `x19-x24` for persistent state
-  and never clobbers them with `bl` return values without saving first
-
----
-
-## Related Issues
-
-- `ISSUES.md` — Module system section
-- `RESOLVED_ISSUES.md` — Issues #26 and #27 (module foundation and multiple use fix)
+The original antigravity crash is fixed, and the remaining import-resolution
+follow-up work is fixed too. Imported functions now compile and execute
+successfully.

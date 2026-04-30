@@ -68,6 +68,16 @@ Lpreparse_loop:
     mov x22, x1
     mov x0, x21
     mov x1, x22
+    LOAD_ADDR x2, kw_blueprint
+    bl _match_cstr_span
+    cbnz x0, Lpreparse_skip_decl_block
+    mov x0, x21
+    mov x1, x22
+    LOAD_ADDR x2, kw_contract
+    bl _match_cstr_span
+    cbnz x0, Lpreparse_skip_decl_block
+    mov x0, x21
+    mov x1, x22
     LOAD_ADDR x2, kw_fn
     bl _match_cstr_span
     cbz x0, Lpreparse_loop
@@ -81,6 +91,11 @@ Lpreparse_non_ident:
     b.ne Lpreparse_advance
     bl _parse_string_literal
     cbz x0, Lpreparse_fail
+    b Lpreparse_loop
+
+Lpreparse_skip_decl_block:
+    bl _skip_decl_block
+    cbnz x0, Lpreparse_fail
     b Lpreparse_loop
 
 Lpreparse_advance:
@@ -246,6 +261,24 @@ _parse_statement:
 
     mov x0, x19
     mov x1, x20
+    LOAD_ADDR x2, kw_blueprint
+    bl _match_cstr_span
+    cbnz x0, Lstmt_blueprint
+
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_contract
+    bl _match_cstr_span
+    cbnz x0, Lstmt_contract
+
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_new
+    bl _match_cstr_span
+    cbnz x0, Lstmt_new
+
+    mov x0, x19
+    mov x1, x20
     LOAD_ADDR x2, kw_return
     bl _match_cstr_span
     cbnz x0, Lstmt_return_val
@@ -262,8 +295,29 @@ _parse_statement:
     bl _match_cstr_span
     cbnz x0, Lstmt_free
 
+    mov x0, x19
+    mov x1, x20
+    bl _lookup_blueprint_id
+    cbnz x0, Lstmt_stack_object
+
 
     b Lstmt_assign
+
+Lstmt_blueprint:
+    bl _parse_blueprint
+    b Lstmt_return
+
+Lstmt_contract:
+    bl _parse_contract
+    b Lstmt_return
+
+Lstmt_new:
+    bl _parse_new_object
+    b Lstmt_return
+
+Lstmt_stack_object:
+    bl _parse_stack_object
+    b Lstmt_return
 
     LOAD_ADDR x0, msg_unknown_stmt
     bl _report_error_prefix
@@ -1545,6 +1599,8 @@ Lstmt_return_void:
 Lstmt_assign:
     bl _skip_whitespace
     bl _peek_char
+    cmp w0, #'.'
+    b.eq Lstmt_member_dispatch
     // Tuple assignment: a, b = expr
     cmp w0, #','
     b.eq Lstmt_tuple_assign
@@ -1565,6 +1621,113 @@ Lstmt_assign:
     cmp w0, #'('
     b.eq Lstmt_fn_call
     b Lstmt_unknown
+
+Lstmt_member_dispatch:
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_self
+    bl _match_cstr_span
+    cbnz x0, Lstmt_self_member
+    mov x0, x19
+    mov x1, x20
+    bl _lookup_variable
+    cbz x0, Lstmt_method_call
+    cmp x2, #10
+    b.eq Lstmt_object_member
+    cmp x2, #11
+    b.eq Lstmt_object_member
+    b Lstmt_method_call
+
+Lstmt_self_member:
+    LOAD_ADDR x9, current_self_instance
+    ldr x23, [x9]
+    LOAD_ADDR x9, current_self_type
+    ldr x24, [x9]
+    LOAD_ADDR x9, current_self_meta
+    ldr x25, [x9]
+    cbz x24, Lstmt_fail
+    b Lstmt_object_member_ready
+
+Lstmt_object_member:
+    mov x23, x1
+    mov x24, x2
+    mov x25, x3
+Lstmt_object_member_ready:
+    bl _advance_char
+    bl _parse_identifier
+    cbz x0, Lstmt_fail
+    mov x21, x0
+    mov x22, x1
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, #'('
+    b.eq Lstmt_object_method_call
+    mov w0, #'='
+    bl _expect_char
+    cbz x0, Lstmt_fail
+    bl _parse_expr_value
+    cbz x0, Lstmt_fail
+    stp x1, x2, [sp, #-16]!
+    stp x3, x4, [sp, #-16]!
+    mov x0, x25
+    mov x1, x21
+    mov x2, x22
+    bl _lookup_blueprint_field
+    cbz x0, Lstmt_object_field_lookup_fail
+    ldp x11, x12, [sp], #16
+    ldp x9, x10, [sp], #16
+    mov x13, x1
+    mov x14, x2
+    cmp x10, x14
+    b.eq Lstmt_object_field_store
+    cmp x14, #27
+    b.ne Lstmt_fail
+    cmp x10, #7
+    b.ne Lstmt_fail
+Lstmt_object_field_store:
+    mov x16, x23
+    lsl x16, x16, #3
+    add x16, x16, x13
+    LOAD_ADDR x17, object_field_var_idxs
+    ldr x16, [x17, x16, lsl #3]
+    LOAD_ADDR x17, var_values
+    str x9, [x17, x16, lsl #3]
+    LOAD_ADDR x17, var_types
+    str x10, [x17, x16, lsl #3]
+    LOAD_ADDR x17, var_lengths
+    str x11, [x17, x16, lsl #3]
+    cmn x12, #1
+    b.eq Lstmt_object_field_record_imm
+    mov x0, #45
+    mov x1, x16
+    mov x2, x12
+    bl _record_operation
+    b Lstmt_object_field_done
+Lstmt_object_field_record_imm:
+    mov x0, x16
+    mov x1, x9
+    bl _record_store_variable
+Lstmt_object_field_done:
+    cbnz x0, Lstmt_fail
+    bl _consume_optional_semicolon
+    mov x0, #0
+    b Lstmt_return
+
+Lstmt_object_field_lookup_fail:
+    add sp, sp, #32
+    b Lstmt_fail
+
+Lstmt_object_method_call:
+    mov x0, x23
+    mov x1, x24
+    mov x2, x25
+    mov x3, x21
+    mov x4, x22
+    bl _call_object_method
+    cbnz x0, Lstmt_fail
+    bl _consume_optional_semicolon
+    mov x0, #0
+    b Lstmt_return
 
 Lstmt_index_assign:
     // Parse target index/key: name[expr] = expr
@@ -2400,6 +2563,15 @@ Lstmt_assign_store:
     b.eq Lstmt_assign_check_byte_target
     cmp x22, x23
     b.ne Lstmt_type_mismatch
+    cmp x23, #10
+    b.eq Lstmt_assign_check_object_meta
+    cmp x23, #11
+    b.eq Lstmt_assign_check_object_meta
+    b Lstmt_assign_do_store
+
+Lstmt_assign_check_object_meta:
+    cmp x24, x26
+    b.ne Lstmt_type_mismatch
     b Lstmt_assign_do_store
 
 Lstmt_assign_check_list_target:
@@ -3059,6 +3231,8 @@ _parse_while_statement_after_keyword:
     ldr x10, [x9]
     add x10, x10, #1
     str x10, [x9]
+    LOAD_ADDR x9, current_blueprint_parse
+    str x23, [x9]
     mov x24, #1
 
 Lwhile_body_loop:
@@ -3932,10 +4106,10 @@ _parse_use_statement_after_keyword:
     bl _parse_identifier
     cbz x0, Luse_fail
     
-    mov x19, x1  // module name start
-    mov x20, x2  // initial module name len
-    mov x21, x1  // track current end position
-    add x21, x21, x2
+    mov x19, x0  // module name start
+    mov x20, x1  // initial module name len
+    mov x21, x0  // track current end position
+    add x21, x21, x1
 
 Luse_loop:
     bl _skip_whitespace
@@ -3948,7 +4122,7 @@ Luse_loop:
     cbz x0, Luse_fail
     
     // Update total length: from x19 to current end
-    add x22, x1, x2  // end of new identifier
+    add x22, x0, x1  // end of new identifier
     sub x20, x22, x19  // total length from start
     mov x21, x22  // update current end
     b Luse_loop
@@ -5006,6 +5180,11 @@ Lprimary_member_access:
     cbz x0, Lprimary_fail
     mov x21, x0 // name ptr
     mov x22, x1 // name len
+
+    cmp x26, #10
+    b.eq Lprimary_member_object
+    cmp x26, #11
+    b.eq Lprimary_member_object
     
     mov x0, x21
     mov x1, x22
@@ -5014,6 +5193,52 @@ Lprimary_member_access:
     cbnz x0, Lprimary_member_length
     
     b Lprimary_fail
+
+Lprimary_member_object:
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, #'('
+    b.eq Lprimary_member_object_method
+    mov x0, x25
+    mov x1, x27
+    mov x2, x21
+    mov x3, x22
+    bl _resolve_object_field_value
+    cbz x0, Lprimary_fail
+    mov x25, x1
+    mov x26, x2
+    mov x27, x3
+    mov x28, x4
+    b Lprimary_suffix_loop_start
+
+Lprimary_member_object_method:
+    mov x0, x25
+    mov x1, x26
+    mov x2, x27
+    mov x3, x21
+    mov x4, x22
+    bl _call_object_method
+    cbnz x0, Lprimary_fail
+    mov x26, x1
+    mov x27, x2
+    LOAD_ADDR x9, fn_return_value
+    ldr x25, [x9]
+    cmp x26, #2
+    b.eq Lprimary_member_method_len
+    cmp x26, #6
+    b.eq Lprimary_member_method_len
+    cmp x26, #10
+    b.eq Lprimary_member_method_len
+    cmp x26, #11
+    b.eq Lprimary_member_method_len
+    mov x27, #0
+    b Lprimary_member_method_done
+Lprimary_member_method_len:
+    LOAD_ADDR x9, fn_return_length
+    ldr x27, [x9]
+Lprimary_member_method_done:
+    mov x28, #-1
+    b Lprimary_suffix_loop_start
 
 Lprimary_member_length:
     bl _skip_whitespace
@@ -5554,6 +5779,12 @@ Lprimary_identifier:
 
     mov x0, x19
     mov x1, x20
+    LOAD_ADDR x2, kw_self
+    bl _match_cstr_span
+    cbnz x0, Lprimary_self
+
+    mov x0, x19
+    mov x1, x20
     bl _lookup_variable
     cbz x0, Lprimary_try_fn_call
     b Lprimary_suffix_loop
@@ -5611,6 +5842,18 @@ Lprimary_true:
     mov x1, #1
     mov x2, #1 // bool
     mov x3, #0
+    mov x4, #-1
+    b Lprimary_suffix_loop
+
+Lprimary_self:
+    LOAD_ADDR x9, current_self_type
+    ldr x2, [x9]
+    cbz x2, Lprimary_fail
+    LOAD_ADDR x9, current_self_instance
+    ldr x1, [x9]
+    LOAD_ADDR x9, current_self_meta
+    ldr x3, [x9]
+    mov x0, #1
     mov x4, #-1
     b Lprimary_suffix_loop
 
@@ -6156,6 +6399,15 @@ _parse_type_spec:
     bl _match_cstr_span
     cbnz x0, Lparse_type_ref
 
+    mov x0, x19
+    mov x1, x20
+    bl _lookup_blueprint_id
+    cbz x0, Lparse_type_fail
+    mov x2, x1
+    mov x0, #1
+    mov x1, #10
+    b Lparse_type_return
+
 Lparse_type_fail:
     mov x0, #0
     ldp x19, x20, [sp], #16
@@ -6226,6 +6478,13 @@ Lparse_type_ref:
     mov w0, #'>'
     bl _expect_char
     cbz x0, Lparse_type_fail
+    cmp x19, #10
+    b.ne Lparse_type_ref_plain
+    mov x0, #1
+    mov x1, #11 // object ref type
+    mov x2, x2
+    b Lparse_type_return
+Lparse_type_ref_plain:
     mov x0, #1
     mov x1, #9 // base ref type
     mov x2, x19 // store element type
@@ -7066,6 +7325,14 @@ _parse_fn_definition:
     mov x19, x0   // name ptr
     mov x20, x1   // name len
 
+    LOAD_ADDR x9, fn_name_override_ptr
+    ldr x10, [x9]
+    cbz x10, Lfn_def_name_ready
+    mov x19, x10
+    LOAD_ADDR x9, fn_name_override_len
+    ldr x20, [x9]
+Lfn_def_name_ready:
+
     mov x0, x19
     mov x1, x20
     bl _lookup_function
@@ -7312,6 +7579,14 @@ Lfn_def_expect_body:
     str x23, [x9, x21, lsl #3]
     LOAD_ADDR x9, fn_body_lines
     str x24, [x9, x21, lsl #3]
+    LOAD_ADDR x9, source_ptr
+    ldr x10, [x9]
+    LOAD_ADDR x9, fn_source_ptrs
+    str x10, [x9, x21, lsl #3]
+    LOAD_ADDR x9, source_len
+    ldr x10, [x9]
+    LOAD_ADDR x9, fn_source_lens
+    str x10, [x9, x21, lsl #3]
 
     // Increment fn count
     LOAD_ADDR x9, fn_count
@@ -7397,6 +7672,13 @@ Lfn_lookup_found:
     b Lfn_lookup_return
 
 Lfn_lookup_fail:
+    mov x0, x19
+    mov x1, x20
+    bl _is_imported_function
+    cbz x0, Lfn_lookup_not_imported
+    mov x21, x1
+    b Lfn_lookup_found
+Lfn_lookup_not_imported:
     mov x0, #0
 
 Lfn_lookup_return:
@@ -7419,10 +7701,20 @@ _call_function:
     stp x23, x24, [sp, #-16]!
     stp x25, x26, [sp, #-16]!
     stp x27, x28, [sp, #-16]!
-    sub sp, sp, #16
+    sub sp, sp, #32
 
     mov x19, x0   // name ptr
     mov x20, x1   // name len
+    LOAD_ADDR x9, cursor_pos
+    ldr x25, [x9]
+    LOAD_ADDR x9, current_line
+    ldr x26, [x9]
+    LOAD_ADDR x9, source_ptr
+    ldr x10, [x9]
+    str x10, [sp, #16]
+    LOAD_ADDR x9, source_len
+    ldr x10, [x9]
+    str x10, [sp, #24]
 
     // Built-in: file_read(path)
     mov x0, x19
@@ -7510,7 +7802,17 @@ Lfn_call_parse_arg:
     cmp x27, #16
     b.ge Lfn_call_check_nullable_arg
     cmp x6, x27
+    b.ne Lfn_call_non_object_arg
+    cmp x27, #10
+    b.eq Lfn_call_check_object_arg_meta
+    cmp x27, #11
+    b.eq Lfn_call_check_object_arg_meta
+    b Lfn_call_define_arg
+Lfn_call_check_object_arg_meta:
+    cmp x7, x5
     b.eq Lfn_call_define_arg
+    b Lfn_call_fail
+Lfn_call_non_object_arg:
     cmp x27, #3
     b.ne Lfn_call_fail
     cmp x6, #0
@@ -7642,11 +7944,17 @@ Lfn_call_args_ready:
     ldr x11, [x9, x21, lsl #3]
     str x11, [sp, #8]
 
-    // Save current cursor position (after the call site)
+    // Refresh saved call-site location after parsing the arguments.
     LOAD_ADDR x9, cursor_pos
     ldr x25, [x9]
     LOAD_ADDR x9, current_line
     ldr x26, [x9]
+    LOAD_ADDR x9, source_ptr
+    ldr x10, [x9]
+    str x10, [sp, #16]
+    LOAD_ADDR x9, source_len
+    ldr x10, [x9]
+    str x10, [sp, #24]
 
     // Clear return flag
     LOAD_ADDR x9, fn_return_flag
@@ -7659,6 +7967,14 @@ Lfn_call_args_ready:
     ldr x27, [x9, x21, lsl #3]
     LOAD_ADDR x9, fn_body_lines
     ldr x28, [x9, x21, lsl #3]
+    LOAD_ADDR x9, fn_source_ptrs
+    ldr x10, [x9, x21, lsl #3]
+    LOAD_ADDR x9, source_ptr
+    str x10, [x9]
+    LOAD_ADDR x9, fn_source_lens
+    ldr x10, [x9, x21, lsl #3]
+    LOAD_ADDR x9, source_len
+    str x10, [x9]
     LOAD_ADDR x9, cursor_pos
     str x27, [x9]
     LOAD_ADDR x9, current_line
@@ -7726,6 +8042,12 @@ Lfn_call_body_done_ok:
     str x10, [x9]
 
     // Restore cursor to call site
+    LOAD_ADDR x9, source_ptr
+    ldr x10, [sp, #16]
+    str x10, [x9]
+    LOAD_ADDR x9, source_len
+    ldr x10, [sp, #24]
+    str x10, [x9]
     LOAD_ADDR x9, cursor_pos
     str x25, [x9]
     LOAD_ADDR x9, current_line
@@ -7902,6 +8224,16 @@ Lfn_call_fail:
     sub x10, x10, #1
     str x10, [x9]
 Lfn_call_fail_restore_vars:
+    LOAD_ADDR x9, source_ptr
+    ldr x10, [sp, #16]
+    str x10, [x9]
+    LOAD_ADDR x9, source_len
+    ldr x10, [sp, #24]
+    str x10, [x9]
+    LOAD_ADDR x9, cursor_pos
+    str x25, [x9]
+    LOAD_ADDR x9, current_line
+    str x26, [x9]
     // Restore var count on failure too
     LOAD_ADDR x9, var_count
     str x22, [x9]
@@ -7911,9 +8243,1337 @@ Lfn_call_fail_restore_vars:
     mov x0, #1
 
 Lfn_call_return:
-    add sp, sp, #16
+    add sp, sp, #32
     ldp x27, x28, [sp], #16
     ldp x25, x26, [sp], #16
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+_parse_blueprint:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+    stp x25, x26, [sp, #-16]!
+
+    bl _skip_whitespace
+    bl _parse_identifier
+    cbz x0, Lblueprint_fail_name
+    mov x19, x0 // name ptr
+    mov x20, x1 // name len
+    bl _skip_generic_suffix
+
+    // Register blueprint name
+    LOAD_ADDR x9, blueprint_count
+    ldr x10, [x9]
+    cmp x10, #64
+    b.ge Lblueprint_fail_too_many
+    mov x23, x10
+
+    LOAD_ADDR x11, blueprint_name_ptrs
+    str x19, [x11, x10, lsl #3]
+    LOAD_ADDR x11, blueprint_name_lens
+    str x20, [x11, x10, lsl #3]
+    LOAD_ADDR x11, blueprint_parent_ids
+    mov x12, #-1
+    str x12, [x11, x10, lsl #3]
+    LOAD_ADDR x11, blueprint_field_counts
+    str xzr, [x11, x10, lsl #3]
+    LOAD_ADDR x11, blueprint_method_counts
+    str xzr, [x11, x10, lsl #3]
+
+    add x10, x10, #1
+    str x10, [x9]
+
+    bl _skip_whitespace
+    LOAD_ADDR x0, kw_from
+    bl _consume_keyword
+    cbz x0, Lblueprint_no_parent
+    bl _skip_whitespace
+    bl _parse_identifier
+    cbz x0, Lblueprint_fail_name
+    mov x24, x0
+    mov x25, x1
+    bl _skip_generic_suffix
+    mov x0, x24
+    mov x1, x25
+    bl _lookup_blueprint_id
+    cbz x0, Lblueprint_no_parent
+    LOAD_ADDR x9, blueprint_parent_ids
+    str x1, [x9, x23, lsl #3]
+
+Lblueprint_no_parent:
+    bl _skip_whitespace
+    LOAD_ADDR x0, kw_follows
+    bl _consume_keyword
+    cbz x0, Lblueprint_expect_body
+Lblueprint_skip_follows_loop:
+    bl _skip_whitespace
+    bl _parse_identifier
+    cbz x0, Lblueprint_fail_name
+    bl _skip_generic_suffix
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, #','
+    b.ne Lblueprint_expect_body
+    bl _advance_char
+    b Lblueprint_skip_follows_loop
+
+Lblueprint_expect_body:
+    bl _skip_whitespace
+    mov w0, #'{'
+    bl _expect_char
+    cbz x0, Lblueprint_fail_name
+
+Lblueprint_parse_body:
+Lblueprint_body_loop:
+    bl _skip_whitespace
+    bl _peek_char
+    cbz w0, Lblueprint_done
+    cmp w0, #'}'
+    b.eq Lblueprint_body_done
+    bl _parse_blueprint_member
+    cbnz x0, Lblueprint_fail_name
+    b Lblueprint_body_loop
+
+Lblueprint_body_done:
+    bl _advance_char // consume '}'
+
+Lblueprint_done:
+    LOAD_ADDR x9, current_blueprint_parse
+    str xzr, [x9]
+    mov x0, #0
+    ldp x25, x26, [sp], #16
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+Lblueprint_fail_name:
+    LOAD_ADDR x9, current_blueprint_parse
+    str xzr, [x9]
+    LOAD_ADDR x0, msg_expected_name
+    bl _report_error_prefix
+    bl _write_newline_stderr
+    mov x0, #1
+    ldp x25, x26, [sp], #16
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+Lblueprint_fail_too_many:
+    LOAD_ADDR x9, current_blueprint_parse
+    str xzr, [x9]
+    mov x0, #1
+    ldp x25, x26, [sp], #16
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+_parse_contract:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    bl _skip_whitespace
+    bl _parse_identifier
+    cbz x0, Lcontract_fail
+    bl _skip_generic_suffix
+    bl _skip_whitespace
+    mov w0, #'{'
+    bl _expect_char
+    cbz x0, Lcontract_fail
+Lcontract_loop:
+    bl _skip_whitespace
+    bl _peek_char
+    cbz w0, Lcontract_done
+    cmp w0, #'}'
+    b.eq Lcontract_done_close
+    bl _parse_contract_member
+    cbnz x0, Lcontract_fail
+    b Lcontract_loop
+Lcontract_done_close:
+    bl _advance_char
+Lcontract_done:
+    mov x0, #0
+    ldp x29, x30, [sp], #16
+    ret
+
+Lcontract_fail:
+    LOAD_ADDR x0, msg_expected_stmt
+    bl _report_error_prefix
+    bl _write_newline_stderr
+    mov x0, #1
+    ldp x29, x30, [sp], #16
+    ret
+
+_parse_new_object:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+    stp x25, x26, [sp, #-16]!
+
+    bl _skip_object_decl_type
+    cbz x0, Lnew_object_fail
+    mov x21, x1
+
+    bl _skip_whitespace
+    bl _parse_identifier
+    cbz x0, Lnew_object_fail
+    mov x19, x0
+    mov x20, x1
+
+    mov x0, x21
+    bl _reserve_object_instance
+    cbz x0, Lnew_object_fail
+    mov x22, x1
+    mov x0, x22
+    mov x1, x21
+    bl _instantiate_object_fields
+    cbz x0, Lnew_object_fail
+
+    mov x0, x19
+    mov x1, x20
+    mov x2, x22
+    mov x3, #0
+    mov x4, #11
+    mov x5, x21
+    bl _define_variable
+    cbnz x0, Lnew_object_fail
+
+    LOAD_ADDR x9, cursor_pos
+    ldr x23, [x9]
+    LOAD_ADDR x9, current_line
+    ldr x24, [x9]
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lnew_object_fail
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, #')'
+    b.eq Lnew_object_done_args
+    LOAD_ADDR x9, cursor_pos
+    ldr x25, [x9]
+    LOAD_ADDR x9, current_line
+    ldr x26, [x9]
+    bl _parse_identifier
+    cbz x0, Lnew_object_call_create
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, #':'
+    b.ne Lnew_object_call_create
+    LOAD_ADDR x9, cursor_pos
+    str x25, [x9]
+    LOAD_ADDR x9, current_line
+    str x26, [x9]
+Lnew_object_named_loop:
+    bl _parse_identifier
+    cbz x0, Lnew_object_fail
+    mov x25, x0
+    mov x26, x1
+    bl _skip_whitespace
+    mov w0, #':'
+    bl _expect_char
+    cbz x0, Lnew_object_fail
+    bl _parse_expr_value
+    cbz x0, Lnew_object_fail
+    stp x1, x2, [sp, #-16]!
+    stp x3, x4, [sp, #-16]!
+    mov x0, x21
+    mov x1, x25
+    mov x2, x26
+    bl _lookup_blueprint_field
+    cbz x0, Lnew_object_field_lookup_fail
+    ldp x11, x12, [sp], #16
+    ldp x9, x10, [sp], #16
+    mov x13, x1
+    mov x14, x2
+    mov x15, x3
+    cmp x10, x14
+    b.eq Lnew_object_field_store
+    cmp x14, #27
+    b.ne Lnew_object_fail
+    cmp x10, #7
+    b.ne Lnew_object_fail
+Lnew_object_field_store:
+    mov x16, x22
+    lsl x16, x16, #3
+    add x16, x16, x13
+    LOAD_ADDR x17, object_field_var_idxs
+    ldr x16, [x17, x16, lsl #3]
+    LOAD_ADDR x17, var_values
+    str x9, [x17, x16, lsl #3]
+    LOAD_ADDR x17, var_types
+    str x10, [x17, x16, lsl #3]
+    LOAD_ADDR x17, var_lengths
+    str x11, [x17, x16, lsl #3]
+    cmn x12, #1
+    b.eq Lnew_object_field_record_imm
+    mov x0, #45
+    mov x1, x16
+    mov x2, x12
+    bl _record_operation
+    cbnz x0, Lnew_object_fail
+    b Lnew_object_field_record_done
+Lnew_object_field_record_imm:
+    mov x0, x16
+    mov x1, x9
+    bl _record_store_variable
+    cbnz x0, Lnew_object_fail
+Lnew_object_field_record_done:
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, #','
+    b.ne Lnew_object_done_named
+    bl _advance_char
+    bl _skip_whitespace
+    b Lnew_object_named_loop
+Lnew_object_done_named:
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lnew_object_fail
+    b Lnew_object_done_args
+Lnew_object_field_lookup_fail:
+    add sp, sp, #32
+    b Lnew_object_fail
+Lnew_object_call_create:
+    LOAD_ADDR x9, cursor_pos
+    str x23, [x9]
+    LOAD_ADDR x9, current_line
+    str x24, [x9]
+    mov x0, x22
+    mov x1, #11
+    mov x2, x21
+    LOAD_ADDR x3, kw_create
+    mov x4, #6
+    bl _call_object_method
+    cbnz x0, Lnew_object_fail
+    b Lnew_object_args_ready
+Lnew_object_done_args:
+    bl _advance_char
+Lnew_object_args_ready:
+    bl _consume_optional_semicolon
+    mov x0, #0
+    b Lnew_object_return
+
+Lnew_object_fail:
+    LOAD_ADDR x0, msg_expected_stmt
+    bl _report_error_prefix
+    bl _write_newline_stderr
+    mov x0, #1
+
+Lnew_object_return:
+    ldp x25, x26, [sp], #16
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+_parse_stack_object:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+    stp x25, x26, [sp, #-16]!
+
+    mov x0, x19
+    mov x1, x20
+    bl _lookup_blueprint_id
+    cbz x0, Lstack_object_fail
+    mov x21, x1
+    bl _skip_whitespace
+    bl _parse_identifier
+    cbz x0, Lstack_object_fail
+    mov x19, x0
+    mov x20, x1
+
+    mov x0, x21
+    bl _reserve_object_instance
+    cbz x0, Lstack_object_fail
+    mov x22, x1
+    mov x0, x22
+    mov x1, x21
+    bl _instantiate_object_fields
+    cbz x0, Lstack_object_fail
+
+    mov x0, x19
+    mov x1, x20
+    mov x2, x22
+    mov x3, #0
+    mov x4, #10
+    mov x5, x21
+    bl _define_variable
+    cbnz x0, Lstack_object_fail
+
+    LOAD_ADDR x9, cursor_pos
+    ldr x23, [x9]
+    LOAD_ADDR x9, current_line
+    ldr x24, [x9]
+    LOAD_ADDR x9, cursor_pos
+    str x23, [x9]
+    LOAD_ADDR x9, current_line
+    str x24, [x9]
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lstack_object_fail
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, #')'
+    b.eq Lstack_object_done_args
+    LOAD_ADDR x9, cursor_pos
+    ldr x25, [x9]
+    LOAD_ADDR x9, current_line
+    ldr x26, [x9]
+    bl _parse_identifier
+    cbz x0, Lstack_object_call_create
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, #':'
+    b.ne Lstack_object_call_create
+    LOAD_ADDR x9, cursor_pos
+    str x25, [x9]
+    LOAD_ADDR x9, current_line
+    str x26, [x9]
+Lstack_object_named_loop:
+    bl _parse_identifier
+    cbz x0, Lstack_object_fail
+    mov x25, x0
+    mov x26, x1
+    bl _skip_whitespace
+    mov w0, #':'
+    bl _expect_char
+    cbz x0, Lstack_object_fail
+    bl _parse_expr_value
+    cbz x0, Lstack_object_fail
+    stp x1, x2, [sp, #-16]!
+    stp x3, xzr, [sp, #-16]!
+    mov x0, x21
+    mov x1, x25
+    mov x2, x26
+    bl _lookup_blueprint_field
+    cbz x0, Lstack_object_field_lookup_fail
+    ldp x11, xzr, [sp], #16
+    ldp x9, x10, [sp], #16
+    mov x13, x1
+    mov x14, x2
+    cmp x10, x14
+    b.eq Lstack_object_field_store
+    cmp x14, #27
+    b.ne Lstack_object_fail
+    cmp x10, #7
+    b.ne Lstack_object_fail
+Lstack_object_field_store:
+    mov x16, x22
+    lsl x16, x16, #3
+    add x16, x16, x13
+    LOAD_ADDR x17, object_field_var_idxs
+    ldr x16, [x17, x16, lsl #3]
+    LOAD_ADDR x17, var_values
+    str x9, [x17, x16, lsl #3]
+    LOAD_ADDR x17, var_types
+    str x10, [x17, x16, lsl #3]
+    LOAD_ADDR x17, var_lengths
+    str x11, [x17, x16, lsl #3]
+    mov x0, x16
+    mov x1, x9
+    bl _record_store_variable
+    cbnz x0, Lstack_object_fail
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, #','
+    b.ne Lstack_object_done_named
+    bl _advance_char
+    bl _skip_whitespace
+    b Lstack_object_named_loop
+Lstack_object_done_named:
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lstack_object_fail
+    b Lstack_object_args_ready
+Lstack_object_field_lookup_fail:
+    add sp, sp, #32
+    b Lstack_object_fail
+Lstack_object_call_create:
+    LOAD_ADDR x9, cursor_pos
+    str x23, [x9]
+    LOAD_ADDR x9, current_line
+    str x24, [x9]
+    mov x0, x22
+    mov x1, #10
+    mov x2, x21
+    LOAD_ADDR x3, kw_create
+    mov x4, #6
+    bl _call_object_method
+    cbnz x0, Lstack_object_fail
+    b Lstack_object_args_ready
+Lstack_object_done_args:
+    bl _advance_char
+Lstack_object_args_ready:
+    bl _consume_optional_semicolon
+    mov x0, #0
+    b Lstack_object_return
+
+Lstack_object_fail:
+    LOAD_ADDR x0, msg_expected_stmt
+    bl _report_error_prefix
+    bl _write_newline_stderr
+    mov x0, #1
+
+Lstack_object_return:
+    ldp x25, x26, [sp], #16
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+_lookup_blueprint_id:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+
+    mov x19, x0
+    mov x20, x1
+    mov x21, #0
+    LOAD_ADDR x22, blueprint_count
+    ldr x22, [x22]
+
+Lbp_lookup_loop:
+    cmp x21, x22
+    b.ge Lbp_lookup_fail
+    LOAD_ADDR x9, blueprint_name_lens
+    ldr x10, [x9, x21, lsl #3]
+    cmp x10, x20
+    b.ne Lbp_lookup_next
+    LOAD_ADDR x9, blueprint_name_ptrs
+    ldr x11, [x9, x21, lsl #3]
+    mov x0, x19
+    mov x1, x20
+    mov x2, x11
+    bl _match_span_span
+    cbnz x0, Lbp_lookup_found
+Lbp_lookup_next:
+    add x21, x21, #1
+    b Lbp_lookup_loop
+
+Lbp_lookup_found:
+    mov x0, #1
+    mov x1, x21
+    b Lbp_lookup_return
+
+Lbp_lookup_fail:
+    mov x0, #0
+    mov x1, #-1
+
+Lbp_lookup_return:
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+_skip_angle_group:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+
+    mov x19, #1
+
+Lskip_angle_loop:
+    bl _peek_char
+    cbz w0, Lskip_angle_fail
+    cmp w0, #'<'
+    b.eq Lskip_angle_open
+    cmp w0, #'>'
+    b.eq Lskip_angle_close
+    bl _advance_char
+    b Lskip_angle_loop
+
+Lskip_angle_open:
+    bl _advance_char
+    add x19, x19, #1
+    b Lskip_angle_loop
+
+Lskip_angle_close:
+    bl _advance_char
+    sub x19, x19, #1
+    cbnz x19, Lskip_angle_loop
+    mov x0, #0
+    b Lskip_angle_return
+
+Lskip_angle_fail:
+    mov x0, #1
+
+Lskip_angle_return:
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+_skip_generic_suffix:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, #'<'
+    b.ne Lskip_generic_done
+    bl _advance_char
+    bl _skip_angle_group
+    cbnz x0, Lskip_generic_fail
+
+Lskip_generic_done:
+    mov x0, #1
+    ldp x29, x30, [sp], #16
+    ret
+
+Lskip_generic_fail:
+    mov x0, #0
+    ldp x29, x30, [sp], #16
+    ret
+
+_skip_type_surface:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+
+    bl _skip_whitespace
+    bl _parse_identifier
+    cbz x0, Lskip_type_surface_fail
+    bl _skip_generic_suffix
+    cbz x0, Lskip_type_surface_fail
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, #'?'
+    b.ne Lskip_type_surface_ok
+    bl _advance_char
+
+Lskip_type_surface_ok:
+    mov x0, #1
+    ldp x29, x30, [sp], #16
+    ret
+
+Lskip_type_surface_fail:
+    mov x0, #0
+    ldp x29, x30, [sp], #16
+    ret
+
+_skip_object_decl_type:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+
+    bl _skip_whitespace
+    bl _parse_identifier
+    cbz x0, Lskip_object_decl_type_fail
+    mov x9, x0
+    mov x10, x1
+    mov x0, x9
+    mov x1, x10
+    bl _lookup_blueprint_id
+    cbz x0, Lskip_object_decl_type_fail
+    mov x11, x1
+    bl _skip_generic_suffix
+    cbz x0, Lskip_object_decl_type_fail
+    mov x0, #1
+    mov x1, x11
+    ldp x29, x30, [sp], #16
+    ret
+
+Lskip_object_decl_type_fail:
+    mov x0, #0
+    mov x1, #-1
+    ldp x29, x30, [sp], #16
+    ret
+
+_skip_decl_block:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+
+Lskip_decl_block_seek:
+    bl _skip_whitespace
+    bl _peek_char
+    cbz w0, Lskip_decl_block_fail
+    cmp w0, #'{'
+    b.eq Lskip_decl_block_body
+    bl _advance_char
+    b Lskip_decl_block_seek
+
+Lskip_decl_block_body:
+    bl _advance_char
+    bl _skip_block_contents
+    ldp x29, x30, [sp], #16
+    ret
+
+Lskip_decl_block_fail:
+    mov x0, #1
+    ldp x29, x30, [sp], #16
+    ret
+
+_parse_blueprint_member:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+    stp x25, x26, [sp, #-16]!
+
+    LOAD_ADDR x9, cursor_pos
+    ldr x19, [x9]
+    LOAD_ADDR x9, current_line
+    ldr x20, [x9]
+
+    bl _parse_identifier
+    cbz x0, Lblueprint_member_fail
+    mov x21, x0
+    mov x22, x1
+
+    mov x0, x21
+    mov x1, x22
+    LOAD_ADDR x2, kw_open
+    bl _match_cstr_span
+    cbnz x0, Lblueprint_member_after_modifier
+    mov x0, x21
+    mov x1, x22
+    LOAD_ADDR x2, kw_closed
+    bl _match_cstr_span
+    cbnz x0, Lblueprint_member_after_modifier
+    mov x0, x21
+    mov x1, x22
+    LOAD_ADDR x2, kw_guarded
+    bl _match_cstr_span
+    cbnz x0, Lblueprint_member_after_modifier
+    b Lblueprint_member_dispatch
+
+Lblueprint_member_after_modifier:
+    LOAD_ADDR x9, cursor_pos
+    ldr x19, [x9]
+    LOAD_ADDR x9, current_line
+    ldr x20, [x9]
+    bl _skip_whitespace
+    bl _parse_identifier
+    cbz x0, Lblueprint_member_fail
+    mov x21, x0
+    mov x22, x1
+
+Lblueprint_member_dispatch:
+    mov x0, x21
+    mov x1, x22
+    LOAD_ADDR x2, kw_fn
+    bl _match_cstr_span
+    cbnz x0, Lblueprint_member_method
+
+    LOAD_ADDR x9, cursor_pos
+    str x19, [x9]
+    LOAD_ADDR x9, current_line
+    str x20, [x9]
+    bl _parse_type_spec
+    cbz x0, Lblueprint_member_fail
+    mov x23, x1
+    mov x24, x2
+    bl _skip_whitespace
+    bl _parse_identifier
+    cbz x0, Lblueprint_member_fail
+    mov x25, x0
+    mov x26, x1
+
+    LOAD_ADDR x9, current_blueprint_parse
+    ldr x21, [x9]
+    LOAD_ADDR x9, blueprint_field_counts
+    ldr x22, [x9, x21, lsl #3]
+    cmp x22, #8
+    b.ge Lblueprint_member_fail
+    mov x10, x21
+    lsl x10, x10, #3
+    add x10, x10, x22
+    LOAD_ADDR x9, blueprint_field_names
+    str x25, [x9, x10, lsl #3]
+    LOAD_ADDR x9, blueprint_field_name_lens
+    str x26, [x9, x10, lsl #3]
+    LOAD_ADDR x9, blueprint_field_types
+    str x23, [x9, x10, lsl #3]
+    LOAD_ADDR x9, blueprint_field_metas
+    str x24, [x9, x10, lsl #3]
+    LOAD_ADDR x9, blueprint_field_default_flags
+    str xzr, [x9, x10, lsl #3]
+
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, #'='
+    b.ne Lblueprint_member_field_done
+    bl _advance_char
+    bl _parse_expr_value
+    cbz x0, Lblueprint_member_fail
+    LOAD_ADDR x9, blueprint_field_default_flags
+    mov x11, #1
+    str x11, [x9, x10, lsl #3]
+    LOAD_ADDR x9, blueprint_field_default_values
+    str x1, [x9, x10, lsl #3]
+    LOAD_ADDR x9, blueprint_field_default_types
+    str x2, [x9, x10, lsl #3]
+    LOAD_ADDR x9, blueprint_field_default_metas
+    str x3, [x9, x10, lsl #3]
+Lblueprint_member_field_done:
+    LOAD_ADDR x9, blueprint_field_counts
+    add x22, x22, #1
+    str x22, [x9, x21, lsl #3]
+    bl _consume_optional_semicolon
+    mov x0, #0
+    b Lblueprint_member_return
+
+Lblueprint_member_method:
+    LOAD_ADDR x9, cursor_pos
+    ldr x23, [x9]
+    LOAD_ADDR x9, current_line
+    ldr x24, [x9]
+    bl _skip_whitespace
+    bl _parse_identifier
+    cbz x0, Lblueprint_member_fail
+    mov x25, x0
+    mov x26, x1
+    LOAD_ADDR x9, current_blueprint_parse
+    ldr x21, [x9]
+    LOAD_ADDR x9, blueprint_method_counts
+    ldr x22, [x9, x21, lsl #3]
+    cmp x22, #8
+    b.ge Lblueprint_member_fail
+    mov x10, x21
+    lsl x10, x10, #3
+    add x10, x10, x22
+    LOAD_ADDR x9, blueprint_method_names
+    str x25, [x9, x10, lsl #3]
+    LOAD_ADDR x9, blueprint_method_name_lens
+    str x26, [x9, x10, lsl #3]
+    sub sp, sp, #16
+    str x10, [sp]
+    LOAD_ADDR x9, cursor_pos
+    str x23, [x9]
+    LOAD_ADDR x9, current_line
+    str x24, [x9]
+    bl _parse_fn_definition
+    ldr x10, [sp]
+    add sp, sp, #16
+    cbnz x0, Lblueprint_member_fail
+    LOAD_ADDR x9, fn_count
+    ldr x23, [x9]
+    sub x23, x23, #1
+    LOAD_ADDR x9, blueprint_method_fn_ids
+    str x23, [x9, x10, lsl #3]
+    LOAD_ADDR x9, blueprint_method_counts
+    add x22, x22, #1
+    str x22, [x9, x21, lsl #3]
+    mov x0, #0
+    b Lblueprint_member_return
+
+Lblueprint_member_fail:
+    mov x0, #1
+
+Lblueprint_member_return:
+    ldp x25, x26, [sp], #16
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+_parse_contract_member:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+
+    bl _parse_identifier
+    cbz x0, Lcontract_member_fail
+    mov x9, x0
+    mov x10, x1
+    mov x0, x9
+    mov x1, x10
+    LOAD_ADDR x2, kw_fn
+    bl _match_cstr_span
+    cbz x0, Lcontract_member_fail
+    bl _skip_whitespace
+    bl _parse_identifier
+    cbz x0, Lcontract_member_fail
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lcontract_member_fail
+    bl _skip_paren_group
+    cbnz x0, Lcontract_member_fail
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, #'-'
+    b.ne Lcontract_member_done
+    bl _advance_char
+    mov w0, #'>'
+    bl _expect_char
+    cbz x0, Lcontract_member_fail
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, #'('
+    b.ne Lcontract_member_ret_single
+    bl _advance_char
+    bl _skip_paren_group
+    cbnz x0, Lcontract_member_fail
+    b Lcontract_member_done
+Lcontract_member_ret_single:
+    bl _skip_type_surface
+    cbz x0, Lcontract_member_fail
+
+Lcontract_member_done:
+    bl _consume_optional_semicolon
+    mov x0, #0
+    ldp x29, x30, [sp], #16
+    ret
+
+Lcontract_member_fail:
+    mov x0, #1
+    ldp x29, x30, [sp], #16
+    ret
+
+_define_hidden_var:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+
+    mov x19, x0
+    mov x20, x1
+    mov x21, x2
+    mov x22, x3
+
+    LOAD_ADDR x23, var_count
+    ldr x24, [x23]
+    cmp x24, #512
+    b.ge Lhidden_var_fail
+
+    LOAD_ADDR x9, hidden_var_name_storage
+    add x9, x9, x24, lsl #5
+    str x24, [x9]
+    LOAD_ADDR x10, var_name_ptrs
+    str x9, [x10, x24, lsl #3]
+    LOAD_ADDR x10, var_name_lens
+    mov x11, #8
+    str x11, [x10, x24, lsl #3]
+    LOAD_ADDR x10, var_values
+    str x19, [x10, x24, lsl #3]
+    LOAD_ADDR x10, var_const_flags
+    str xzr, [x10, x24, lsl #3]
+    LOAD_ADDR x10, var_types
+    str x21, [x10, x24, lsl #3]
+    LOAD_ADDR x10, var_lengths
+    str x22, [x10, x24, lsl #3]
+    add x24, x24, #1
+    str x24, [x23]
+    LOAD_ADDR x10, max_var_count
+    ldr x11, [x10]
+    cmp x24, x11
+    b.le Lhidden_var_ok
+    str x24, [x10]
+Lhidden_var_ok:
+    mov x0, #1
+    sub x1, x24, #1
+    b Lhidden_var_return
+Lhidden_var_fail:
+    mov x0, #0
+    mov x1, #-1
+Lhidden_var_return:
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+_reserve_object_instance:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    mov x19, x0
+    LOAD_ADDR x9, object_instance_count
+    ldr x20, [x9]
+    cmp x20, #128
+    b.ge Lreserve_object_fail
+    LOAD_ADDR x10, object_blueprint_ids
+    str x19, [x10, x20, lsl #3]
+    mov x11, #0
+Lreserve_object_init_loop:
+    cmp x11, #8
+    b.ge Lreserve_object_done_init
+    mov x12, x20
+    lsl x12, x12, #3
+    add x12, x12, x11
+    LOAD_ADDR x13, object_field_var_idxs
+    mov x14, #-1
+    str x14, [x13, x12, lsl #3]
+    add x11, x11, #1
+    b Lreserve_object_init_loop
+Lreserve_object_done_init:
+    add x11, x20, #1
+    str x11, [x9]
+    mov x0, #1
+    mov x1, x20
+    b Lreserve_object_return
+Lreserve_object_fail:
+    mov x0, #0
+    mov x1, #-1
+Lreserve_object_return:
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+_lookup_blueprint_field:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+
+    mov x19, x0
+    mov x20, x1
+    mov x21, x2
+Lbp_field_bp_loop:
+    cmp x19, #-1
+    b.eq Lbp_field_fail
+    LOAD_ADDR x9, blueprint_field_counts
+    ldr x22, [x9, x19, lsl #3]
+    mov x23, #0
+Lbp_field_loop:
+    cmp x23, x22
+    b.ge Lbp_field_parent
+    mov x24, x19
+    lsl x24, x24, #3
+    add x24, x24, x23
+    LOAD_ADDR x9, blueprint_field_name_lens
+    ldr x10, [x9, x24, lsl #3]
+    cmp x10, x21
+    b.ne Lbp_field_next
+    LOAD_ADDR x9, blueprint_field_names
+    ldr x11, [x9, x24, lsl #3]
+    mov x0, x20
+    mov x1, x21
+    mov x2, x11
+    bl _match_span_span
+    cbnz x0, Lbp_field_found
+Lbp_field_next:
+    add x23, x23, #1
+    b Lbp_field_loop
+Lbp_field_parent:
+    LOAD_ADDR x9, blueprint_parent_ids
+    ldr x19, [x9, x19, lsl #3]
+    b Lbp_field_bp_loop
+Lbp_field_found:
+    LOAD_ADDR x9, blueprint_field_types
+    ldr x2, [x9, x24, lsl #3]
+    LOAD_ADDR x9, blueprint_field_metas
+    ldr x3, [x9, x24, lsl #3]
+    mov x0, #1
+    mov x1, x23
+    b Lbp_field_return
+Lbp_field_fail:
+    mov x0, #0
+    mov x1, #-1
+Lbp_field_return:
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+_lookup_blueprint_method:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+
+    mov x19, x0
+    mov x20, x1
+    mov x21, x2
+Lbp_method_bp_loop:
+    cmp x19, #-1
+    b.eq Lbp_method_fail
+    LOAD_ADDR x9, blueprint_method_counts
+    ldr x22, [x9, x19, lsl #3]
+    mov x23, #0
+Lbp_method_loop:
+    cmp x23, x22
+    b.ge Lbp_method_parent
+    mov x24, x19
+    lsl x24, x24, #3
+    add x24, x24, x23
+    LOAD_ADDR x9, blueprint_method_name_lens
+    ldr x10, [x9, x24, lsl #3]
+    cmp x10, x21
+    b.ne Lbp_method_next
+    LOAD_ADDR x9, blueprint_method_names
+    ldr x11, [x9, x24, lsl #3]
+    mov x0, x20
+    mov x1, x21
+    mov x2, x11
+    bl _match_span_span
+    cbnz x0, Lbp_method_found
+Lbp_method_next:
+    add x23, x23, #1
+    b Lbp_method_loop
+Lbp_method_parent:
+    LOAD_ADDR x9, blueprint_parent_ids
+    ldr x19, [x9, x19, lsl #3]
+    b Lbp_method_bp_loop
+Lbp_method_found:
+    LOAD_ADDR x9, blueprint_method_fn_ids
+    ldr x1, [x9, x24, lsl #3]
+    mov x0, #1
+    b Lbp_method_return
+Lbp_method_fail:
+    mov x0, #0
+    mov x1, #-1
+Lbp_method_return:
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+_build_method_synth_name:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+    stp x25, x26, [sp, #-16]!
+
+    mov x19, x0
+    mov x20, x1
+    mov x21, x2
+    mov x22, x3
+    LOAD_ADDR x23, method_name_storage
+    add x23, x23, x22, lsl #6
+    mov x24, x23
+    LOAD_ADDR x9, blueprint_name_ptrs
+    ldr x25, [x9, x19, lsl #3]
+    LOAD_ADDR x9, blueprint_name_lens
+    ldr x26, [x9, x19, lsl #3]
+    mov x10, #0
+Lbuild_method_copy_bp:
+    cmp x10, x26
+    b.ge Lbuild_method_sep1
+    ldrb w11, [x25, x10]
+    strb w11, [x24], #1
+    add x10, x10, #1
+    b Lbuild_method_copy_bp
+Lbuild_method_sep1:
+    mov w11, #'_'
+    strb w11, [x24], #1
+    strb w11, [x24], #1
+    mov x10, #0
+Lbuild_method_copy_name:
+    cmp x10, x21
+    b.ge Lbuild_method_done
+    ldrb w11, [x20, x10]
+    strb w11, [x24], #1
+    add x10, x10, #1
+    b Lbuild_method_copy_name
+Lbuild_method_done:
+    strb wzr, [x24]
+    sub x1, x24, x23
+    mov x0, x23
+    ldp x25, x26, [sp], #16
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+_resolve_object_field_value:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+
+    mov x19, x0
+    mov x20, x1
+    mov x21, x2
+    mov x22, x3
+    mov x0, x20
+    mov x1, x21
+    mov x2, x22
+    bl _lookup_blueprint_field
+    cbz x0, Lresolve_object_field_fail
+    mov x23, x1
+    mov x24, x19
+    lsl x24, x24, #3
+    add x24, x24, x23
+    LOAD_ADDR x9, object_field_var_idxs
+    ldr x24, [x9, x24, lsl #3]
+    cmp x24, #-1
+    b.eq Lresolve_object_field_fail
+    LOAD_ADDR x9, var_values
+    ldr x1, [x9, x24, lsl #3]
+    LOAD_ADDR x9, var_types
+    ldr x2, [x9, x24, lsl #3]
+    LOAD_ADDR x9, var_lengths
+    ldr x3, [x9, x24, lsl #3]
+    mov x4, x24
+    mov x0, #1
+    b Lresolve_object_field_return
+Lresolve_object_field_fail:
+    mov x0, #0
+Lresolve_object_field_return:
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+_call_object_method:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+    stp x25, x26, [sp, #-16]!
+    sub sp, sp, #32
+
+    mov x19, x0
+    mov x20, x1
+    mov x21, x2
+    mov x22, x3
+    mov x23, x4
+
+    LOAD_ADDR x9, current_self_instance
+    ldr x25, [x9]
+    str x25, [sp]
+    LOAD_ADDR x9, current_self_type
+    ldr x26, [x9]
+    str x26, [sp, #8]
+    LOAD_ADDR x9, current_self_meta
+    ldr x10, [x9]
+    str x10, [sp, #16]
+
+    LOAD_ADDR x9, current_self_instance
+    str x19, [x9]
+    LOAD_ADDR x9, current_self_type
+    str x20, [x9]
+    LOAD_ADDR x9, current_self_meta
+    str x21, [x9]
+
+    mov x0, x22
+    mov x1, x23
+    bl _call_function
+
+    LOAD_ADDR x9, current_self_instance
+    ldr x10, [sp]
+    str x10, [x9]
+    LOAD_ADDR x9, current_self_type
+    ldr x10, [sp, #8]
+    str x10, [x9]
+    LOAD_ADDR x9, current_self_meta
+    ldr x10, [sp, #16]
+    str x10, [x9]
+    b Lcall_object_method_return
+
+Lcall_object_method_fail:
+    mov x0, #1
+Lcall_object_method_return:
+    add sp, sp, #32
+    ldp x25, x26, [sp], #16
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+_instantiate_object_fields:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+
+    mov x19, x0
+    mov x20, x1
+    LOAD_ADDR x9, blueprint_field_counts
+    ldr x21, [x9, x20, lsl #3]
+    mov x22, #0
+Linst_object_field_loop:
+    cmp x22, x21
+    b.ge Linst_object_field_done
+    mov x23, x20
+    lsl x23, x23, #3
+    add x23, x23, x22
+    LOAD_ADDR x9, blueprint_field_types
+    ldr x10, [x9, x23, lsl #3]
+    LOAD_ADDR x9, blueprint_field_metas
+    ldr x11, [x9, x23, lsl #3]
+    LOAD_ADDR x9, blueprint_field_default_flags
+    ldr x12, [x9, x23, lsl #3]
+    cbz x12, Linst_object_field_no_default
+    LOAD_ADDR x9, blueprint_field_default_values
+    ldr x0, [x9, x23, lsl #3]
+    LOAD_ADDR x9, blueprint_field_default_types
+    ldr x13, [x9, x23, lsl #3]
+    LOAD_ADDR x9, blueprint_field_default_metas
+    ldr x14, [x9, x23, lsl #3]
+    mov x1, #0
+    mov x2, x13
+    mov x3, x14
+    bl _define_hidden_var
+    cbz x0, Linst_object_field_fail
+    b Linst_object_field_store_idx
+Linst_object_field_no_default:
+    mov x0, #0
+    mov x1, #0
+    cmp x10, #27
+    b.eq Linst_object_field_default_none
+    mov x2, x10
+    mov x3, x11
+    bl _define_hidden_var
+    cbz x0, Linst_object_field_fail
+    b Linst_object_field_store_idx
+Linst_object_field_default_none:
+    mov x2, #7
+    mov x3, #0
+    bl _define_hidden_var
+    cbz x0, Linst_object_field_fail
+Linst_object_field_store_idx:
+    mov x15, x1
+    LOAD_ADDR x9, blueprint_field_types
+    ldr x10, [x9, x23, lsl #3]
+    mov x24, x19
+    lsl x24, x24, #3
+    add x24, x24, x22
+    LOAD_ADDR x9, object_field_var_idxs
+    str x15, [x9, x24, lsl #3]
+    cmp x10, #2
+    b.eq Linst_object_field_next
+    cmp x10, #4
+    b.eq Linst_object_field_next
+    cmp x10, #6
+    b.eq Linst_object_field_next
+    mov x0, x15
+    LOAD_ADDR x9, var_values
+    ldr x1, [x9, x15, lsl #3]
+    bl _record_store_variable
+    cbnz x0, Linst_object_field_fail
+Linst_object_field_next:
+    add x22, x22, #1
+    b Linst_object_field_loop
+Linst_object_field_done:
+    mov x0, #1
+    b Linst_object_field_return
+Linst_object_field_fail:
+    mov x0, #0
+Linst_object_field_return:
     ldp x23, x24, [sp], #16
     ldp x21, x22, [sp], #16
     ldp x19, x20, [sp], #16

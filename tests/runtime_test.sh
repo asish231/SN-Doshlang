@@ -57,5 +57,63 @@ fn main() {
 SN
 run_test "Literal + var concat" "XY" /tmp/t5.sn
 
+echo "=== Imported Function Calls ==="
+cat > ./__runtime_import_math.sn << 'SN'
+fn helper() -> int {
+    return 42
+}
+SN
+
+cat > /tmp/t6.sn << 'SN'
+use __runtime_import_math
+
+fn main() {
+    print(helper())
+}
+SN
+run_test "Imported function call" "42" /tmp/t6.sn
+rm -f ./__runtime_import_math.sn
+
+echo "=== Blueprint Runtime ==="
+cat > /tmp/t_oop_fields.sn << 'SN'
+blueprint Point {
+    int x
+    int y
+}
+
+Point p(x: 2, y: 3)
+print(p.x)
+print(p.y)
+SN
+run_test "Blueprint field access" $'2\n3' /tmp/t_oop_fields.sn
+
+cat > /tmp/t_oop_method.sn << 'SN'
+blueprint Point {
+    int x
+    int y
+
+    fn sum() -> int {
+        return self.x + self.y
+    }
+}
+
+Point p(x: 2, y: 3)
+print(p.sum())
+SN
+run_test "Blueprint method with self" "5" /tmp/t_oop_method.sn
+
+cat > /tmp/t_oop_void_method.sn << 'SN'
+blueprint Greeter {
+    fn ping() {
+        print("hi")
+    }
+}
+
+Greeter g()
+g.ping()
+print("ok")
+SN
+run_test "Blueprint void method call" $'hi\nok' /tmp/t_oop_void_method.sn
+
 echo ""
 echo "Summary: PASS=$PASS FAIL=$FAIL"

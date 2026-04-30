@@ -144,3 +144,8 @@ This file tracks issues that have been fixed and locally verified.
 - **Problem:** Multiple `use` statements in one file caused segmentation faults due to malloc symbol mismatch and module name pointer management
 - **Fix:** Fixed platform-specific malloc calls and simplified module loading to avoid memory allocation issues during parsing
 - **Verified:** `use std.math; use utils.string; use io.file; use net.http` compiles and runs successfully
+
+### 28) Module system — full implementation (ANTIGRAVITY_ISSUE)
+- **Problem:** `_load_module` crashed on any real `use` statement. Multiple root causes: wrong register passing in `use` parser, caller-saved register misuse in module helpers, main source buffer overwritten during module parse, reversed success check in `_parse_module_content`
+- **Fix:** Fixed all four root causes. Module files now load and parse cleanly. Functions defined in imported modules are registered into the global function table and callable from the importing file
+- **Verified:** All 4 ANTIGRAVITY_ISSUE verification tests pass — crash fixed, no corruption, duplicate use safe, imported functions callable (`helper()` returns `42`)

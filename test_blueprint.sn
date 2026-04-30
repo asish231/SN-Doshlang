@@ -1,0 +1,7 @@
+blueprint MyNode {
+    int value
+}
+
+fn main() {
+    print("Blueprint parsed successfully!")
+}

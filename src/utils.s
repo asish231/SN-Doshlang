@@ -798,6 +798,7 @@ _module_path_to_file:
     stp x19, x20, [sp, #-16]!
     stp x21, x22, [sp, #-16]!
     stp x23, x24, [sp, #-16]!
+    stp x25, x26, [sp, #-16]!
 
     mov x19, x0  // module path ptr
     mov x20, x1  // module path len
@@ -825,7 +826,7 @@ Lmodule_search_loop:
     add x0, x0, #4
     bl _malloc
     cbz x0, Lmodule_search_next
-    mov x9, x0  // x9 = allocated buffer
+    mov x25, x0  // x25 = allocated buffer
 
     // Copy search path
     mov x10, #0
@@ -833,13 +834,13 @@ Lmodule_copy_sp:
     cmp x10, x24
     b.ge Lmodule_add_slash
     ldrb w11, [x23, x10]
-    strb w11, [x9, x10]
+    strb w11, [x25, x10]
     add x10, x10, #1
     b Lmodule_copy_sp
 
 Lmodule_add_slash:
     mov w11, #'/'
-    strb w11, [x9, x24]
+    strb w11, [x25, x24]
 
     // Copy module path replacing '.' with '/'
     mov x10, #0
@@ -853,7 +854,7 @@ Lmodule_copy_mp:
 Lmodule_copy_mp_char:
     add x12, x24, #1
     add x12, x12, x10
-    strb w11, [x9, x12]
+    strb w11, [x25, x12]
     add x10, x10, #1
     b Lmodule_copy_mp
 
@@ -862,23 +863,24 @@ Lmodule_add_ext:
     add x10, x24, #1
     add x10, x10, x20
     mov w11, #'.'
-    strb w11, [x9, x10]
+    strb w11, [x25, x10]
     add x10, x10, #1
     mov w11, #'s'
-    strb w11, [x9, x10]
+    strb w11, [x25, x10]
     add x10, x10, #1
     mov w11, #'n'
-    strb w11, [x9, x10]
+    strb w11, [x25, x10]
     add x10, x10, #1
-    strb wzr, [x9, x10]
+    strb wzr, [x25, x10]
+    sub x26, x10, #1  // length without null terminator
 
     // Check if file exists
-    mov x0, x9
+    mov x0, x25
     bl _file_exists
     cbnz x0, Lmodule_found_file
 
     // Not found — free and try next search path
-    mov x0, x9
+    mov x0, x25
     bl _free
 
 Lmodule_search_next:
@@ -886,9 +888,8 @@ Lmodule_search_next:
     b Lmodule_search_loop
 
 Lmodule_found_file:
-    // x9 = malloc'd path, x10-1 = length
-    sub x1, x10, #1  // length without null
-    mov x0, x9
+    mov x0, x25
+    mov x1, x26
     b Lmodule_convert_return
 
 Lmodule_convert_fail:
@@ -896,6 +897,7 @@ Lmodule_convert_fail:
     mov x1, #0
 
 Lmodule_convert_return:
+    ldp x25, x26, [sp], #16
     ldp x23, x24, [sp], #16
     ldp x21, x22, [sp], #16
     ldp x19, x20, [sp], #16
@@ -909,21 +911,22 @@ _find_module:
     mov x29, sp
     stp x19, x20, [sp, #-16]!
     stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
 
     mov x19, x0  // module name ptr
     mov x20, x1  // module name len
     
     LOAD_ADDR x21, module_count
     ldr x22, [x21]  // module count
-    mov x9, #0      // loop counter
+    mov x23, #0     // loop counter
 
 Lfind_module_loop:
-    cmp x9, x22
+    cmp x23, x22
     b.ge Lfind_module_not_found
     
-    // Get module name at index x9
+    // Get module name at index x23
     LOAD_ADDR x10, module_names
-    ldr x11, [x10, x9, lsl #3]  // stored module name ptr (allocated)
+    ldr x11, [x10, x23, lsl #3]  // stored module name ptr (allocated)
     
     // Compare lengths first by checking null terminator position
     mov x12, #0  // stored name length counter
@@ -947,17 +950,18 @@ Lfind_module_len_done:
     cbnz x0, Lfind_module_found
     
 Lfind_module_next:
-    add x9, x9, #1
+    add x23, x23, #1
     b Lfind_module_loop
 
 Lfind_module_found:
-    mov x0, x9
+    mov x0, x23
     b Lfind_module_return
 
 Lfind_module_not_found:
     mov x0, #-1
 
 Lfind_module_return:
+    ldp x23, x24, [sp], #16
     ldp x21, x22, [sp], #16
     ldp x19, x20, [sp], #16
     ldp x29, x30, [sp], #16
@@ -1236,6 +1240,7 @@ _load_and_parse_module_file:
     mov x29, sp
     stp x19, x20, [sp, #-16]!
     stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
 
     mov x19, x0  // file path
 
@@ -1244,30 +1249,20 @@ _load_and_parse_module_file:
     mov x20, x0  // saved state
     cbz x20, Lparse_module_fail
 
-    // Open the file
+    // Read the module into its own heap buffer so we do not clobber the
+    // caller's source text stored in the shared global buffer.
     mov x0, x19
-    bl _open_file
-    cmp x0, #-1
-    b.eq Lparse_module_file_error
-    mov x21, x0  // file descriptor
+    bl _file_read
+    cbz x0, Lparse_module_file_error
+    mov x21, x0  // module buffer
 
-    // Read file into buffer
     mov x0, x21
-    bl _read_into_buffer
+    bl _cstring_length
     mov x22, x0  // bytes read
-
-    // Close file
-    mov x0, x21
-#ifdef _WIN32
-    bl close
-#else
-    bl _close
-#endif
-
     cbz x22, Lparse_module_read_error
 
-    // Set source to buffer
-    LOAD_ADDR x0, buffer
+    // Set source to module buffer
+    mov x0, x21
     mov x1, x22
     bl _set_source
 
@@ -1278,23 +1273,33 @@ _load_and_parse_module_file:
     // Parse the module content
     bl _parse_module_content
     mov x22, x0  // parse result
+    LOAD_ADDR x9, fn_count
+    ldr x23, [x9]  // preserve functions discovered in the module
 
-    // Restore parser state
+    // Restore parser state but keep imported function metadata.
     mov x0, x20
     bl _restore_parser_state
+    cbz x22, Lparse_module_fail
+    LOAD_ADDR x9, fn_count
+    str x23, [x9]
 
     mov x0, x22  // return parse result
     b Lparse_module_return
 
 Lparse_module_read_error:
+    mov x0, x21
+    bl _free
+
 Lparse_module_file_error:
     mov x0, x20
     bl _restore_parser_state
 
 Lparse_module_fail:
     mov x0, #0
+    b Lparse_module_return
 
 Lparse_module_return:
+    ldp x23, x24, [sp], #16
     ldp x21, x22, [sp], #16
     ldp x19, x20, [sp], #16
     ldp x29, x30, [sp], #16
@@ -1306,6 +1311,7 @@ _parse_module_content:
     stp x29, x30, [sp, #-16]!
     mov x29, sp
     stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
 
     // Get module index (current count - 1, since we haven't added it yet)
     LOAD_ADDR x19, module_count
@@ -1329,8 +1335,23 @@ Lparse_module_loop:
     bl _match_cstr_span
     cbz x0, Lparse_module_skip_line
 
+    LOAD_ADDR x21, fn_count
+    ldr x22, [x21]  // fn_count before parsing this definition
+
     // Parse function definition
     bl _parse_fn_definition
+    cbnz x0, Lparse_module_error
+
+    ldr x9, [x21]  // fn_count after parsing
+    cmp x9, x22
+    b.le Lparse_module_loop
+    sub x9, x9, #1
+    LOAD_ADDR x10, fn_name_ptrs
+    ldr x0, [x10, x9, lsl #3]
+    LOAD_ADDR x10, fn_name_lens
+    ldr x1, [x10, x9, lsl #3]
+    mov x2, x9
+    bl _register_imported_function
     cbz x0, Lparse_module_error
 
     b Lparse_module_loop
@@ -1356,6 +1377,7 @@ Lparse_module_error:
     mov x0, #0
 
 Lparse_module_content_return:
+    ldp x21, x22, [sp], #16
     ldp x19, x20, [sp], #16
     ldp x29, x30, [sp], #16
     ret
@@ -1478,8 +1500,8 @@ _init_default_search_paths:
 
     ldp x29, x30, [sp], #16
     ret
-// _register_imported_function: register a function from a module
-// x0=function_name_ptr, x1=function_name_len, x2=module_index -> x0=success
+// _register_imported_function: register an imported function by fn index
+// x0=function_name_ptr, x1=function_name_len, x2=fn_index -> x0=success
 _register_imported_function:
     stp x29, x30, [sp, #-16]!
     mov x29, sp
@@ -1488,7 +1510,7 @@ _register_imported_function:
     
     mov x19, x0  // function name ptr
     mov x20, x1  // function name len
-    mov x21, x2  // module index
+    mov x21, x2  // function index
     
     // Get current imported function count
     LOAD_ADDR x22, imported_function_count
@@ -1530,7 +1552,7 @@ Lregister_function_copy_done:
     LOAD_ADDR x11, imported_function_names
     str x10, [x11, x9, lsl #3]
     
-    // Store module index
+    // Store function index
     LOAD_ADDR x11, imported_function_modules
     str x21, [x11, x9, lsl #3]
     
@@ -1552,12 +1574,13 @@ Lregister_function_return:
     ret
 
 // _is_imported_function: check if function is imported
-// x0=function_name_ptr, x1=function_name_len -> x0=is_imported (1=yes, 0=no), x1=module_index
+// x0=function_name_ptr, x1=function_name_len -> x0=is_imported (1=yes, 0=no), x1=fn_index
 _is_imported_function:
     stp x29, x30, [sp, #-16]!
     mov x29, sp
     stp x19, x20, [sp, #-16]!
     stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
     
     mov x19, x0  // function name ptr
     mov x20, x1  // function name len
@@ -1566,15 +1589,15 @@ _is_imported_function:
     LOAD_ADDR x21, imported_function_count
     ldr x22, [x21]
     
-    mov x9, #0  // loop counter
-    
+    mov x23, #0  // loop counter
+
 Lis_imported_loop:
-    cmp x9, x22
+    cmp x23, x22
     b.ge Lis_imported_not_found
     
-    // Get function name at index x9
+    // Get function name at index x23
     LOAD_ADDR x10, imported_function_names
-    ldr x11, [x10, x9, lsl #3]  // stored function name ptr
+    ldr x11, [x10, x23, lsl #3]  // stored function name ptr
     
     // Calculate stored name length
     mov x0, x11
@@ -1593,13 +1616,13 @@ Lis_imported_loop:
     cbnz x0, Lis_imported_found
     
 Lis_imported_next:
-    add x9, x9, #1
+    add x23, x23, #1
     b Lis_imported_loop
 
 Lis_imported_found:
-    // Get module index
+    // Get function index
     LOAD_ADDR x10, imported_function_modules
-    ldr x1, [x10, x9, lsl #3]  // module index
+    ldr x1, [x10, x23, lsl #3]  // function index
     mov x0, #1  // found
     b Lis_imported_return
 
@@ -1608,13 +1631,14 @@ Lis_imported_not_found:
     mov x1, #-1 // invalid module index
 
 Lis_imported_return:
+    ldp x23, x24, [sp], #16
     ldp x21, x22, [sp], #16
     ldp x19, x20, [sp], #16
     ldp x29, x30, [sp], #16
     ret
 
 // _resolve_function_call: resolve function call (check if imported)
-// x0=function_name_ptr, x1=function_name_len -> x0=call_type (0=local, 1=imported), x1=module_index
+// x0=function_name_ptr, x1=function_name_len -> x0=call_type (0=local, 1=imported), x1=fn_index
 _resolve_function_call:
     stp x29, x30, [sp, #-16]!
     mov x29, sp

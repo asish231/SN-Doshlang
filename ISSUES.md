@@ -14,22 +14,25 @@ Resolved work lives in `RESOLVED_ISSUES.md`.
 - hardened strings and file I/O
 - fuller multi-return support
 
-## Module system (partially implemented)
+## Module system
 
 - ✅ `use module.path` syntax parsing
 - ✅ Single and multiple module imports work
 - ✅ Dotted module paths
-- ✅ Module loading tracking infrastructure in place
-- ❌ `_load_module` crashes on any real `use` statement — see `ANTIGRAVITY_ISSUE.md`
-- ❌ Actual file loading and parsing blocked by above crash
-- ❌ Symbol resolution (imported functions not callable)
-- ❌ Module search paths (infrastructure done, blocked by crash)
+- ✅ Module file loading and parsing
+- ✅ Imported functions callable from importing file
+- ✅ Duplicate `use` handled safely
+- ✅ Module search paths (`.` and `stdlib` by default)
+- ❌ Symbol resolution across multiple chained modules
+- ❌ Standard library modules (`std.math`, `std.io` etc.)
+
+See `ANTIGRAVITY_ISSUE.md` — RESOLVED.
 
 ## Next concrete milestone
 
-- Implement actual module file loading and parsing
-- Add symbol resolution for imported functions
-- Expand test coverage and diagnostics for typed returns, cast paths, list/map edge cases, and file I/O runtime behavior
+- Standard library module stubs (`std.math`, `std.io`, `std.string`)
+- Expand test coverage for module imports with multiple functions
+- Diagnostics for typed returns, cast paths, list/map edge cases, file I/O
 
 ## Pointer ops
 

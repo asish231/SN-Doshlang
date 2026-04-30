@@ -85,6 +85,44 @@
 .global kw_has
 .global kw_keys
 .global kw_values
+.global kw_blueprint
+.global kw_new
+.global kw_contract
+.global kw_follows
+.global kw_open
+.global kw_closed
+.global kw_guarded
+.global kw_from
+.global kw_self
+.global kw_create
+.global blueprint_count
+.global blueprint_name_ptrs
+.global blueprint_name_lens
+.global blueprint_parent_ids
+.global blueprint_field_counts
+.global blueprint_field_names
+.global blueprint_field_name_lens
+.global blueprint_field_types
+.global blueprint_field_metas
+.global blueprint_field_default_flags
+.global blueprint_field_default_values
+.global blueprint_field_default_types
+.global blueprint_field_default_metas
+.global blueprint_method_counts
+.global blueprint_method_names
+.global blueprint_method_name_lens
+.global blueprint_method_fn_ids
+.global object_instance_count
+.global object_blueprint_ids
+.global object_field_var_idxs
+.global current_self_instance
+.global current_self_type
+.global current_self_meta
+.global current_blueprint_parse
+.global fn_name_override_ptr
+.global fn_name_override_len
+.global method_name_storage
+.global hidden_var_name_storage
 .global asm_header
 .global asm_runtime_helpers
 .global asm_sub_sp_prefix
@@ -293,6 +331,8 @@
 .global fn_name_lens
 .global fn_body_cursors
 .global fn_body_lines
+.global fn_source_ptrs
+.global fn_source_lens
 .global fn_param_counts
 .global fn_param_types
 .global fn_param_lengths
@@ -403,6 +443,16 @@ kw_contains:      .asciz "contains"
 kw_has:            .asciz "has"
 kw_keys:          .asciz "keys"
 kw_values:        .asciz "values"
+kw_blueprint:     .asciz "blueprint"
+kw_new:           .asciz "new"
+kw_contract:      .asciz "contract"
+kw_follows:       .asciz "follows"
+kw_open:          .asciz "open"
+kw_closed:        .asciz "closed"
+kw_guarded:       .asciz "guarded"
+kw_from:          .asciz "from"
+kw_self:          .asciz "self"
+kw_create:        .asciz "create"
 asm_sub_sp_prefix:
     .asciz "    sub sp, sp, #"
 asm_header:
@@ -958,6 +1008,8 @@ fn_name_ptrs:   .space 512         // 64 functions * 8 bytes
 fn_name_lens:   .space 512
 fn_body_cursors: .space 512
 fn_body_lines:  .space 512
+fn_source_ptrs: .space 512
+fn_source_lens: .space 512
 fn_param_counts: .space 512
 fn_return_types: .space 512
 fn_param_types: .space 2048        // 64 fns * 4 params * 8 bytes
@@ -983,3 +1035,31 @@ saved_var_count: .space 8
 imported_function_names: .space 4096
 imported_function_modules: .space 4096
 imported_function_count: .space 8
+blueprint_count:      .space 8
+blueprint_name_ptrs:  .space 512         // 64 blueprints * 8 bytes
+blueprint_name_lens:  .space 512
+blueprint_parent_ids: .space 512
+blueprint_field_counts: .space 512
+blueprint_field_names: .space 4096        // 64 blueprints * 8 fields * 8 bytes
+blueprint_field_name_lens: .space 4096
+blueprint_field_types: .space 4096
+blueprint_field_metas: .space 4096
+blueprint_field_default_flags: .space 4096
+blueprint_field_default_values: .space 4096
+blueprint_field_default_types: .space 4096
+blueprint_field_default_metas: .space 4096
+blueprint_method_counts: .space 512
+blueprint_method_names: .space 4096
+blueprint_method_name_lens: .space 4096
+blueprint_method_fn_ids: .space 4096
+object_instance_count: .space 8
+object_blueprint_ids: .space 1024         // 128 instances * 8 bytes
+object_field_var_idxs: .space 8192        // 128 instances * 8 fields * 8 bytes
+current_self_instance: .space 8
+current_self_type: .space 8
+current_self_meta: .space 8
+current_blueprint_parse: .space 8
+fn_name_override_ptr: .space 8
+fn_name_override_len: .space 8
+method_name_storage: .space 4096          // 64 synthetic fn names * 64 bytes
+hidden_var_name_storage: .space 16384     // 512 hidden var names * 32 bytes

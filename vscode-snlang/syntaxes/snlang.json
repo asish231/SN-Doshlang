@@ -28,7 +28,7 @@
       "patterns": [
         {
           "name": "keyword.control.snlang",
-          "match": "\\b(fn|if|else|while|for|in|stop|skip|return|match|default|use|const|let)\\b"
+          "match": "\\b(fn|if|else|while|for|in|stop|skip|return|match|default|use|const|let|blueprint|contract|from|follows|new)\\b"
         },
         {
           "name": "keyword.operator.snlang",
@@ -36,7 +36,7 @@
         },
         {
           "name": "keyword.other.snlang",
-          "match": "\\b(true|false|none|otherwise)\\b"
+          "match": "\\b(true|false|none|otherwise|self|open|closed|guarded)\\b"
         }
       ]
     },
@@ -44,7 +44,7 @@
       "patterns": [
         {
           "name": "storage.type.snlang",
-          "match": "\\b(int|str|bool|byte|dec|list|map)\\b"
+          "match": "\\b(int|str|bool|byte|dec|list|map|ref)\\b"
         }
       ]
     },

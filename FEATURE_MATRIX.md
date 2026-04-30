@@ -145,13 +145,13 @@ This file tracks spec vs implementation status.
 
 | Feature | Spec | Status | Notes |
 |---|---|---|---|
-| `blueprint` (class) | Yes | MISSING | |
-| `object` creation | Yes | MISSING | |
-| `contract` (interface) | Yes | MISSING | |
-| Inheritance `from` | Yes | MISSING | |
-| `follows` (implements) | Yes | MISSING | |
-| Access control `open/closed/guarded` | Yes | MISSING | |
-| `self` reference | Yes | MISSING | |
+| `blueprint` (class) | Yes | PARTIAL | Field metadata, instances, field access, and methods work |
+| `object` creation | Yes | PARTIAL | Named field init and basic method calls work; `create()` path still limited |
+| `contract` (interface) | Yes | PARSER-ONLY | Contract signatures parse; enforcement still pending |
+| Inheritance `from` | Yes | PARTIAL | Parent names recorded; inherited field/method lookup supported |
+| `follows` (implements) | Yes | PARSER-ONLY | Header syntax accepted |
+| Access control `open/closed/guarded` | Yes | PARSER-ONLY | Modifiers parse inside blueprints |
+| `self` reference | Yes | PARTIAL | `self.field` and `self` method execution work in supported cases |
 | `ref<T>` pointer | Yes | DONE | Type and memory opcodes complete |
 | `address()` / `value()` / `set()` | Yes | DONE | Memory ops mapped to ARM64 instructions |
 | `alloc()` / `free()` | Yes | DONE | Wraps libc `_malloc`/`_free` |
