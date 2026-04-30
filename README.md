@@ -118,8 +118,12 @@ fn main() {
 **Current module system status:**
 - ✅ `use module.path` syntax parsing
 - ✅ Single and multiple module imports work
-- ❌ Imported functions not yet callable
-- ❌ No actual file loading yet
+- ✅ Dotted module paths
+- ✅ Module file loading and parsing
+- ✅ Imported functions callable from importing file
+- ✅ Duplicate `use` handled safely
+- ✅ Module search paths (`.` and `stdlib` by default)
+- ❌ Symbol resolution across multiple chained modules (cannot access symbols from transitive imports; must import each module directly)
 
 ### String Interpolation
 
