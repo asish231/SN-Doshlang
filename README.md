@@ -8,6 +8,25 @@
 
 **SNlang** (originally named **DOSH lang**, but formally SNlang since it is natively compiled) is a programming language created from scratch in 7 days by its author and creator, **Asish Kumar Sharma**, similar to how Linus Torvalds originally built Linux.
 
+## The Motive and Story
+
+The core motive behind SNlang is to make programming **natively fast** while remaining **incredibly simple** to write. It was born out of a desire to eliminate repetitive boilerplate code and unnecessary syntax, like the semicolon (`;`), when they aren't actually needed.
+
+SNlang is designed to give you:
+- The **speed and structuring** of C (but better looking and easier to use).
+- The **simplicity** of Golang.
+- The **feel and readability** of Python.
+- Zero boilerplate, removing the verbose overhead of Java (like `Class obj = new Class();`).
+
+To achieve this clarity, SNlang strips away confusing and misleading legacy keywords:
+- `class` is replaced with `blueprint`.
+- `extends` is replaced with `from`.
+- Pointers don't use confusing `*` syntax; they use a readable `ref<T>` approach.
+- Cumbersome input methods like `scanf` or `System.in` are replaced with a simple `input()`.
+- Function return types use a clear arrow syntax, like `-> int` or `-> str`, making the code actually readable.
+
+It is a natively compiled language that is **fast enough to be broadly used**, providing the raw performance of native execution without sacrificing the developer experience.
+
 `snc` is a small programming language compiler written in ARM64 assembly.
 
 It reads `.sn` source code and emits ARM64 assembly that can be assembled with `clang`.
