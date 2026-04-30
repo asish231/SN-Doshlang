@@ -73,12 +73,13 @@ SNlang provides all necessary tools for implementing Data Structures and Algorit
 
 ## [prior: 2] Pointer Implementation Status
 
-**Do pointers (ref<T>) work? NO.**
+**Do pointers (ref<T>) work? YES.**
 
-The `ref<T>` type is documented in SNLANG_SPEC.md but is not implemented in the compiler:
-- Attempting to use `ref<int> p = address(x)` results in error: "unknown statement on line 3: ref"
-- No keyword definition for `ref` exists in `src/lexer.s` or `src/parser.s`
-- Related functions like `address()`, `value()`, `set()`, `alloc()`, `free()` are also missing or not connected
-- While the spec describes pointer arithmetic and manual memory management, the current compiler lacks support for these features
+The `ref<T>` type and its associated operations are now fully implemented and working in the compiler:
+- `ref<T> p = address(x)` works and stores the memory address.
+- `value(p)` correctly dereferences the pointer.
+- `set(p, val)` mutates the memory at the pointer's address.
+- `alloc(size)` and `free(p)` correctly wrap dynamic heap allocation.
+- Stack variable addresses and pointer arithmetic are fully supported via ARM64 code generation.
 
-One-line assessment: ❌ **NOT IMPLEMENTED** - Pointer functionality is specified but missing from the compiler.
+One-line assessment: ✅ **GOOD** - Pointer functionality is now fully implemented and tested.

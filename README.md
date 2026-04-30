@@ -127,6 +127,7 @@ Supported today:
 - `none`, nullable `?` declarations, and `otherwise`
 - default parameters
 - logical `and`, `or`, and `not`
+- pointers (`ref<T>`), memory allocation (`alloc()`, `free()`), and dereferencing (`value()`, `set()`)
 - `// line comments`
 - `/* block comments */`
 
@@ -140,7 +141,8 @@ Still planned from `SNLANG_SPEC.md`:
 - multiple return values
 - blueprints/contracts/OOP
 - real module loading and imports
-- pointers, allocation, and concurrency
+- self-hosting (requires modules, structs, and advanced strings)
+- concurrency
 
 ## How To Use It
 

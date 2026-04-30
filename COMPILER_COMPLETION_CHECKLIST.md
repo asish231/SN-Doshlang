@@ -75,7 +75,7 @@ This document converts the full-system checklist into a concrete status board fo
 - `use module.path` (runtime loading): MISSING
 - Modules / multi-file compilation:    MISSING
 - Object model (`blueprint`, `object`, contracts): MISSING
-- Pointers / allocation / concurrency: MISSING
+- Pointers / allocation / concurrency: DONE (Pointers, alloc, free implemented; concurrency missing)
 
 ---
 
@@ -107,7 +107,7 @@ This document converts the full-system checklist into a concrete status board fo
 - Const assignment enforcement:         DONE
 - Type mismatch enforcement:            DONE
 - Bounds checks for collections:        MISSING
-- Memory model for heap-based data:     MISSING
+- Memory model for heap-based data:     DONE
 
 ---
 

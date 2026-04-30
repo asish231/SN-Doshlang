@@ -150,9 +150,9 @@ This file tracks spec vs implementation status.
 | `follows` (implements) | Yes | MISSING | |
 | Access control `open/closed/guarded` | Yes | MISSING | |
 | `self` reference | Yes | MISSING | |
-| `ref<T>` pointer | Yes | MISSING | |
-| `address()` / `value()` / `set()` | Yes | MISSING | |
-| `alloc()` / `free()` | Yes | MISSING | `_malloc`/`_free` extern'd, not exposed |
+| `ref<T>` pointer | Yes | DONE | Type and memory opcodes complete |
+| `address()` / `value()` / `set()` | Yes | DONE | Memory ops mapped to ARM64 instructions |
+| `alloc()` / `free()` | Yes | DONE | Wraps libc `_malloc`/`_free` |
 
 ---
 

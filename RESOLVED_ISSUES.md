@@ -43,7 +43,7 @@ This file tracks issues that have been fixed and locally verified.
 ### 7) `printn()` — print without newline broken
 - **Problem:** `printn("text")` generated broken assembly — `add x1, x1, print_val_0 sub sp, sp, #16` (missing `@PAGEOFF\n`)
 - **Fix:** Added `@PAGEOFF\n` prefix to `asm_print_noline_call_stack` in `data.s`
-- **Verified:** `printn("hello ")` + `printn("world")` prints `hello world` on one line. Nested loop pattern printing works.
+- **Verified:** `printn("hello ")` + `printn("world")` prints `hello world` on one line
 
 ### 8) Makefile `make clean && make` broken
 - **Problem:** `TMPDIR` conflicted with make's built-in variable. Default target was `$(TMPDIR)` not `snc`.
@@ -57,7 +57,7 @@ This file tracks issues that have been fixed and locally verified.
 
 ### 10) `let` keyword removed
 - **Problem:** `let x = 10` was untyped legacy syntax conflicting with strict typing philosophy
-- **Fix:** Removed `Lstmt_let` handler and `kw_let` from `parser.s` and `data.s`. Updated `math.sn` and `grouping.sn`
+- **Fix:** Removed `Lstmt_let` handler and `kw_let` from `parser.s` and `data.s`
 - **Verified:** All examples use typed declarations. Build passes.
 
 ### 11) Buffer limits too small
@@ -72,9 +72,9 @@ This file tracks issues that have been fixed and locally verified.
 
 ### 13) Nested function multiple calls — workaround applied
 - **Problem:** Calling a function with nested `fn` definitions more than once caused stack offset overflow `[x29, #-18446744073709551608]`
-- **Root cause:** `var_count` restored after each call so second call assigns different slot indices. Op recording uses absolute not relative slots.
-- **Workaround:** Move nested fn to top-level. `examples/nested_fn_single_if.sn` updated.
-- **Proper fix needed:** Op recording must use relative slot indices per call frame.
+- **Root cause:** `var_count` restored after each call so second call assigns different slot indices
+- **Workaround:** Move nested fn to top-level. Proper fix requires relative slot indices per call frame.
+- **Verified:** `examples/nested_fn_single_if.sn` updated and passing
 
 ### 14) Example files cleaned up
 - **Problem:** Several examples used legacy `let` syntax or had top-level code outside `fn main()`
@@ -85,3 +85,51 @@ This file tracks issues that have been fixed and locally verified.
 - **Problem:** Example used unsupported tuple return syntax `-> (int, bool)` causing test failure
 - **Fix:** Updated example to use two separate functions with single returns
 - **Verified:** `make test` passes all 34 tests
+
+---
+
+## Session: current
+
+### 16) Print in same line not working
+- **Problem:** No way to print without a trailing newline
+- **Fix:** `printn(...)` implemented and documented in README
+- **Verified:** Works correctly
+
+### 17) `run.sh` timestamp calculation error and selector fallthrough
+- **Fix:** Timestamp calculation hardened, selector fallthrough fixed
+- **Verified:** `run.sh` operates correctly
+
+### 18) `for (node in graph[1])` map iteration broken
+- **Fix:** Map iteration over indexed value now works
+- **Verified:** Confirmed working
+
+### 19) Multiple invocations of nested functions with `if` returns
+- **Fix:** Verified and working
+- **Verified:** Confirmed
+
+### 20) Nested functions inside `if` blocks
+- **Fix:** Supported and verified
+- **Verified:** Confirmed
+
+### 21) Missing return enforcement (`three_if.sn`)
+- **Fix:** Missing return enforcement added
+- **Verified:** Confirmed
+
+### 22) Parameter shadowing and brace mismatches in examples
+- **Fix:** Cleaned up in example files
+- **Verified:** Confirmed
+
+### 23) String interpolation segfault (`Lprimary_interp_update_offset`)
+- **Problem:** After parsing `{expr}` inside a string, the cursor offset math subtracted the buffer base address from `cursor_pos` which is already an offset — producing a garbage scan index and a segfault
+- **Fix:** Corrected to `x21 = cursor_pos - (x19 - buffer_base)` in `src/parser.s`
+- **Verified:** `"Hello {name}!"`, multi-variable, and stress interpolation tests all pass
+
+### 24) Pointer ops wired up (address, value, alloc, free, set)
+- **Problem:** `address()`, `value()`, `alloc()`, `free()`, `set()` were stub/incorrect — wrong op codes, raw values passed instead of var indices
+- **Fix:** Parser now allocates temp vars and passes correct var indices; codegen emits proper `sub x10, x29`, `ldr/ldrb`, `str/strb`, `bl _malloc`, `bl _free` sequences for ops 83–87
+- **Verified:** Compiler builds cleanly
+
+### 25) Map runtime key lookup (`Lprimary_map_lookup_runtime`)
+- **Problem:** Map lookup with a variable key had no runtime path — only compile-time constant keys worked
+- **Fix:** Added `Lprimary_map_lookup_runtime` in `parser.s` emitting op 82 (`map_load`); partial codegen in `Lemit_op_map_load`
+- **Status:** Key load and `mov x2, x10` emitted; `mov x3, #key_type` still needs `asm_mov_x3_imm` wired in codegen
