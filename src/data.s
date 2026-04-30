@@ -159,6 +159,8 @@
 .global asm_mov_x12_x10
 .global asm_mov_x10_x12
 .global asm_mov_x0_x10
+.global asm_mov_x2_x10
+.global asm_mov_x3_imm
 .global asm_load_pool_val_x10_from_x12
 .global asm_load_list_pool_lens_x11
 .global asm_load_map_pool_lens_x11
@@ -475,6 +477,15 @@ asm_print_dec_call_stack:
 .global asm_print_noline_call_suffix
 .global asm_print_noline_call_suffix_stack
 .global asm_print_noline_stack_only
+.global asm_call_free
+.global asm_call_malloc
+.global asm_ldr_x10_x11
+.global asm_ldrb_w10_x11
+.global asm_mov_x0_imm_prefix
+.global asm_store_val_ldr_x10
+.global asm_str_x10_x11
+.global asm_strb_w10_x11
+.global asm_sub_x10_x29_imm
 asm_print_noline_call_stack:
 #ifdef _WIN32
     .asciz "@PAGEOFF\n    sub sp, sp, #16\n    str x1, [sp]\n    bl printf\n    add sp, sp, #16\n"
@@ -756,6 +767,42 @@ asm_call_file_write:
 #else
     .asciz "    bl _file_write\n"
 #endif
+.globl asm_sub_x10_x29_imm
+asm_sub_x10_x29_imm:
+    .asciz "    sub x10, x29, #"
+.globl asm_ldr_x10_x11
+asm_ldr_x10_x11:
+    .asciz "    ldr x10, [x11]\n"
+.globl asm_ldrb_w10_x11
+asm_ldrb_w10_x11:
+    .asciz "    ldrb w10, [x11]\n"
+.globl asm_str_x10_x11
+asm_str_x10_x11:
+    .asciz "    str x10, [x11]\n"
+.globl asm_strb_w10_x11
+asm_strb_w10_x11:
+    .asciz "    strb w10, [x11]\n"
+.globl asm_store_val_ldr_x10
+asm_store_val_ldr_x10:
+#ifdef _WIN32
+    .asciz "\n    ldr x10, [x9, :lo12:store_val_"
+#else
+    .asciz "@PAGE\n    ldr x10, [x9, store_val_"
+#endif
+.globl asm_call_malloc
+asm_call_malloc:
+#ifdef _WIN32
+    .asciz "    bl malloc\n"
+#else
+    .asciz "    bl _malloc\n"
+#endif
+.globl asm_call_free
+asm_call_free:
+#ifdef _WIN32
+    .asciz "    bl free\n"
+#else
+    .asciz "    bl _free\n"
+#endif
 asm_call_read:
 #ifdef _WIN32
     .asciz "    bl read\n"
@@ -776,6 +823,9 @@ asm_input_buffer_pageoff:
     .asciz "@PAGE\n    add x1, x1, input_buf_"
 asm_input_write_fd:
     .asciz "    mov x0, #1\n"
+.globl asm_mov_x0_imm_prefix
+asm_mov_x0_imm_prefix:
+    .asciz "    mov x0, #"
 asm_input_read_fd:
     .asciz "    mov x0, #0\n"
 asm_input_len_prefix:
@@ -804,6 +854,10 @@ asm_input_store_x0_str:
     .asciz "    stur x0, [x29, #-"
 asm_mov_x0_x10:
     .asciz "    mov x0, x10\n"
+asm_mov_x2_x10:
+    .asciz "    mov x2, x10\n"
+asm_mov_x3_imm:
+    .asciz "    mov x3, #"
 asm_newline:
     .asciz "\n"
 asm_load_list_pool_x11:

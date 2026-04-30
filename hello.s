@@ -18,18 +18,14 @@ _main:
     stp x29, x30, [sp, #-16]!
     mov x29, sp
     sub sp, sp, #16
-    adrp x0, print_fmt_int@PAGE
-    add x0, x0, print_fmt_int@PAGEOFF
-    adrp x9, print_val_0@PAGE
-    ldr x1, [x9, print_val_0@PAGEOFF]
-    sub sp, sp, #16
-    str x1, [sp]
-    bl _printf
-    add sp, sp, #16
-    adrp x0, print_fmt_int@PAGE
-    add x0, x0, print_fmt_int@PAGEOFF
-    adrp x9, print_val_1@PAGE
-    ldr x1, [x9, print_val_1@PAGEOFF]
+    adrp x0, print_val_0@PAGE
+    add x0, x0, print_val_0@PAGEOFF
+    mov x10, x0
+    stur x10, [x29, #-8]
+    adrp x0, print_fmt_str@PAGE
+    add x0, x0, print_fmt_str@PAGEOFF
+    adrp x1, print_val_1@PAGE
+    add x1, x1, print_val_1@PAGEOFF
     sub sp, sp, #16
     str x1, [sp]
     bl _printf
@@ -59,21 +55,17 @@ dec_sign_minus:
 .align 3
 .align 3
 print_val_0:
-    .quad 25
+    .asciz "Hello, World!"
 .align 3
 print_val_1:
-    .quad 30
+    .asciz "Hello, World!"
 .align 3
 list_pool_values:
 list_pool_lengths:
 map_pool_keys:
-    .quad 4376753508
 map_pool_key_lengths:
-    .quad 5
 map_pool_values:
-    .quad 25
 map_pool_lengths:
-    .quad 0
 
 
 .text

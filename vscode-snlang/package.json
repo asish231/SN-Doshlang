@@ -4,6 +4,7 @@
   "description": "SNlang language support for VS Code",
   "version": "1.0.0",
   "publisher": "snlang",
+  "icon": "./icon.png",
   "engines": {
     "vscode": "^1.50.0"
   },
@@ -16,6 +17,10 @@
         "id": "snlang",
         "aliases": ["SNlang", "sn"],
         "extensions": [".sn"],
+        "icon": {
+          "light": "./icon.png",
+          "dark": "./icon.png"
+        },
         "configuration": "./language-configuration.json"
       }
     ],
@@ -24,13 +29,6 @@
         "language": "snlang",
         "scopeName": "source.snlang",
         "path": "./syntaxes/snlang.json"
-      }
-    ],
-    "iconThemes": [
-      {
-        "id": "snlang",
-        "label": "SNlang Icon",
-        "path": "./icon.png"
       }
     ]
   }

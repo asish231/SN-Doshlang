@@ -1,0 +1,21 @@
+fn main() {
+    int a = 10
+    int b = 20
+
+    ref<int> pa = address(a)
+    ref<int> pb = address(b)
+
+    print(value(pa))
+    print(value(pb))
+
+    set(pa, value(pb))
+    print(a)
+
+    ref<int> heap = alloc(64)
+    set(heap, 999)
+    print(value(heap))
+    free(heap)
+
+    print(a)
+    print(b)
+}

@@ -1,0 +1,15 @@
+fn main() {
+    int x = 42
+    print(x)
+
+    ref<int> p = address(x)
+    print(value(p))
+
+    set(p, 100)
+    print(x)
+
+    ref<int> b = alloc(16)
+    set(b, 5)
+    print(value(b))
+    free(b)
+}

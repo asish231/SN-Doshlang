@@ -85,6 +85,7 @@ Ldefine_store:
     str x23, [x24]
 Ldefine_success:
     mov x0, #0
+    sub x4, x23, #1  // return the new var's index in x4
     b Ldefine_return
 
 Ldefine_duplicate:

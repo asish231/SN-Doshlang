@@ -287,6 +287,7 @@ Lstmt_set:
     cmp x22, #9 // must be ref
     b.ne Lstmt_type_mismatch
     mov x26, x3 // element type metadata
+    mov x27, x4 // ptr var idx
 
     bl _skip_whitespace
     mov w0, #','
@@ -299,6 +300,7 @@ Lstmt_set:
     mov x24, x2 // type ID
     cmp x24, x26
     b.ne Lstmt_type_mismatch
+    mov x25, x4 // set var idx
 
     bl _skip_whitespace
     mov w0, #')'
@@ -307,12 +309,13 @@ Lstmt_set:
 
     bl _consume_optional_semicolon
 
-    // Emit pointer set operation
-    mov x0, #80 // op_set_ptr
-    mov x1, x21 // pointer value (var_slot holding the address)
-    mov x2, x23 // value to set
-    mov x3, x26 // element type
-    bl _record_operation3
+    // Emit pointer set operation (87)
+    mov x0, #87 // op_set_ptr
+    mov x1, x27 // ptr var idx
+    mov x2, x23 // value to set (imm)
+    mov x3, x25 // set var idx
+    mov x4, x26 // element type
+    bl _record_operation4
     cbnz x0, Lstmt_fail
 
     mov x0, #0
@@ -330,6 +333,7 @@ Lstmt_free:
     mov x22, x2 // type ID
     cmp x22, #9 // must be ref
     b.ne Lstmt_type_mismatch
+    mov x23, x4 // ptr var idx
 
     bl _skip_whitespace
     mov w0, #')'
@@ -338,9 +342,10 @@ Lstmt_free:
 
     bl _consume_optional_semicolon
 
-    // Emit free operation
-    mov x0, #81 // op_free_ptr
-    mov x1, x21 // pointer value
+    // Emit free operation (86)
+    mov x0, #86 // op_free_ptr
+    mov x1, x23 // ptr var idx
+    mov x2, x21 // ptr val
     bl _record_operation
     cbnz x0, Lstmt_fail
 
@@ -938,6 +943,7 @@ Lstmt_ref_name:
     mov x21, x1 // value
     mov x22, x2 // type ID
     mov x25, x3 // metadata (for ref it could be element type, but maybe just value is enough)
+    mov x26, x4 // src var idx (temp var from address/alloc, or -1 if immediate)
 
     // Check if types match exactly or none
     cmp x22, x24
@@ -966,11 +972,26 @@ Lstmt_ref_value_ok:
     mov x1, x20
     bl _lookup_variable
     cbz x0, Lstmt_fail
+    // x4 = newly defined var idx
+
+    cmp x26, #-1
+    b.eq Lstmt_ref_store_imm
+
+    // Result is in a temp var — emit store_var_var (45)
+    mov x0, #45
+    mov x1, x4   // dest var idx
+    mov x2, x26  // src var idx (temp)
+    bl _record_operation
+    cbnz x0, Lstmt_fail
+    b Lstmt_ref_done
+
+Lstmt_ref_store_imm:
     mov x0, x4
     mov x1, x21
     bl _record_store_variable
     cbnz x0, Lstmt_fail
 
+Lstmt_ref_done:
     mov x0, #0
     b Lstmt_return
 
@@ -1706,7 +1727,8 @@ Lstmt_index_map_insert_skip_ptr:
     mov x2, x11
     bl _set_variable_metadata
 
-    b Lstmt_index_map_store
+    b Lstmt_index_map_store_done
+
 Lstmt_index_map_cmp_str:
     LOAD_ADDR x17, map_pool_key_lengths
     ldr x0, [x17, x16, lsl #3]
@@ -1727,27 +1749,13 @@ Lstmt_index_map_store:
     str x25, [x17, x16, lsl #3]
     LOAD_ADDR x17, map_pool_lengths
     str x27, [x17, x16, lsl #3]
-    // Update the variable's metadata count so future lookups see the new entry
-    mov x0, x19
-    mov x1, x20
-    bl _lookup_variable
-    cbz x0, Lstmt_fail
-    // x1=value x2=type x3=metadata. Update count (lower 32 bits) to x14
-    mov x28, x1  // save value
-    mov x27, x2  // save type
-    and x26, x3, #0xFFFFFFFF00000000
-    orr x26, x26, x14  // new metadata with updated count
-    mov x0, x19
-    mov x1, x20
-    mov x2, x28  // value
-    mov x3, x27  // type
-    mov x4, x26  // new metadata
-    bl _set_variable_full
+Lstmt_index_map_store_done:
     bl _consume_optional_semicolon
     mov x0, #0
     b Lstmt_return
 
 Lstmt_tuple_assign:
+
     // x19=name ptr, x20=name len (first var) already set by identifier parse
     bl _advance_char
     bl _skip_whitespace
@@ -5366,61 +5374,93 @@ Lprimary_map_lookup_val:
     lsr x9, x27, #40 // expected key type
     cmp x24, x9
     b.ne Lprimary_fail
-    
+
     and x20, x27, #0xFFFFFFFF // count
     cbz x20, Lprimary_fail
-    
+
+    // If key came from a variable/temp slot, emit runtime load.
+    cmn x22, #1
+    b.ne Lprimary_map_lookup_runtime
+
     mov x22, #0 // loop counter
 Lmap_lookup_loop_val:
     add x10, x25, x22
     LOAD_ADDR x11, map_pool_keys
     ldr x12, [x11, x10, lsl #3]
-    
+
     // If it's a string, we need to compare using _match_span_span
     cmp x24, #2
     b.eq Lmap_lookup_str_val
-    
+
     // Not a string, normal compare
     cmp x12, x23
     b.eq Lmap_lookup_found_val
     b Lmap_lookup_next_val
-    
+
 Lmap_lookup_str_val:
     LOAD_ADDR x11, map_pool_key_lengths
     ldr x13, [x11, x10, lsl #3]
     // x12=pool ptr, x13=pool len, x23=lookup ptr, x21=lookup len
     cmp x13, x21
     b.ne Lmap_lookup_next_val
-    
+
     // Call _match_span_span(x12, x13, x23)
-    // We need to save our state. _match_span_span clobbers x0,x1,x2,x9,x10,x11,x19,x20...
-    // WAIT! _match_span_span saves x19, x20! So we can safely use them!
-    // But we are currently using x19..x28!
-    // Let's look at _match_span_span. It saves x19, x20, x29, x30. It doesn't save x10!
-    // We must push/pop what we need.
     stp x20, x22, [sp, #-16]!
     stp x25, x26, [sp, #-16]!
     stp x27, x28, [sp, #-16]!
-    
+
     mov x0, x12
     mov x1, x13
     mov x2, x23
     bl _match_span_span
     mov x12, x0 // result
-    
+
     ldp x27, x28, [sp], #16
     ldp x25, x26, [sp], #16
     ldp x20, x22, [sp], #16
-    
+
     cbnz x12, Lmap_lookup_found_val
-    
+
 Lmap_lookup_next_val:
     add x22, x22, #1
     cmp x22, x20
     b.lt Lmap_lookup_loop_val
     b Lprimary_fail
 
+Lprimary_map_lookup_runtime:
+    // x25 = map pool base index
+    // x22 = key var slot id
+    // x27 = map metadata
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+    bl _allocate_temp_var
+    mov x19, x0 // dest var id
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+
+    // op 82: map_load(dest, key_var, base_idx, count | flags)
+    mov x0, #82
+    mov x1, x19 // dest
+    mov x2, x23 // key var id
+    mov x3, x25 // base pool index
+    and x4, x27, #0xFFFFFFFF // count
+    lsr x9, x27, #40 // key type
+    lsl x9, x9, #56
+    orr x4, x4, x9
+    ubfx x9, x27, #32, #8 // val type
+    cmp x9, #2 // str
+    orr x4, x4, x9, lsl #48
+    bl _record_operation4
+    cbnz x0, Lprimary_fail
+
+    mov x25, #0
+    ubfx x26, x27, #32, #8 // val type
+    mov x27, #0
+    mov x28, x19
+    b Lprimary_suffix_loop_start
+
 Lmap_lookup_found_val:
+
     add x10, x25, x22 // restore x10 just in case
     LOAD_ADDR x11, map_pool_values
     ldr x25, [x11, x10, lsl #3]
@@ -5574,15 +5614,252 @@ Lprimary_string:
     b Lprimary_suffix_loop
 
 Lprimary_string_interpolated:
-    // x1 = ptr, x2 = len
-    // For now, let's just treat it as a normal string to avoid breaking things,
-    // until we have the full interpolation logic.
-    mov x3, x2
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+    stp x25, x26, [sp, #-16]!
+    stp x27, x28, [sp, #-16]!
+
+    mov x19, x1 // full string content ptr
+    mov x20, x2 // full string content len
+    mov x21, #0 // current offset relative to x19
+    mov x22, #-1 // result var id (-1 = none yet)
+
+Lprimary_interp_loop:
+    cmp x21, x20
+    b.ge Lprimary_interp_done
+    
+    // Find next '{'
+    mov x23, x21
+Lprimary_interp_find_brace:
+    cmp x23, x20
+    b.ge Lprimary_interp_last_part
+    add x9, x19, x23
+    ldrb w10, [x9]
+    cmp w10, #'{'
+    b.eq Lprimary_interp_part_found
+    add x23, x23, #1
+    b Lprimary_interp_find_brace
+
+Lprimary_interp_part_found:
+    // Prefix literal: [x21, x23)
+    sub x1, x23, x21
+    cbz x1, Lprimary_interp_expr_start
+    
+    add x0, x19, x21
+    mov x1, #2 // type str
+    sub x2, x23, x21 // len
+    bl _record_data_value
+    mov x24, x0 // data id
+    
+    bl _allocate_temp_var
+    mov x25, x0 // temp var id
+    
+    mov x0, #72 // store_str_lit
+    mov x1, x25
+    mov x2, x24
+    bl _record_operation
+    
+    cmn x22, #1
+    b.ne Lprimary_interp_prefix_concat
+    mov x22, x25
+    b Lprimary_interp_expr_start
+
+Lprimary_interp_prefix_concat:
+    bl _allocate_temp_var
+    mov x26, x0
+    mov x0, #60 // concat_str
+    mov x1, x26 // dest
+    mov x2, x22 // left
+    mov x3, x25 // right
+    mov x4, #0  // flags: both are vars
+    bl _record_operation4
+    mov x22, x26
+
+Lprimary_interp_expr_start:
+    // Update cursor to just after '{'
+    add x23, x23, #1
+    LOAD_ADDR x9, buffer
+    mov x10, x9
+    sub x11, x19, x10
+    add x11, x11, x23
+    LOAD_ADDR x9, cursor_pos
+    str x11, [x9]
+    
+    bl _parse_expr_value
+    cbz x0, Linterp_fail
+    mov x24, x1 // value
+    mov x25, x2 // type
+    mov x26, x4 // var id
+    
+    bl _skip_whitespace
+    mov w0, #'}'
+    bl _expect_char
+    cbz x0, Linterp_fail
+    
+    // Cast result to str if needed
+    cmp x25, #2
+    b.eq Lprimary_interp_expr_is_str
+    
+    mov x0, x25
+    mov x1, #2
+    mov x2, x24
+    mov x3, x26
+    bl _emit_cast_op
+    mov x26, x0 // result var id
+    b Lprimary_interp_expr_concat
+
+Lprimary_interp_expr_is_str:
+    cmn x26, #1
+    b.ne Lprimary_interp_expr_concat
+    // Immediate string - intern it
+    mov x0, x24
+    mov x1, #2
+    mov x2, #0 // length unknown
+    bl _record_data_value
+    mov x24, x0
+    bl _allocate_temp_var
+    mov x26, x0
+    mov x0, #72
+    mov x1, x26
+    mov x2, x24
+    bl _record_operation
+
+Lprimary_interp_expr_concat:
+    cmn x22, #1
+    b.ne Lprimary_interp_expr_concat_real
+    mov x22, x26
+    b Lprimary_interp_update_offset
+
+Lprimary_interp_expr_concat_real:
+    bl _allocate_temp_var
+    mov x27, x0 // Safe register.
+    mov x0, #60 // concat_str
+    mov x1, x27 // dest
+    mov x2, x22 // left
+    mov x3, x26 // right
+    mov x4, #0  // flags: both are vars
+    bl _record_operation4
+    mov x22, x27
+
+
+Lprimary_interp_update_offset:
+    LOAD_ADDR x9, cursor_pos
+    ldr x11, [x9]
+    LOAD_ADDR x9, buffer
+    mov x10, x9
+    sub x11, x11, x10
+    sub x10, x19, x10
+    sub x21, x11, x10
+    b Lprimary_interp_loop
+
+Lprimary_interp_last_part:
+    // Literal from x21 to x20
+    sub x1, x20, x21
+    cbz x1, Lprimary_interp_done
+    
+    add x0, x19, x21
+    mov x1, #2
+    sub x2, x20, x21
+    bl _record_data_value
+    mov x24, x0
+    
+    bl _allocate_temp_var
+    mov x25, x0
+    mov x0, #72
+    mov x1, x25
+    mov x2, x24
+    bl _record_operation
+    
+    cmn x22, #1
+    b.ne Lprimary_interp_last_concat
+    mov x22, x25
+    b Lprimary_interp_done
+
+Lprimary_interp_last_concat:
+    bl _allocate_temp_var
+    mov x26, x0
+    mov x0, #60 // concat_str
+    mov x1, x26 // dest
+    mov x2, x22 // left
+    mov x3, x25 // right
+    mov x4, #0  // flags: both are vars
+    bl _record_operation4
+    mov x22, x26
+
+Lprimary_interp_done:
+    // Restore cursor past the entire literal (content + closing quote)
+    LOAD_ADDR x9, buffer
+    mov x10, x9
+    sub x11, x19, x10
+    add x11, x11, x20
+    add x11, x11, #1
+    LOAD_ADDR x9, cursor_pos
+    str x11, [x9]
+
+    mov x1, #0
     mov x2, #2
-    mov x0, #1
-    mov x4, #-1
+    mov x3, #0
+    mov x4, x22
+    ldp x27, x28, [sp], #16
+    ldp x25, x26, [sp], #16
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
     b Lprimary_suffix_loop
 
+Linterp_fail:
+    ldp x27, x28, [sp], #16
+    ldp x25, x26, [sp], #16
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    b Lprimary_fail
+
+_emit_cast_op:
+    // x0=src_type, x1=dst_type, x2=src_val, x3=src_var
+    // Returns x0=new_var_id
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+    stp x25, x26, [sp, #-16]!
+    stp x27, x28, [sp, #-16]!
+
+    mov x19, x0
+    mov x20, x1
+    mov x21, x2
+    mov x22, x3
+
+    // Currently only supports int->str (73) and bool->str (future)
+    cmp x20, #2
+    b.ne Lemit_cast_unsupported
+    cmp x19, #0
+    b.eq Lemit_cast_int_to_str_op
+
+Lemit_cast_unsupported:
+    mov x0, #-1
+    b Lemit_cast_ret
+
+Lemit_cast_int_to_str_op:
+    bl _allocate_temp_var
+    mov x23, x0
+
+    mov x0, #73
+    mov x1, x23
+    mov x2, x22
+    bl _record_operation
+    mov x0, x23
+
+Lemit_cast_ret:
+    ldp x27, x28, [sp], #16
+    ldp x25, x26, [sp], #16
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
 // address(varname) — takes address of a named variable
 // Returns type=9 (ref), value=var_slot_idx, metadata=element_type
 Lprimary_address:
@@ -5611,15 +5888,24 @@ Lprimary_address:
     mov x19, x4   // var_idx
     mov x23, x2   // element type
 
-    // Emit op_address (75): result var, src var idx
-    // We need a temp var to hold the ref; emit op and store in new var slot
-    // Actually, return the var_idx as the "value" with type=9
-    // The codegen for address() will emit lea of stack slot
+    // Allocate temp var for the resulting pointer
+    stp x19, x23, [sp, #-16]!
+    bl _allocate_temp_var
+    mov x20, x0 // dest var id
+    ldp x19, x23, [sp], #16
+
+    // emit op_address (83)
+    mov x0, #83
+    mov x1, x20 // dest var id
+    mov x2, x19 // source var idx
+    bl _record_operation
+    cbnz x0, Lprimary_fail
+
     mov x0, #1
-    mov x1, x19   // var slot as value (codegen knows how to turn this into &stack_slot)
+    mov x1, #0
     mov x2, #9    // ref type
     mov x3, x23   // element type
-    mov x4, #-1
+    mov x4, x20
     b Lprimary_suffix_loop
 
 // value(ptr_var) — dereference a ref<T>
@@ -5634,7 +5920,8 @@ Lprimary_value:
     cbz x0, Lprimary_fail
     cmp x2, #9    // must be ref type
     b.ne Lprimary_fail
-    mov x21, x1   // pointer value (var_idx or immediate)
+    mov x21, x1   // pointer value
+    mov x22, x4   // ptr var id
     mov x23, x3   // element type stored in metadata
 
     bl _skip_whitespace
@@ -5642,14 +5929,28 @@ Lprimary_value:
     bl _expect_char
     cbz x0, Lprimary_fail
 
-    // Emit a special deref operation at codegen time via a store+load trick
-    // For now, represent as type=element_type, value=pointer_value, special var
-    // We'll use op 76 to create a temp holding the dereffed value
+    // Allocate temp var for deref result
+    stp x21, x22, [sp, #-16]!
+    stp x23, xzr, [sp, #-16]!
+    bl _allocate_temp_var
+    mov x20, x0 // dest var id
+    ldp x23, xzr, [sp], #16
+    ldp x21, x22, [sp], #16
+
+    // Emit op_deref (84)
+    mov x0, #84
+    mov x1, x20 // dest
+    mov x2, x21 // ptr value (if imm)
+    mov x3, x22 // ptr var id
+    mov x4, x23 // element type
+    bl _record_operation4
+    cbnz x0, Lprimary_fail
+
     mov x0, #1
-    mov x1, x21   // the ref var slot / address
+    mov x1, #0
     mov x2, x23   // element type
     mov x3, #0
-    mov x4, #-1   // signal it's an expression result
+    mov x4, x20
     b Lprimary_suffix_loop
 
 // alloc(size_expr) — malloc wrapper, returns ref<byte>
@@ -5671,12 +5972,25 @@ Lprimary_alloc:
     bl _expect_char
     cbz x0, Lprimary_fail
 
-    // alloc returns ref<byte> (type 9, element type 3 = byte)
+    // Allocate temp var for the allocated pointer
+    stp x21, x22, [sp, #-16]!
+    bl _allocate_temp_var
+    mov x20, x0 // dest var id
+    ldp x21, x22, [sp], #16
+
+    // emit op_alloc (85)
+    mov x0, #85
+    mov x1, x20 // dest
+    mov x2, x21 // size value
+    mov x3, x22 // size var idx
+    bl _record_operation3
+    cbnz x0, Lprimary_fail
+
     mov x0, #1
-    mov x1, x21   // size (as value, codegen will pass to malloc)
+    mov x1, #0
     mov x2, #9    // ref type
     mov x3, #3    // element type = byte
-    mov x4, #-1
+    mov x4, x20
     b Lprimary_suffix_loop
 
 Lprimary_missing:
