@@ -1,0 +1,5 @@
+fn main() {
+    list<int> lst = [100, 200, 300]
+    int idx = 1
+    print(lst[idx])
+}

@@ -2,3 +2,4 @@
 snc
 *.o
 .DS_Store
+.amazonq/rules
