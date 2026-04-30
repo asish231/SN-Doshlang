@@ -65,13 +65,14 @@ This document converts the full-system checklist into a concrete status board fo
 - `cast(x, str)` in concat:            DONE
 - `cast(bool, str)`:                   DONE
 - `cast(dec, str)`:                    DONE
-- String interpolation `{name}`:       MISSING
+- String interpolation `{name}`:       DONE
 - String methods (.length .slice etc): MISSING
 - `print()` with newline:              DONE
 - `printn()` without newline:          DONE
 - File I/O (`file_read`, `file_write`): DONE
 - `input("prompt")`:                   DONE
 - `use module.path` (syntax):          DONE
+- `use module.path` (multiple imports): DONE
 - `use module.path` (runtime loading): MISSING
 - Modules / multi-file compilation:    MISSING
 - Object model (`blueprint`, `object`, contracts): MISSING

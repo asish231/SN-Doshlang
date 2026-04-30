@@ -8,6 +8,7 @@
 .global msg_colon_space
 .global msg_expected_stmt
 .global msg_expected_name
+.global msg_module_load_error
 .global msg_expected_expr
 .global msg_expected_char
 .global msg_unknown_stmt
@@ -265,6 +266,19 @@
 .global map_pool_key_ptrs
 .global map_pool_values
 .global map_pool_lengths
+.global module_count
+.global module_names
+.global module_paths
+.global module_function_names
+.global module_function_counts
+.global module_search_paths
+.global module_search_count
+.global default_search_path_current
+.global default_search_path_stdlib
+.global module_file_path_buf
+.global imported_function_names
+.global imported_function_modules
+.global imported_function_count
 .global print_values
 .global print_lengths
 .global print_types
@@ -310,6 +324,9 @@ msg_on_line:       .asciz "line "
 msg_colon_space:   .asciz ": "
 msg_expected_stmt: .asciz "error: expected statement on "
 msg_expected_name: .asciz "error: expected variable name on "
+msg_module_load_error: .asciz "error: failed to load module on "
+default_search_path_current: .asciz "."
+default_search_path_stdlib: .asciz "stdlib"
 msg_expected_expr: .asciz "error: expected expression on "
 msg_expected_char: .asciz "error: expected character on "
 msg_unknown_stmt:  .asciz "error: unknown statement on "
@@ -919,6 +936,14 @@ map_pool_key_lengths: .space 32768
 map_pool_key_ptrs: .space 32768
 map_pool_values: .space 32768
 map_pool_lengths: .space 32768
+module_count:    .space 8
+module_names:    .space 2048      // 256 modules * 8 bytes (ptr)
+module_paths:    .space 2048      // 256 modules * 8 bytes (ptr)
+module_function_names: .space 16384  // 2048 function names * 8 bytes
+module_function_counts: .space 2048  // 256 modules * 8 bytes (count)
+module_search_paths: .space 1024
+module_search_count: .space 8
+module_file_path_buf: .space 512   // static buffer for module file paths
 print_values:   .space 16384       // 2048 prints
 print_lengths:  .space 16384
 print_types:    .space 16384
@@ -955,3 +980,6 @@ fn_exec_depth:   .space 8
 var_scope_base: .space 8
 max_var_count:  .space 8
 saved_var_count: .space 8
+imported_function_names: .space 4096
+imported_function_modules: .space 4096
+imported_function_count: .space 8

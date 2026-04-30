@@ -1,5 +1,7 @@
 #include "platform.inc"
 .global _main
+.global _read_into_buffer
+.global _set_source
 .align 4
 
 .extern _open
@@ -62,6 +64,9 @@ Lmain_have_input:
     str x1, [x2]
     LOAD_ADDR x2, var_scope_base
     str x1, [x2]
+
+    // Initialize module system
+    bl _init_default_search_paths
 
     bl _parse_program
     cbnz x0, Lmain_fail

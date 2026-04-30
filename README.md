@@ -71,12 +71,45 @@ fn main() {
     print((a + b) * 3)
     bool ready = true
     str name = "Asish"
-    print(name)
+    str greeting = "Hello {name}!"  // String interpolation
+    print(greeting)
     if (total >= 20) {
         print(1)
     } else {
         print(0)
     }
+}
+```
+
+### Module System (Basic)
+
+SNlang supports basic module imports:
+
+```sn
+use math
+use utils.string
+
+fn main() {
+    print("Modules loaded successfully")
+}
+```
+
+**Current module system status:**
+- ✅ `use module.path` syntax parsing
+- ✅ Single and multiple module imports work
+- ❌ Imported functions not yet callable
+- ❌ No actual file loading yet
+
+### String Interpolation
+
+Embed variables and expressions in strings:
+
+```sn
+fn main() {
+    str name = "World"
+    int count = 42
+    str msg = "Hello {name}! Count: {count}"
+    print(msg)  // Prints: Hello World! Count: 42
 }
 ```
 
@@ -107,7 +140,8 @@ Supported today:
 - `dec(X)` declarations and decimal arithmetic paths
 - string literals in `print(...)`
 - `input("prompt")` for `str` declarations/assignments (first-cut runtime path)
-- `use module.path` syntax
+- `use module.path` syntax (basic module loading)
+- string interpolation with `"Hello {name}!"`
 - `match (...) { ... default { ... } }`
 - runtime slots for `int` / `bool` declarations and assignments
 - runtime slots for decimal values
@@ -139,10 +173,212 @@ Still planned from `SNLANG_SPEC.md`:
 - full `list<T>` semantics
 - `map<K,V>`
 - multiple return values
-- blueprints/contracts/OOP
 - real module loading and imports
 - self-hosting (requires modules, structs, and advanced strings)
-- concurrency
+
+---
+
+# SNlang OOP Syntax (Zero Boilerplate)
+
+SNlang provides a simple yet powerful object system inspired by Go and Java.
+
+## 1. Blueprints (Classes)
+
+Define custom types with `blueprint`:
+
+```sn
+blueprint Point {
+    int x
+    int y
+
+    fn print() {
+        print("(" + self.x + ", " + self.y + ")")
+    }
+}
+```
+
+## 2. Creating Objects
+
+| Type | Syntax | Variable Type |
+| :--- | :--- | :--- |
+| Heap | `new Point p(x: 10, y: 20)` | `ref<Point>` |
+| Stack | `Point p(x: 10, y: 20)` | `Point` (value) |
+
+```sn
+new Point p(x: 10, y: 20)  // Heap allocation
+p.print()                 // Heap objects use . directly
+
+Point q(x: 5, y: 15)        // Stack allocation
+q.print()                   // Same syntax, auto-cleanup
+```
+
+## 3. Contracts (Interfaces)
+
+Define interfaces with `contract`, implement with `follows`:
+
+```sn
+contract Drawable {
+    fn draw()
+}
+
+blueprint Circle follows Drawable {
+    fn draw() { print("Drawing Circle") }
+}
+
+blueprint Square follows Drawable {
+    fn draw() { print("Drawing Square") }
+}
+```
+
+## 4. Inheritance
+
+Use `from` for single inheritance:
+
+```sn
+blueprint Animal {
+    str species
+    fn describe() { print("I am a " + self.species) }
+}
+
+blueprint Dog from Animal {
+    str breed
+    fn bark() { print("Woof!") }
+}
+```
+
+## 5. Access Control
+
+| Modifier | Scope |
+| :--- | :--- |
+| `open` | Public (default) |
+| `closed` | Private (blueprint only) |
+| `guarded` | Protected (blueprint + children) |
+
+---
+
+# SNlang Concurrency
+
+Simple built-in concurrency primitives.
+
+## 1. Spawning Threads
+
+```sn
+spawn {
+    for (i in 0..1000) {
+        print("Working: " + i)
+    }
+}
+print("Main continues immediately")
+```
+
+## 2. Channels (Message Passing)
+
+```sn
+chan<int> numbers
+
+spawn {
+    for (i in 0..10) {
+        numbers.send(i)
+    }
+    numbers.close()
+}
+
+spawn {
+    while (numbers.open) {
+        print("Received: " + numbers.receive())
+    }
+}
+```
+
+## 3. Locks (Synchronization)
+
+```sn
+lock counterLock
+int counter = 0
+
+fn increment() {
+    lock(counterLock) {
+        counter += 1
+    }
+}
+
+spawn increment()
+spawn increment()
+print(counter)  // Output: 2
+```
+
+## 4. Async/Await
+
+```sn
+async fn fetchData(str url) -> str {
+    result = await httpGet(url)
+    return result
+}
+
+fn main() {
+    data = async fetchData("https://api.example.com")
+    print("Fetching...")
+    result = await data
+    print("Got: " + result)
+}
+```
+
+---
+
+# SNlang Advanced Features
+
+## Generics
+
+```sn
+blueprint Box<T> {
+    T value
+    fn get() -> T { return self.value }
+}
+
+new Box<int> intBox(value: 42)
+new Box<str> strBox(value: "Hello")
+
+print(intBox.get())   // 42
+print(strBox.get())   // Hello
+```
+
+## Error Handling
+
+```sn
+fn divide(int a, int b) -> int {
+    if (b == 0) {
+        throw("Division by zero")
+    }
+    return a / b
+}
+
+fn safeDivide() {
+    result = try divide(10, 0)
+    catch (e) {
+        print("Error: " + e)
+        return 0
+    }
+    return result
+}
+```
+
+## Memory & Ownership
+
+```sn
+fn printName(&str name) {  // Borrow
+    print(name)
+}
+
+fn consume(str s) {       // Takes ownership
+    print(s)
+}
+
+fn main() {
+    str name = "Asish"
+    printName(&name)     // Borrow: name still valid
+    move consume(name)    // Move: ownership transferred
+}
+```
 
 ## How To Use It
 

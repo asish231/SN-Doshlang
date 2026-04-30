@@ -448,7 +448,7 @@ blueprint User {
 ### Object Creation
 
 ```text
-object alice = User("Alice", "alice@mail.com", 25)
+new User alice(name: "Alice", email: "alice@mail.com", age: 25)
 print(alice.greet())
 
 if (alice.isAdult()) {
@@ -482,7 +482,7 @@ blueprint Dog from Animal {
 ```
 
 ```text
-object rex = Dog(species: "Canine", legs: 4, breed: "Labrador")
+new Dog rex(species: "Canine", legs: 4, breed: "Labrador")
 print(rex.describe())
 rex.bark()
 ```
@@ -558,6 +558,40 @@ int result = math_utils.square(5)
 print(result)   // 25
 ```
 
+### Multiple Module Imports
+
+You can import multiple modules in a single file:
+
+```text
+use std.math
+use utils.string
+use io.file
+use net.http
+
+fn main() {
+    print("All modules loaded!")
+}
+```
+
+### Dotted Module Paths
+
+Modules can be organized in hierarchical paths:
+
+```text
+use std.collections.list
+use std.collections.map
+use company.auth.jwt
+use company.database.postgres
+```
+
+**Current Implementation Status:**
+- ✅ `use module.path` syntax parsing
+- ✅ Single and multiple module imports
+- ✅ Dotted module paths (`use std.math.advanced`)
+- ❌ Actual file loading and parsing (planned)
+- ❌ Symbol resolution (imported functions not yet callable)
+- ❌ Module search paths
+
 ### Standard Library Imports
 
 ```text
@@ -573,39 +607,54 @@ use std.json        // JSON parsing
 
 ## 18. Concurrency / Threads
 
-### Simple Thread
+### Spawning Threads
 
 ```text
-thread fn downloadFile(str url) {
+fn downloadFile(str url) {
     print("Downloading: " + url)
 }
 
-downloadFile("https://example.com/data.zip")
+// Spawn new thread, continues immediately
+spawn downloadFile("https://example.com/data.zip")
 print("This runs immediately, no waiting!")
 ```
 
 ### Channels (Safe Communication)
 
 ```text
-channel<str> messages = channel()
+chan<str> messages
 
-thread fn producer() {
+spawn {
     messages.send("Hello from thread!")
 }
 
-thread fn consumer() {
+spawn {
     str msg = messages.receive()
     print(msg)
 }
-
-producer()
-consumer()
 ```
 
-### Wait for Threads
+### Locks (Synchronization)
 
 ```text
-thread fn slowTask() -> int {
+lock counterLock
+int counter = 0
+
+fn increment() {
+    lock(counterLock) {
+        counter += 1
+    }
+}
+
+spawn increment()
+spawn increment()
+print(counter)  // Output: 2
+```
+
+### Async/Await
+
+```text
+async fn slowTask() -> int {
     return 42
 }
 

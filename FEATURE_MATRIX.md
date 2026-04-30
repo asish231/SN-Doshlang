@@ -106,7 +106,7 @@ This file tracks spec vs implementation status.
 | `printn(str)` | Yes | DONE | No newline version |
 | String concat `+` | Yes | DONE | |
 | `cast(x, str)` | Yes | DONE | int, bool, dec all work |
-| String interpolation `{name}` | Yes | MISSING | Not implemented |
+| String interpolation `{name}` | Yes | DONE | `"Hello {name}!"` works |
 | `.length` | Yes | MISSING | |
 | `.slice(s, e)` | Yes | MISSING | |
 | `.contains(x)` | Yes | MISSING | |
@@ -132,9 +132,11 @@ This file tracks spec vs implementation status.
 
 | Feature | Spec | Status | Notes |
 |---|---|---|---|
-| `use module.path` syntax | Yes | DONE | Parsed, no-op |
+| `use module.path` syntax | Yes | DONE | Single and multiple imports work |
+| Dotted module paths | Yes | DONE | `use std.math.advanced` |
+| Module loading tracking | No | DONE | Prevents duplicate loads |
 | Module file loading | Yes | MISSING | Not implemented |
-| Symbol resolution | Yes | MISSING | Not implemented |
+| Symbol resolution | Yes | MISSING | Imported functions not callable |
 | Standard library | Yes | MISSING | No std.io, std.math etc |
 
 ---

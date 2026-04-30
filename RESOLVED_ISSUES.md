@@ -133,3 +133,14 @@ This file tracks issues that have been fixed and locally verified.
 - **Problem:** Map lookup with a variable key had no runtime path — only compile-time constant keys worked
 - **Fix:** Added `Lprimary_map_lookup_runtime` in `parser.s` emitting op 82 (`map_load`); partial codegen in `Lemit_op_map_load`
 - **Status:** Key load and `mov x2, x10` emitted; `mov x3, #key_type` still needs `asm_mov_x3_imm` wired in codegen
+
+### 26) Basic module system foundation
+- **Problem:** No module system — `use module.path` was parsed but ignored, no way to organize code into files
+- **Fix:** Added module loading infrastructure in `src/utils.s` and `src/data.s`. Parser now tracks loaded modules, prevents duplicates, supports dotted paths like `use std.math`
+- **Status:** Single `use` statements work. Multiple statements segfault (module name span calculation issue). File loading and symbol resolution not yet implemented.
+- **Verified:** `use math` compiles and runs successfully
+
+### 27) Multiple use statements segfault
+- **Problem:** Multiple `use` statements in one file caused segmentation faults due to malloc symbol mismatch and module name pointer management
+- **Fix:** Fixed platform-specific malloc calls and simplified module loading to avoid memory allocation issues during parsing
+- **Verified:** `use std.math; use utils.string; use io.file; use net.http` compiles and runs successfully

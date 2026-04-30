@@ -119,6 +119,20 @@ This batch upgrades `use` from syntax support into real cross-file behavior.
 - imported function calls
 - standard-library namespace groundwork such as `std.io`
 
+### Current Status
+
+**✅ Completed:**
+- `use module.path` syntax parsing
+- Single and multiple module imports
+- Dotted module paths (`use std.math.advanced`)
+- Module loading tracking (prevents duplicates)
+
+**❌ Remaining:**
+- Actual file loading and parsing
+- Symbol resolution (imported functions not callable)
+- Module search paths
+- Standard library implementation
+
 ### Why this batch is separate
 
 Modules multiply complexity across parsing, symbol tables, and code generation. They should land after the runtime and data model are stable.

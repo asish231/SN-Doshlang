@@ -3925,10 +3925,17 @@ Lmap_return:
 _parse_use_statement_after_keyword:
     stp x29, x30, [sp, #-16]!
     mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
 
     bl _skip_whitespace
     bl _parse_identifier
     cbz x0, Luse_fail
+    
+    mov x19, x1  // module name start
+    mov x20, x2  // initial module name len
+    mov x21, x1  // track current end position
+    add x21, x21, x2
 
 Luse_loop:
     bl _skip_whitespace
@@ -3936,13 +3943,37 @@ Luse_loop:
     cmp w0, #'.'
     b.ne Luse_done
     bl _advance_char
+    
     bl _parse_identifier
     cbz x0, Luse_fail
+    
+    // Update total length: from x19 to current end
+    add x22, x1, x2  // end of new identifier
+    sub x20, x22, x19  // total length from start
+    mov x21, x22  // update current end
     b Luse_loop
 
 Luse_done:
     bl _consume_optional_semicolon
+    
+    // Actually load the module
+    mov x0, x19  // module name ptr
+    mov x1, x20  // module name len
+    bl _load_module
+    cbnz x0, Luse_load_error
+    
     mov x0, #0
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+Luse_load_error:
+    LOAD_ADDR x0, msg_module_load_error
+    bl _report_error_prefix
+    mov x0, #1
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
     ldp x29, x30, [sp], #16
     ret
 
@@ -3950,6 +3981,8 @@ Luse_fail:
     LOAD_ADDR x0, msg_expected_name
     bl _report_error_prefix
     mov x0, #1
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
     ldp x29, x30, [sp], #16
     ret
 
@@ -7012,6 +7045,12 @@ Lstr_val_fail:
 .global _parse_fn_definition
 .global _call_function
 .global _lookup_function
+.global _parse_identifier
+.global _skip_whitespace
+.global _is_eof
+.global _peek_char
+.global _advance_char
+.global _get_cursor_ptr
 
 _parse_fn_definition:
     stp x29, x30, [sp, #-16]!
