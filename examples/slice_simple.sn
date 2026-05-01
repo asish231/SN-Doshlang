@@ -1,0 +1,6 @@
+fn main() -> int {
+    str s = "Hello"
+    str p = s.slice(0, 3)
+    print(p)
+    return 0
+}

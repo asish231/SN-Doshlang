@@ -1,0 +1,8 @@
+fn main() -> int {
+    str s = "Hello, World!"
+    int start = 0
+    int end = 5
+    str part = s.slice(start, end)
+    print(part)
+    return 0
+}

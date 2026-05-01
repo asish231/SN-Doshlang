@@ -1,0 +1,1 @@
+fn main() -> int { print("hello"); print("world"); return 0; }

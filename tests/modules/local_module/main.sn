@@ -1,0 +1,5 @@
+use mathutils
+
+fn main() {
+    print(double(5))
+}

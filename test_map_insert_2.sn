@@ -1,0 +1,7 @@
+fn main() {
+    map<str, int> m = {}
+    m["first"] = 100
+    m["second"] = 200
+    print(m["first"])
+    print(m["second"])
+}

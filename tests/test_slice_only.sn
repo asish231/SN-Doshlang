@@ -1,0 +1,5 @@
+fn main() {
+    str s = "hello"
+    str sub = s.slice(0, 2)
+    print(sub)
+}

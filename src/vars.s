@@ -12,6 +12,7 @@
 .global _record_operation
 .global _record_operation3
 .global _record_operation4
+.global _record_operation5
 
 _define_variable:
     stp x29, x30, [sp, #-16]!
@@ -506,6 +507,8 @@ _record_operation:
     mov x20, x1
     mov x21, x2
     mov x22, #0
+    mov x24, #0
+    mov x25, #0
     b Lrecord_operation_common
 
 _record_operation4:
@@ -514,12 +517,27 @@ _record_operation4:
     stp x19, x20, [sp, #-16]!
     stp x21, x22, [sp, #-16]!
     stp x23, x24, [sp, #-16]!
-
+    
     mov x19, x0
     mov x20, x1
     mov x21, x2
     mov x22, x3
     mov x24, x4
+    b Lrecord_operation_common
+
+_record_operation5:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+    
+    mov x19, x0
+    mov x20, x1
+    mov x21, x2
+    mov x22, x3
+    mov x24, x4
+    mov x25, x5
     b Lrecord_operation_common
 
 _record_operation3:
@@ -551,22 +569,26 @@ Lrecord_operation_common:
     str x22, [x10, x9, lsl #3]
     LOAD_ADDR x10, op_arg3
     str x24, [x10, x9, lsl #3]
+    LOAD_ADDR x10, op_arg4
+    str x25, [x10, x9, lsl #3]
     add x9, x9, #1
     str x9, [x23]
     mov x0, #0
     b Lrecord_op_return
-
-Lrecord_op_full:
-    LOAD_ADDR x0, msg_too_many_ops
-    mov x1, #2
-    bl _write_cstr_fd
-    mov x0, #1
 
 Lrecord_op_return:
     ldp x23, x24, [sp], #16
     ldp x21, x22, [sp], #16
     ldp x19, x20, [sp], #16
     ldp x29, x30, [sp], #16
+    ret
+
+Lrecord_op_full:
+    LOAD_ADDR x0, msg_too_many_ops
+    mov x1, #2
+    bl _write_cstr_fd
+    mov x0, #1
+    bl _exit
     ret
 
 .global _allocate_temp_var

@@ -1,0 +1,7 @@
+use std.math
+
+fn main() {
+    print(abs(-5))
+    print(max(5, 10))
+    print(min(5, 10))
+}

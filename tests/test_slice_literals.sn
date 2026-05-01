@@ -1,0 +1,5 @@
+fn main() {
+    print("LiteralSource".slice(0, 7))
+    str s = "VariableSource"
+    print(s.slice(8, 14))
+}

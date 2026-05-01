@@ -1,0 +1,6 @@
+use answer
+use answer
+
+fn main() {
+    print(get_answer())
+}

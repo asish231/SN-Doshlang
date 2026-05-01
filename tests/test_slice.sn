@@ -1,0 +1,10 @@
+fn main() {
+    str s = "Hello World"
+    int start = 0
+    int end = 5
+    str sub = s.slice(start, end)
+    print(sub)
+    
+    str sub2 = s.slice(6, 11)
+    print(sub2)
+}

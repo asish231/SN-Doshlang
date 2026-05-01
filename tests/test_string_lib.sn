@@ -1,0 +1,33 @@
+use std.string
+
+fn main() {
+    str s = "hello world"
+    
+    print("isEmpty(''):")
+    if (string.isEmpty("")) {
+        print("true")
+    } else {
+        print("false")
+    }
+    
+    print("startsWith('hello world', 'hello'):")
+    if (string.startsWith(s, "hello")) {
+        print("true")
+    } else {
+        print("false")
+    }
+    
+    print("startsWith('hello world', 'world'):")
+    if (string.startsWith(s, "world")) {
+        print("true")
+    } else {
+        print("false")
+    }
+    
+    print("endsWith('hello world', 'world'):")
+    if (string.endsWith(s, "world")) {
+        print("true")
+    } else {
+        print("false")
+    }
+}

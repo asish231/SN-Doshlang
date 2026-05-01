@@ -1,0 +1,5 @@
+use mod2
+
+fn main() {
+    print(c2())
+}

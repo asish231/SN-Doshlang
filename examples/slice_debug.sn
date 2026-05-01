@@ -1,0 +1,11 @@
+fn main() -> int {
+    str s = "Hello, World!"
+    int a = 0
+    int b = 5
+    int x = 100  // different slot
+    int y = 200  // different slot
+    // Use x and y instead
+    str part = s.slice(x, y)
+    print(part)
+    return 0
+}

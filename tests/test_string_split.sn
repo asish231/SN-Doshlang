@@ -1,0 +1,6 @@
+fn main() {
+    str s = "a,b"
+    list<str> p = s.split(",")
+    str x = p[0]
+    print(x)
+}

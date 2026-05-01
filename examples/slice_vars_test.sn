@@ -1,0 +1,12 @@
+fn main() -> int {
+    str s = "Hello"
+    int first = 0
+    int second = 3
+    printn("first=")
+    print(first)
+    printn(" second=")
+    print(second)
+    str p = s.slice(first, second)
+    print(p)
+    return 0
+}

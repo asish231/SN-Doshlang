@@ -5357,6 +5357,12 @@ Lprimary_member_access:
     bl _match_cstr_span
     cbnz x0, Lprimary_member_length
     
+    mov x0, x21
+    mov x1, x22
+    LOAD_ADDR x2, kw_slice
+    bl _match_cstr_span
+    cbnz x0, Lprimary_member_slice
+    
     b Lprimary_fail
 
 Lprimary_member_object:
@@ -5437,6 +5443,10 @@ Lprimary_str_length_val:
     mov x27, #0
     mov x28, #-1
     b Lprimary_suffix_loop_start
+
+Lprimary_member_slice:
+    // Not implemented yet - just fail
+    b Lprimary_fail
 
 Lprimary_member_push:
     mov x0, x21

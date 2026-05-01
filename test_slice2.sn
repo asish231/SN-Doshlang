@@ -1,0 +1,1 @@
+fn main() -> int { str s = "hello"; str r = s.slice(1, 3); print(r); print(""); return 0; }

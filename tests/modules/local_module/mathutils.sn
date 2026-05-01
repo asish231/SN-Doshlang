@@ -1,0 +1,3 @@
+fn double(int x) -> int {
+    return x * 2
+}

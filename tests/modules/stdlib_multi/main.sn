@@ -1,0 +1,8 @@
+use std.math
+use std.io
+
+fn main() {
+    print(abs(-50))
+    print(max(10, 20))
+    println("hello from stdlib")
+}

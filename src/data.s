@@ -85,6 +85,8 @@
 .global kw_has
 .global kw_keys
 .global kw_values
+.global kw_slice
+.global kw_split
 .global kw_blueprint
 .global kw_new
 .global kw_contract
@@ -201,6 +203,10 @@
 .global asm_mov_x1_imm
 .global asm_mov_x4_imm
 .global asm_call_map_lookup
+.global asm_call_string_slice
+.global asm_string_slice_runtime
+.global asm_load_x2_var
+.global asm_mov_x2_imm
 .global asm_mov_x4_x10
 .global asm_call_cstring_length
 .global asm_mov_x4_x0
@@ -220,6 +226,8 @@
 .global asm_map_pool_key_lengths_label
 .global asm_map_pool_values_label
 .global asm_map_pool_lengths_label
+.global asm_map_key_prefix
+.global asm_map_key_suffix
 .global asm_quad_prefix
 .global asm_math_sub_x11_x10
 .global asm_math_mul_x11_x10
@@ -334,6 +342,8 @@
 .global op_arg1
 .global op_arg2
 .global op_arg3
+.global op_arg4
+.global asm_mov_x2_imm
 .global fn_count
 .global fn_name_ptrs
 .global fn_name_lens
@@ -453,6 +463,8 @@ kw_contains:      .asciz "contains"
 kw_has:            .asciz "has"
 kw_keys:          .asciz "keys"
 kw_values:        .asciz "values"
+kw_slice:         .asciz "slice"
+kw_split:         .asciz "split"
 kw_blueprint:     .asciz "blueprint"
 kw_new:           .asciz "new"
 kw_contract:      .asciz "contract"
@@ -658,6 +670,8 @@ asm_load_x0_var:
     .asciz "    ldur x0, [x29, #-"
 asm_load_x1_var:
     .asciz "    ldur x1, [x29, #-"
+asm_load_x2_var:
+    .asciz "    ldur x2, [x29, #-"
 asm_store_x0_var:
     .asciz "    stur x0, [x29, #-"
 asm_print_var_adrp:
@@ -758,6 +772,10 @@ asm_map_pool_values_label:
     .asciz "map_pool_values:\n"
 asm_map_pool_lengths_label:
     .asciz "map_pool_lengths:\n"
+asm_map_key_prefix:
+    .asciz "map_key_"
+asm_map_key_suffix:
+    .asciz ":\n    .asciz \""
 asm_quad_prefix:
     .asciz "    .quad "
 asm_data_value_mid_str:
@@ -943,10 +961,18 @@ asm_mov_x0_imm:
     .asciz "    mov x0, #"
 asm_mov_x1_imm:
     .asciz "    mov x1, #"
+asm_mov_x2_imm:
+    .asciz "    mov x2, #"
 asm_mov_x4_imm:
     .asciz "    mov x4, #"
 asm_call_map_lookup:
     .asciz "    bl _map_lookup\n"
+
+asm_call_string_slice:
+    .asciz "    bl _string_slice\n"
+
+asm_string_slice_runtime:
+    .asciz "\n.align 4\n.global _string_slice\n_string_slice:\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    stp x19, x20, [sp, #-16]!\n    stp x21, x22, [sp, #-16]!\n    stp x23, x24, [sp, #-16]!\n    mov x19, x0  // source ptr\n    mov x20, x1  // start\n    mov x21, x2  // end\n    sub x22, x21, x20  // x22 = length = end - start\n    cmp x22, #0\n    b.le Lslice_empty\n    add x0, x22, #1  // length + 1 for null\n    bl _malloc\n    mov x23, x0  // result ptr\n    mov x24, #0  // i = 0\nLslice_copy:\n    cmp x24, x22  // compare with length, not end!\n    b.ge Lslice_done\n    add x9, x19, x20  // source + start\n    ldrb w10, [x9, x24]\n    strb w10, [x23, x24]\n    add x24, x24, #1\n    b Lslice_copy\nLslice_done:\n    strb wzr, [x23, x22]  // null at length, not end!\n    mov x0, x23\n    b Lslice_ret\nLslice_empty:\n    mov x0, #1\n    bl _malloc\n    strb wzr, [x0]\nLslice_ret:\n    ldp x23, x24, [sp], #16\n    ldp x21, x22, [sp], #16\n    ldp x19, x20, [sp], #16\n    ldp x29, x30, [sp], #16\n    ret\n"
 asm_mov_x4_x10:
     .asciz "    mov x4, x10\n"
 asm_mov_x2_x10:
@@ -1037,6 +1063,7 @@ op_arg0:        .space 32768
 op_arg1:        .space 32768
 op_arg2:        .space 32768
 op_arg3:        .space 32768
+op_arg4:        .space 32768
 fn_count:       .space 8
 fn_name_ptrs:   .space 512         // 64 functions * 8 bytes
 fn_name_lens:   .space 512

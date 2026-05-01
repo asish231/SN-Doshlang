@@ -1,0 +1,7 @@
+fn main() -> int {
+    str s = "Hello"
+    // Use immediate values directly 
+    str p = s.slice(1, 4)
+    print(p)
+    return 0
+}

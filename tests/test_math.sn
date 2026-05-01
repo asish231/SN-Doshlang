@@ -1,0 +1,26 @@
+use std.math
+
+fn main() {
+    print("Testing Math Stdlib:")
+    
+    int a = 5
+    int b = 10
+    
+    print("abs(-10):")
+    print(abs(-10))
+
+    print("max(5, 10):")
+    print(max(a, b))
+    
+    print("min(5, 10):")
+    print(min(a, b))
+    
+    print("pow(2, 3):")
+    print(pow(2, 3))
+    
+    print("clamp(15, 0, 10):")
+    print(clamp(15, 0, 10))
+    
+    print("sign(-42):")
+    print(sign(-42))
+}

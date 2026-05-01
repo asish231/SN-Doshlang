@@ -1,0 +1,6 @@
+use lib
+
+fn main() {
+    print("from main")
+    from_lib()
+}
