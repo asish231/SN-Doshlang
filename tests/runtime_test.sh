@@ -6,8 +6,19 @@ run_test() {
     name="$1"
     expected="$2"
     shift 2
-    ./snc "$@" > /tmp/out.s 2>&1 || return 1
-    cc -o /tmp/out /tmp/out.s 2>&1 || return 1
+    if ! ./snc "$@" > /tmp/out.s 2>&1; then
+        echo "FAIL: $name"
+        echo "  Compile failed:"
+        sed 's/^/    /' /tmp/out.s
+        ((FAIL++))
+        return 0
+    fi
+    if ! cc -o /tmp/out /tmp/out.s 2>&1; then
+        echo "FAIL: $name"
+        echo "  Link failed"
+        ((FAIL++))
+        return 0
+    fi
     result=$(/tmp/out 2>&1)
     if [ "$result" = "$expected" ]; then
         echo "PASS: $name"
