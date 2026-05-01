@@ -2035,7 +2035,7 @@ Lemit_map_load_miss_done:
     b Lemit_op_done
 
 Lemit_op_map_store:
-    // arg0: map var slot (unused by runtime helper currently, reserved)
+    // arg0: map base index (immediate)
     // arg1: key operand (slot or immediate)
     // arg2: value operand (slot or immediate)
     // arg3: packed (key_type<<56 | val_type<<48 | key_is_imm<<47 | val_is_imm<<46)
@@ -2045,15 +2045,15 @@ Lemit_op_map_store:
     lsr x24, x22, #56          // key type
     ubfx x25, x22, #48, #8     // value type
 
-    // x0 = map base index from variable slot value
-    LOAD_ADDR x0, asm_load_x0_var
+    // x0 = map base index
+    LOAD_ADDR x0, asm_mov_x0_imm
     mov x1, #1
     bl _write_cstr_fd
     LOAD_ADDR x20, op_arg0
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
-    bl _write_stack_offset_fd
-    LOAD_ADDR x0, asm_close_bracket
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_newline
     mov x1, #1
     bl _write_cstr_fd
 
@@ -2295,14 +2295,14 @@ Lemit_map_store_call_key_var:
     bl _write_cstr_fd
 Lemit_map_store_call_ready:
     // Re-load map base index into x0 before helper call.
-    LOAD_ADDR x0, asm_load_x0_var
+    LOAD_ADDR x0, asm_mov_x0_imm
     mov x1, #1
     bl _write_cstr_fd
     LOAD_ADDR x20, op_arg0
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
-    bl _write_stack_offset_fd
-    LOAD_ADDR x0, asm_close_bracket
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_newline
     mov x1, #1
     bl _write_cstr_fd
 

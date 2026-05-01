@@ -2080,7 +2080,7 @@ Lstmt_index_map_store_done:
 
 Lstmt_index_map_runtime:
     // Build op 88 payload:
-    //   arg0=map_var_slot
+    //   arg0=map base index
     //   arg1=key (slot or immediate value/data-id)
     //   arg2=value (slot or immediate value/data-id)
     //   arg3=packed(key_type,val_type,key_is_imm,val_is_imm)
@@ -2129,7 +2129,7 @@ Lstmt_index_map_runtime_val_imm_non_str:
 Lstmt_index_map_runtime_val_done:
 
     mov x0, #88
-    mov x1, x18
+    mov x1, x9
     mov x2, x15
     mov x3, x17
     bl _record_operation5
