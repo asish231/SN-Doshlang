@@ -149,3 +149,8 @@ This file tracks issues that have been fixed and locally verified.
 - **Problem:** `_load_module` crashed on any real `use` statement. Multiple root causes: wrong register passing in `use` parser, caller-saved register misuse in module helpers, main source buffer overwritten during module parse, reversed success check in `_parse_module_content`
 - **Fix:** Fixed all four root causes. Module files now load and parse cleanly. Functions defined in imported modules are registered into the global function table and callable from the importing file
 - **Verified:** All 4 ANTIGRAVITY_ISSUE verification tests pass — crash fixed, no corruption, duplicate use safe, imported functions callable (`helper()` returns `42`)
+
+### 29) Map and List Runtime Lookup with constant keys
+- **Problem:** `Lemit_op_map_load` and `Lemit_op_list_load` in `codegen.s` were generating invalid stack offsets (`ldur x10, [x29, #-0]`) for constant index/keys. Additionally, `parser.s` had a bug where it passed the map/list variable ID instead of the key/index ID to the runtime lookup logic.
+- **Fix:** Fixed parser ID assignment to correctly pass the key ID or set an immediate flag. Updated `codegen.s` to properly handle the immediate flag for Ops 80 and 82, emitting `mov x10, #imm` or `adrp x0, print_val_...` instead of a stack load. Added missing `asm_mov_x3_imm` for Op 82.
+- **Verified:** Programs executing `m["b"]` and `l[2]` correctly load immediate key/index values natively at runtime without crashing.

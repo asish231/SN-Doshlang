@@ -1,0 +1,4 @@
+fn main() {
+    str k = "hello"
+    print(k)
+}

@@ -1,5 +1,5 @@
 fn main() {
-    map<str, int> m = ["key1": 10, "key2": 20]
+    map<str, int> m = {"key1": 10, "key2": 20}
     str k = "key1"
     print(m[k])
 }

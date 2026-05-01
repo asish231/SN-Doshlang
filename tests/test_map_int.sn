@@ -1,0 +1,4 @@
+fn main() {
+    map<int, int> m = {1: 42}
+    print(m[1])
+}

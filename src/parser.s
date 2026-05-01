@@ -5766,7 +5766,7 @@ Lprimary_indexing:
     ldp x23, x24, [sp], #16
     ldp x21, x22, [sp], #16
 
-    // op 80: list_load(dest, index_var, base_idx, load_len)
+    // op 80: list_load(dest, index_var, base_idx, flags)
     mov x0, #80
     mov x1, x19 // dest
     mov x2, x22 // use index slot id
@@ -5775,6 +5775,14 @@ Lprimary_indexing:
     lsr x9, x27, #32 // element type
     cmp x9, #2 // str
     cset x4, eq
+
+    cmn x22, #1
+    cset x9, eq
+    orr x4, x4, x9, lsl #1
+    b.ne Lprimary_list_index_runtime_args
+    mov x2, x23 // pass immediate value
+Lprimary_list_index_runtime_args:
+
     bl _record_operation4
     cbnz x0, Lprimary_fail
 

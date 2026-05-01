@@ -1499,25 +1499,7 @@ Lemit_op_cast_int_to_str:
     b Lemit_op_done
 
 Lemit_op_list_load:
-    // arg0: dest, arg1: index_var/imm, arg2: base_idx, arg3: flags
-    LOAD_ADDR x20, op_arg3
-    ldr x22, [x20, x19, lsl #3]
-    tbz x22, #1, Lemit_list_load_var
-    
-    // Immediate index
-    LOAD_ADDR x0, asm_mov_x10_imm
-    mov x1, #1
-    bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
-    ldr x0, [x20, x19, lsl #3]
-    mov x1, #1
-    bl _write_u64_fd
-    LOAD_ADDR x0, asm_newline
-    mov x1, #1
-    bl _write_cstr_fd
-    b Lemit_list_load_ready
-
-Lemit_list_load_var:
+    // arg0: dest, arg1: index_var, arg2: base_idx, arg3: load_len
     LOAD_ADDR x0, asm_math_var_x10_ldr
     mov x1, #1
     bl _write_cstr_fd
@@ -1529,7 +1511,6 @@ Lemit_list_load_var:
     mov x1, #1
     bl _write_cstr_fd
 
-Lemit_list_load_ready:
     LOAD_ADDR x0, asm_add_x10_imm
     mov x1, #1
     bl _write_cstr_fd
@@ -1596,59 +1577,8 @@ Lemit_op_cast_str_to_int:
 
 Lemit_op_map_load:
     // arg0: dest, arg1: key_var, arg2: base_idx, arg3: packed
-    // packed: (key_type << 56) | (val_type << 48) | (is_imm << 47) | count
+    // packed: (key_type << 56) | (val_type << 48) | count
     
-    // Unpack arg3
-    LOAD_ADDR x20, op_arg3
-    ldr x22, [x20, x19, lsl #3]
-    and x23, x22, #0xFFFFFFFF // count
-    lsr x24, x22, #56 // key type
-    
-    tbz x22, #47, Lemit_map_load_var
-    
-    // Immediate key
-    cmp x24, #2 // str
-    b.eq Lemit_map_load_imm_str
-    
-    // Immediate int key
-    LOAD_ADDR x0, asm_mov_x10_imm
-    mov x1, #1
-    bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
-    ldr x0, [x20, x19, lsl #3]
-    mov x1, #1
-    bl _write_u64_fd
-    LOAD_ADDR x0, asm_newline
-    mov x1, #1
-    bl _write_cstr_fd
-    b Lemit_map_load_imm_ready
-
-Lemit_map_load_imm_str:
-    // Load string pointer from print pool
-    LOAD_ADDR x0, asm_load_x0_print_val_prefix
-    mov x1, #1
-    bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
-    ldr x0, [x20, x19, lsl #3]
-    mov x1, #1
-    bl _write_u64_fd
-    LOAD_ADDR x0, asm_load_x0_print_val_middle
-    mov x1, #1
-    bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
-    ldr x0, [x20, x19, lsl #3]
-    mov x1, #1
-    bl _write_u64_fd
-    LOAD_ADDR x0, asm_load_x0_print_val_suffix
-    mov x1, #1
-    bl _write_cstr_fd
-    
-    LOAD_ADDR x0, asm_mov_x10_x0
-    mov x1, #1
-    bl _write_cstr_fd
-    b Lemit_map_load_imm_ready
-
-Lemit_map_load_var:
     // 1. Load key value from stack into x10
     LOAD_ADDR x0, asm_math_var_x10_ldr
     mov x1, #1
@@ -1660,12 +1590,17 @@ Lemit_map_load_var:
     LOAD_ADDR x0, asm_close_bracket
     mov x1, #1
     bl _write_cstr_fd
-
-Lemit_map_load_imm_ready:
+    
     // mov x2, x10
     LOAD_ADDR x0, asm_mov_x2_x10
     mov x1, #1
     bl _write_cstr_fd
+    
+    // Unpack arg3
+    LOAD_ADDR x20, op_arg3
+    ldr x22, [x20, x19, lsl #3]
+    and x23, x22, #0xFFFFFFFF // count
+    lsr x24, x22, #56 // key type
     
     // 2. If key_type is 2 (str), get length into x4
     cmp x24, #2

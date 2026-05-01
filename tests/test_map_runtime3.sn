@@ -1,0 +1,4 @@
+fn main() {
+    map<str, int> m = {"hello": 42}
+    print(m["hello"])
+}

@@ -59,19 +59,19 @@ dec_sign_minus:
 .align 3
 .align 3
 print_val_0:
-    .quad 1
+    .quad 25
 .align 3
 print_val_1:
-    .quad 2
+    .quad 30
 .align 3
 list_pool_values:
 list_pool_lengths:
 map_pool_keys:
-    .quad 4375590484
+    .quad 4376753508
 map_pool_key_lengths:
-    .quad 1
+    .quad 5
 map_pool_values:
-    .quad 1
+    .quad 25
 map_pool_lengths:
     .quad 0
 

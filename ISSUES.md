@@ -31,10 +31,6 @@ See `ANTIGRAVITY_ISSUE.md` — RESOLVED.
 - Expand test coverage for module imports with multiple functions
 - Diagnostics for typed returns, cast paths, list/map edge cases, file I/O
 
-## Pointer ops
-
-- `Lemit_op_map_load` in `codegen.s` is incomplete — `mov x3, #key_type` emission is missing (`asm_mov_x3_imm` not yet wired in); runtime map lookup by variable key will crash until this is done
-
 ## Nested function multiple calls (proper fix pending)
 
 - Workaround in place (move nested fns to top-level) but the root cause — op recording using absolute rather than relative slot indices per call frame — is not yet fixed
