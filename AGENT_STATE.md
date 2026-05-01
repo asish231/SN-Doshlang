@@ -54,7 +54,7 @@ Tracks who is working on what right now. Update this before starting work to avo
 
 Things that are currently broken or mid-fix. If you touch something and break it, add it here so the other agent doesn't build on top of broken code.
 
-_None currently._
+- `std.math.pow(2, 3)` currently returns `2` during macOS `tests/test_math.sh` runtime output (expected `8`).
 
 ---
 

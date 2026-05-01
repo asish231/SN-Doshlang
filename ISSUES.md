@@ -12,6 +12,7 @@ Resolved work lives in `RESOLVED_ISSUES.md`.
 - better compiler diagnostics
 - hardened strings and file I/O
 - fuller multi-return support
+- `std.math.pow()` semantic mismatch in current runtime validation (`pow(2, 3)` prints `2`, expected `8`)
 
 ## String cast hardening status
 
