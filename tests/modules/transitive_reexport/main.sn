@@ -1,0 +1,6 @@
+use mod2
+
+fn main() {
+    print(c1())
+    print(c2())
+}

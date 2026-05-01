@@ -156,6 +156,12 @@ run_test "multi_fn" \
 10
 5"
 
+# 10. transitive import re-export visibility
+run_test "transitive_reexport" \
+    "transitive_reexport/main.sn" \
+    "40
+42"
+
 # -------------------------------------------------------
 echo ""
 echo -e "${CYAN}-------------------${NC}"

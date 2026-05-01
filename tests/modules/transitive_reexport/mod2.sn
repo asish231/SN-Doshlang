@@ -1,0 +1,5 @@
+use mod1
+
+fn c2() -> int {
+    return c1() + 2
+}

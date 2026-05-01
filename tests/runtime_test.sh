@@ -137,5 +137,23 @@ fn main() {
 SN
 run_test "Runtime decimal cast in concat" "e=11.75" /tmp/t_cast_dec_runtime.sn
 
+cat > /tmp/t_nested_fn_multi_call.sn << 'SN'
+fn caller(int n) -> int {
+    fn inc(int x) -> int {
+        if (x > 0) {
+            return x + 1
+        }
+        return 1
+    }
+    return inc(n)
+}
+
+fn main() {
+    print(caller(1))
+    print(caller(2))
+}
+SN
+run_test "Nested fn multiple calls with if-return" $'2\n3' /tmp/t_nested_fn_multi_call.sn
+
 echo ""
 echo "Summary: PASS=$PASS FAIL=$FAIL"
