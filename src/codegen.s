@@ -174,6 +174,9 @@ Lemit_map_key_strs_next:
     b Lemit_map_key_strs_loop
 Lemit_map_key_strs_done:
 
+    LOAD_ADDR x0, asm_align_3
+    mov x1, #1
+    bl _write_cstr_fd
     LOAD_ADDR x0, asm_map_pool_keys_label
     mov x1, #1
     bl _write_cstr_fd
