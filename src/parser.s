@@ -5448,10 +5448,12 @@ Lprimary_member_slice:
     // str.slice(start, end) -> str
     cmp x26, #2
     b.ne Lprimary_fail
-    // Preserve source expression.
-    mov x23, x25 // source value (ptr if immediate)
-    mov x24, x27 // source length
-    mov x19, x28 // source var id
+    LOAD_ADDR x9, slice_tmp_source_val
+    str x25, [x9]
+    LOAD_ADDR x9, slice_tmp_source_len
+    str x27, [x9]
+    LOAD_ADDR x9, slice_tmp_source_var
+    str x28, [x9]
 
     bl _skip_whitespace
     mov w0, #'('
@@ -5461,10 +5463,12 @@ Lprimary_member_slice:
     // Parse start
     bl _parse_expr_value
     cbz x0, Lprimary_fail
-    mov x20, x1 // start value
     cmp x2, #0
     b.ne Lprimary_fail
-    mov x21, x4 // start var id
+    LOAD_ADDR x9, slice_tmp_start_val
+    str x1, [x9]
+    LOAD_ADDR x9, slice_tmp_start_var
+    str x4, [x9]
 
     bl _skip_whitespace
     mov w0, #','
@@ -5474,10 +5478,12 @@ Lprimary_member_slice:
     // Parse end
     bl _parse_expr_value
     cbz x0, Lprimary_fail
-    mov x22, x1 // end value
     cmp x2, #0
     b.ne Lprimary_fail
-    mov x25, x4 // end var id
+    LOAD_ADDR x9, slice_tmp_end_val
+    str x1, [x9]
+    LOAD_ADDR x9, slice_tmp_end_var
+    str x4, [x9]
 
     bl _skip_whitespace
     mov w0, #')'
@@ -5485,11 +5491,15 @@ Lprimary_member_slice:
     cbz x0, Lprimary_fail
 
     // Materialize source into a temp var when source is an immediate string.
+    LOAD_ADDR x9, slice_tmp_source_var
+    ldr x19, [x9]
     cmn x19, #1
     b.ne Lprimary_member_slice_source_ready
-    mov x0, x23
+    LOAD_ADDR x9, slice_tmp_source_val
+    ldr x0, [x9]
     mov x1, #2
-    mov x2, x24
+    LOAD_ADDR x9, slice_tmp_source_len
+    ldr x2, [x9]
     bl _record_data_value
     mov x24, x0
     bl _allocate_temp_var
@@ -5499,9 +5509,15 @@ Lprimary_member_slice:
     mov x2, x24
     bl _record_operation
     cbnz x0, Lprimary_fail
+    LOAD_ADDR x9, slice_tmp_source_var
+    str x19, [x9]
 
 Lprimary_member_slice_source_ready:
-    // Encode start arg (immediate or var+100).
+    // Encode start arg (immediate or var-slot with bit63 set).
+    LOAD_ADDR x9, slice_tmp_start_val
+    ldr x20, [x9]
+    LOAD_ADDR x9, slice_tmp_start_var
+    ldr x21, [x9]
     cmn x21, #1
     b.ne Lprimary_member_slice_start_var
     b Lprimary_member_slice_start_done
@@ -5511,7 +5527,11 @@ Lprimary_member_slice_start_var:
     orr x20, x21, x9
 Lprimary_member_slice_start_done:
 
-    // Encode end arg (immediate or var+100).
+    // Encode end arg (immediate or var-slot with bit63 set).
+    LOAD_ADDR x9, slice_tmp_end_val
+    ldr x22, [x9]
+    LOAD_ADDR x9, slice_tmp_end_var
+    ldr x25, [x9]
     cmn x25, #1
     b.ne Lprimary_member_slice_end_var
     b Lprimary_member_slice_end_done
@@ -5526,7 +5546,8 @@ Lprimary_member_slice_end_done:
     mov x23, x0
     mov x0, #90
     mov x1, x23
-    mov x2, x19
+    LOAD_ADDR x9, slice_tmp_source_var
+    ldr x2, [x9]
     mov x3, x20
     mov x4, x22
     bl _record_operation4

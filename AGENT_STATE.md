@@ -77,6 +77,7 @@ Add new rows here whenever you add or change a cross-file interface.
 | `fn_table` | `data.s` | `parser.s`, `codegen.s` | function name/arity table | max 128 entries |
 | `src_buf` | `data.s` | `main.s`, `parser.s` | loaded source file | read-only after load |
 | `cur_fn_slot` | `data.s` | `vars.s`, `codegen.s` | current function's next free stack slot | reset on fn entry |
+| `slice_tmp_*` scratch symbols | `data.s` | `parser.s` | temporary cross-call scratch for `str.slice(start,end)` arg/source encoding | added 2026-05-01 by Agent B |
 
 ---
 

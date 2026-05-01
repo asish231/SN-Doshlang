@@ -321,6 +321,13 @@
 .global map_pool_key_ptrs
 .global map_pool_values
 .global map_pool_lengths
+.global slice_tmp_source_val
+.global slice_tmp_source_len
+.global slice_tmp_source_var
+.global slice_tmp_start_val
+.global slice_tmp_start_var
+.global slice_tmp_end_val
+.global slice_tmp_end_var
 .global module_count
 .global module_names
 .global module_paths
@@ -1049,6 +1056,13 @@ map_pool_key_lengths: .space 32768
 map_pool_key_ptrs: .space 32768
 map_pool_values: .space 32768
 map_pool_lengths: .space 32768
+slice_tmp_source_val: .space 8
+slice_tmp_source_len: .space 8
+slice_tmp_source_var: .space 8
+slice_tmp_start_val:  .space 8
+slice_tmp_start_var:  .space 8
+slice_tmp_end_val:    .space 8
+slice_tmp_end_var:    .space 8
 module_count:    .space 8
 module_names:    .space 2048      // 256 modules * 8 bytes (ptr)
 module_paths:    .space 2048      // 256 modules * 8 bytes (ptr)
