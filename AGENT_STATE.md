@@ -15,11 +15,11 @@ Tracks who is working on what right now. Update this before starting work to avo
 
 | Zone | File(s) | Agent | Status | Last Updated |
 |---|---|---|---|---|
-| codegen | `src/codegen.s` | Agent A | idle | 2026-05-01 |
-| parser | `src/parser.s` | Agent A | idle | 2026-05-01 |
+| codegen | `src/codegen.s` | Agent A | idle | 2026-05-02 |
+| parser | `src/parser.s` | Agent A | idle | 2026-05-02 |
 | vars | `src/vars.s` | — | idle | — |
 | utils | `src/utils.s` | — | idle | — |
-| data | `src/data.s` | Agent A | idle | 2026-05-01 |
+| data | `src/data.s` | Agent A | idle | 2026-05-02 |
 | lexer | `src/lexer.s` | — | idle | — |
 | main | `src/main.s` | — | idle | — |
 
@@ -35,6 +35,7 @@ Tracks who is working on what right now. Update this before starting work to avo
 - Optimized `_string_slice` runtime helper to correctly handle length boundaries.
 
 ### Agent A (most recent first)
+- Added initial `contract`/`follows` enforcement (required-method presence checks), introduced `spawn` statement handling via function-call execution path, and refreshed `SELFHOSTING_NEEDS.md` to match current feature status.
 - Closed the remaining tracked blockers: fixed `pow` semantics, added runtime dynamic map store/lookup overlay (`op 88` + `_map_store/_map_lookup_ext`), expanded module/runtime regressions (including transitive imports and nested multi-calls), and verified full macOS validation matrix.
 - Completed Cursor SSH workflow: pushed to `origin/main`, pulled/rebuilt on Mac, and verified `tests/test_modules.sh`, `tests/test_math.sh`, and slice repro programs all pass.
 - Hardened `_string_slice` bounds/null handling in `src/data.s` and rebuilt `stdlib/std/math.sn` to complete/compat syntax.
@@ -87,6 +88,8 @@ Add new rows here whenever you add or change a cross-file interface.
 | `src_buf` | `data.s` | `main.s`, `parser.s` | loaded source file | read-only after load |
 | `cur_fn_slot` | `data.s` | `vars.s`, `codegen.s` | current function's next free stack slot | reset on fn entry |
 | `slice_tmp_*` scratch symbols | `data.s` | `parser.s` | temporary cross-call scratch for `str.slice(start,end)` arg/source encoding | added 2026-05-01 by Agent B |
+| `contract_*` tables | `data.s` | `parser.s` | contract names + required method-name metadata | added 2026-05-02 by Agent A |
+| `blueprint_contract_*` tables | `data.s` | `parser.s` | followed-contract ids per blueprint for post-parse validation | added 2026-05-02 by Agent A |
 
 ---
 
@@ -102,7 +105,7 @@ _Format: `[date] [who] decision`_
 
 Work that one agent started but needs the other agent to finish or unblock.
 
-_None currently._
+- SSH/Mac validation is currently blocked in this session by `Permission denied (publickey,password,keyboard-interactive)`; rerun remote build/tests once credentials/agent are available.
 
 ---
 

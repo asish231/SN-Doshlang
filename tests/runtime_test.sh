@@ -138,5 +138,29 @@ fn main() {
 SN
 run_test "Nested fn multiple calls with if-return" $'2\n3' /tmp/t_nested_fn_multi_call.sn
 
+echo "=== Contract/Follows and Spawn ==="
+cat > /tmp/t_contract_follows_spawn.sn << 'SN'
+contract Worker {
+    fn run()
+}
+
+blueprint Task follows Worker {
+    fn run() {
+        print(1)
+    }
+}
+
+fn worker() {
+    Task t()
+    t.run()
+}
+
+fn main() {
+    spawn worker()
+    print(2)
+}
+SN
+run_test "Contract follows + spawn call path" $'1\n2' /tmp/t_contract_follows_spawn.sn
+
 echo ""
 echo "Summary: PASS=$PASS FAIL=$FAIL"

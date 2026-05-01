@@ -24,7 +24,7 @@ Every one of those steps requires language features that are not fully done yet.
 ## Blockers — Critical (Must Have)
 
 ### 1. Module System — Symbol Resolution
-**Status:** MISSING
+**Status:** PARTIAL
 
 `use module.path` syntax parses, but imported functions are not callable across files. The compiler is split across 7 source files (`main.s`, `lexer.s`, `parser.s`, `vars.s`, `codegen.s`, `utils.s`, `data.s`). A SNlang rewrite would need the same split. Without real cross-file symbol resolution, the entire rewrite must live in one file — which is impractical at compiler scale.
 
@@ -37,31 +37,30 @@ Every one of those steps requires language features that are not fully done yet.
 - Imported functions callable from importing file (single level)
 
 **What is missing:**
-- Symbol resolution across chained modules (transitive imports fail)
-- Standard library namespace (`std.io`, `std.math`, etc.)
+- Namespace/module ergonomics are still limited compared to a mature package system.
 
 ---
 
 ### 2. String Methods
-**Status:** MISSING (all of them)
+**Status:** PARTIAL
 
 A lexer written in SNlang needs to walk characters, slice substrings, check prefixes, and split on delimiters. None of the string methods exist yet.
 
 | Method | Status |
 |---|---|
-| `.length` | MISSING |
-| `.slice(start, end)` | MISSING |
+| `.length` | DONE |
+| `.slice(start, end)` | DONE |
 | `.contains(x)` | MISSING |
 | `.replace(a, b)` | MISSING |
 | `.split(sep)` | MISSING |
 | `.upper()` / `.lower()` | MISSING |
 
-Without at least `.length` and `.slice`, you cannot write a lexer in SNlang. String concat and interpolation are done, but they are not enough.
+Core lexer-enabling operations (`.length`, `.slice`) are now available. Broader string utility coverage is still incomplete.
 
 ---
 
 ### 3. Map Key Insertion
-**Status:** MISSING
+**Status:** PARTIAL
 
 The compiler needs symbol tables — maps from identifier names to their types, stack slots, and scopes. The current `map<K,V>` only supports updating existing keys. Inserting a new key at runtime is not implemented.
 
@@ -71,24 +70,21 @@ The compiler needs symbol tables — maps from identifier names to their types, 
 - `map[key] = val` update (existing keys only)
 
 **What is missing:**
-- `map[key] = val` insert (new key)
-- `map<K, list<T>>` nested types
-- Missing-key diagnostics
+- Deeply nested map/list typing and richer diagnostics are still incomplete.
 
 ---
 
 ### 4. Multi-Return Values
-**Status:** IN_PROGRESS — syntax not parsed yet
+**Status:** DONE
 
 Compiler functions naturally return a value plus a success/error flag. Example: a parse function returns the parsed node and whether it succeeded. Without multi-return, every such function needs awkward workarounds (globals, out-params).
 
 **What is done:**
 - Single return values work fully
 
-**What is missing:**
-- `-> (int, bool)` return type syntax not parsed
-- Tuple unpacking on the call side not implemented
-- Codegen for multiple return registers not done
+- `-> (T1, T2)` style declarations parse
+- Tuple-style assignment at call sites is supported
+- Runtime value propagation for the extra return path is wired
 
 ---
 
@@ -104,11 +100,13 @@ AST nodes, tokens, and symbol table entries are naturally modeled as structs/obj
 - Parent names recorded for inheritance
 
 **What is missing:**
-- `contract` enforcement (parser-only right now)
-- `follows` enforcement (parser-only)
 - Access control (`open`/`closed`/`guarded`) enforcement (parser-only)
 - `create()` path still limited
 - Inherited field/method lookup not fully reliable
+
+**Recent update:**
+- `contract` and `follows` now enforce required method presence during blueprint parse.
+- `spawn` keyword is available for function-call execution path; full parallel thread scheduling semantics still need deeper runtime work.
 
 ---
 

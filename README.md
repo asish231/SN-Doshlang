@@ -31,14 +31,10 @@ It is a natively compiled language that is **fast enough to be broadly used**, p
 
 It reads `.sn` source code and emits ARM64 assembly that can be assembled with `clang`.
 
-The source now includes a small platform macro layer for Mach-O and COFF symbol
-differences, so the compiler and emitted assembly can be built for:
+The source includes a platform macro layer for ARM64 Mach-O output and is
+currently validated for:
 
 - macOS on ARM64
-- Windows on ARM64
-
-It is still an ARM64 codebase, so a typical x64 Windows machine can cross-build
-it but cannot run the resulting `snc.exe` natively.
 
 ## Architecture
 
@@ -123,7 +119,7 @@ fn main() {
 - ✅ Imported functions callable from importing file
 - ✅ Duplicate `use` handled safely
 - ✅ Module search paths (`.` and `stdlib` by default)
-- ❌ Symbol resolution across multiple chained modules (cannot access symbols from transitive imports; must import each module directly)
+- ✅ Transitive re-export style usage covered in module tests
 
 ### String Interpolation
 
@@ -196,10 +192,21 @@ Still planned from `SNLANG_SPEC.md`:
 - fuller runtime expression evaluation across more type combinations
 - richer logical precedence
 - full `list<T>` semantics
-- `map<K,V>`
+- fuller `map<K,V>` semantics
 - multiple return values
-- real module loading and imports
-- self-hosting (requires modules, structs, and advanced strings)
+- self-hosting bootstrap completion
+
+## Self-Hosting Status
+
+SNlang is now **self-hosting capable** in the practical sense that you can start
+writing a compiler in SNlang today and bootstrap it with the current `snc`.
+
+That means:
+
+- ✅ language/runtime baseline is stable enough on macOS for compiler-work
+- ✅ core module, map runtime store, cast, and slice paths are validated
+- 🔄 full self-hosted completion is still a bootstrap milestone (the SNlang
+  compiler must compile itself end-to-end)
 
 ---
 
@@ -473,25 +480,6 @@ On PowerShell, you can also build without `make`:
 
 ```powershell
 ./build.ps1
-```
-
-On Windows, `build.ps1` now defaults to `aarch64-windows-msvc` because the
-compiler sources are ARM64 assembly. On a typical x64 Windows PC that means:
-
-- you can cross-build `snc.exe`
-- you cannot run that `snc.exe` natively unless the machine is Windows on ARM
-  (or you add external emulation)
-
-To set the ARM64 Windows target explicitly:
-
-```powershell
-./build.ps1 -Target aarch64-windows-msvc
-```
-
-If LLVM is installed but `clang` is not on `PATH`, pass it directly:
-
-```powershell
-./build.ps1 -Clang "C:\Program Files\LLVM\bin\clang.exe"
 ```
 
 Emit assembly for the example:

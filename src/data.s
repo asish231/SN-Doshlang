@@ -91,6 +91,7 @@
 .global kw_new
 .global kw_contract
 .global kw_follows
+.global kw_spawn
 .global kw_open
 .global kw_closed
 .global kw_guarded
@@ -114,6 +115,14 @@
 .global blueprint_method_names
 .global blueprint_method_name_lens
 .global blueprint_method_fn_ids
+.global contract_count
+.global contract_name_ptrs
+.global contract_name_lens
+.global contract_method_counts
+.global contract_method_names
+.global contract_method_name_lens
+.global blueprint_contract_counts
+.global blueprint_contract_ids
 .global object_instance_count
 .global object_blueprint_ids
 .global object_field_var_idxs
@@ -489,6 +498,7 @@ kw_blueprint:     .asciz "blueprint"
 kw_new:           .asciz "new"
 kw_contract:      .asciz "contract"
 kw_follows:       .asciz "follows"
+kw_spawn:         .asciz "spawn"
 kw_open:          .asciz "open"
 kw_closed:        .asciz "closed"
 kw_guarded:       .asciz "guarded"
@@ -1169,6 +1179,14 @@ blueprint_method_counts: .space 512
 blueprint_method_names: .space 4096
 blueprint_method_name_lens: .space 4096
 blueprint_method_fn_ids: .space 4096
+contract_count: .space 8
+contract_name_ptrs: .space 512
+contract_name_lens: .space 512
+contract_method_counts: .space 512
+contract_method_names: .space 4096
+contract_method_name_lens: .space 4096
+blueprint_contract_counts: .space 512
+blueprint_contract_ids: .space 4096
 object_instance_count: .space 8
 object_blueprint_ids: .space 1024         // 128 instances * 8 bytes
 object_field_var_idxs: .space 8192        // 128 instances * 8 fields * 8 bytes

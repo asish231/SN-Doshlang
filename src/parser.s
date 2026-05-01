@@ -278,6 +278,12 @@ _parse_statement:
 
     mov x0, x19
     mov x1, x20
+    LOAD_ADDR x2, kw_spawn
+    bl _match_cstr_span
+    cbnz x0, Lstmt_spawn
+
+    mov x0, x19
+    mov x1, x20
     LOAD_ADDR x2, kw_new
     bl _match_cstr_span
     cbnz x0, Lstmt_new
@@ -314,6 +320,21 @@ Lstmt_blueprint:
 
 Lstmt_contract:
     bl _parse_contract
+    b Lstmt_return
+
+Lstmt_spawn:
+    bl _skip_whitespace
+    bl _parse_identifier
+    cbz x0, Lstmt_fail
+    mov x21, x0
+    mov x22, x1
+    bl _skip_whitespace
+    mov x0, x21
+    mov x1, x22
+    bl _call_function
+    cbnz x0, Lstmt_fail
+    bl _consume_optional_semicolon
+    mov x0, #0
     b Lstmt_return
 
 Lstmt_new:
@@ -8942,6 +8963,9 @@ Lblueprint_register_done:
     str x1, [x9, x23, lsl #3]
 
 Lblueprint_no_parent:
+    // Reset followed-contract list for this blueprint.
+    LOAD_ADDR x9, blueprint_contract_counts
+    str xzr, [x9, x23, lsl #3]
     bl _skip_whitespace
     LOAD_ADDR x0, kw_follows
     bl _consume_keyword
@@ -8950,7 +8974,25 @@ Lblueprint_skip_follows_loop:
     bl _skip_whitespace
     bl _parse_identifier
     cbz x0, Lblueprint_fail_name
+    mov x24, x0
+    mov x25, x1
     bl _skip_generic_suffix
+    mov x0, x24
+    mov x1, x25
+    bl _lookup_contract_id
+    cbz x0, Lblueprint_fail_name
+    mov x26, x1
+    LOAD_ADDR x9, blueprint_contract_counts
+    ldr x10, [x9, x23, lsl #3]
+    cmp x10, #8
+    b.ge Lblueprint_fail_too_many
+    mov x11, x23
+    lsl x11, x11, #3
+    add x11, x11, x10
+    LOAD_ADDR x12, blueprint_contract_ids
+    str x26, [x12, x11, lsl #3]
+    add x10, x10, #1
+    str x10, [x9, x23, lsl #3]
     bl _skip_whitespace
     bl _peek_char
     cmp w0, #','
@@ -8977,6 +9019,41 @@ Lblueprint_body_loop:
 
 Lblueprint_body_done:
     bl _advance_char // consume '}'
+    // Enforce followed contracts: each required method must exist in blueprint.
+    LOAD_ADDR x9, blueprint_contract_counts
+    ldr x10, [x9, x23, lsl #3]
+    mov x24, #0
+Lblueprint_contract_loop:
+    cmp x24, x10
+    b.ge Lblueprint_done
+    mov x11, x23
+    lsl x11, x11, #3
+    add x11, x11, x24
+    LOAD_ADDR x12, blueprint_contract_ids
+    ldr x25, [x12, x11, lsl #3]
+    LOAD_ADDR x12, contract_method_counts
+    ldr x26, [x12, x25, lsl #3]
+    mov x27, #0
+Lblueprint_contract_method_loop:
+    cmp x27, x26
+    b.ge Lblueprint_contract_next
+    mov x13, x25
+    lsl x13, x13, #3
+    add x13, x13, x27
+    LOAD_ADDR x14, contract_method_names
+    ldr x0, [x14, x13, lsl #3]
+    LOAD_ADDR x14, contract_method_name_lens
+    ldr x1, [x14, x13, lsl #3]
+    mov x2, x1
+    mov x1, x0
+    mov x0, x23
+    bl _lookup_blueprint_method
+    cbz x0, Lblueprint_fail_name
+    add x27, x27, #1
+    b Lblueprint_contract_method_loop
+Lblueprint_contract_next:
+    add x24, x24, #1
+    b Lblueprint_contract_loop
 
 Lblueprint_done:
     LOAD_ADDR x9, current_blueprint_parse
@@ -9017,10 +9094,37 @@ Lblueprint_fail_too_many:
 _parse_contract:
     stp x29, x30, [sp, #-16]!
     mov x29, sp
+    stp x19, x20, [sp, #-16]!
     bl _skip_whitespace
     bl _parse_identifier
     cbz x0, Lcontract_fail
+    mov x19, x0
+    mov x20, x1
     bl _skip_generic_suffix
+    // Register contract name if needed.
+    mov x0, x19
+    mov x1, x20
+    bl _lookup_contract_id
+    cbnz x0, Lcontract_have_id
+    LOAD_ADDR x9, contract_count
+    ldr x10, [x9]
+    cmp x10, #64
+    b.ge Lcontract_fail
+    LOAD_ADDR x11, contract_name_ptrs
+    str x19, [x11, x10, lsl #3]
+    LOAD_ADDR x11, contract_name_lens
+    str x20, [x11, x10, lsl #3]
+    LOAD_ADDR x11, contract_method_counts
+    str xzr, [x11, x10, lsl #3]
+    mov x19, x10
+    add x10, x10, #1
+    str x10, [x9]
+    b Lcontract_id_ready
+Lcontract_have_id:
+    mov x19, x1
+    LOAD_ADDR x11, contract_method_counts
+    str xzr, [x11, x19, lsl #3]
+Lcontract_id_ready:
     bl _skip_whitespace
     mov w0, #'{'
     bl _expect_char
@@ -9031,6 +9135,7 @@ Lcontract_loop:
     cbz w0, Lcontract_done
     cmp w0, #'}'
     b.eq Lcontract_done_close
+    mov x0, x19
     bl _parse_contract_member
     cbnz x0, Lcontract_fail
     b Lcontract_loop
@@ -9038,6 +9143,7 @@ Lcontract_done_close:
     bl _advance_char
 Lcontract_done:
     mov x0, #0
+    ldp x19, x20, [sp], #16
     ldp x29, x30, [sp], #16
     ret
 
@@ -9046,6 +9152,7 @@ Lcontract_fail:
     bl _report_error_prefix
     bl _write_newline_stderr
     mov x0, #1
+    ldp x19, x20, [sp], #16
     ldp x29, x30, [sp], #16
     ret
 
@@ -9420,6 +9527,51 @@ Lbp_lookup_return:
     ldp x29, x30, [sp], #16
     ret
 
+_lookup_contract_id:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+
+    mov x19, x0
+    mov x20, x1
+    mov x21, #0
+    LOAD_ADDR x22, contract_count
+    ldr x22, [x22]
+
+Lcontract_lookup_loop:
+    cmp x21, x22
+    b.ge Lcontract_lookup_fail
+    LOAD_ADDR x9, contract_name_lens
+    ldr x10, [x9, x21, lsl #3]
+    cmp x10, x20
+    b.ne Lcontract_lookup_next
+    LOAD_ADDR x9, contract_name_ptrs
+    ldr x11, [x9, x21, lsl #3]
+    mov x0, x19
+    mov x1, x20
+    mov x2, x11
+    bl _match_span_span
+    cbnz x0, Lcontract_lookup_found
+Lcontract_lookup_next:
+    add x21, x21, #1
+    b Lcontract_lookup_loop
+
+Lcontract_lookup_found:
+    mov x0, #1
+    mov x1, x21
+    b Lcontract_lookup_return
+
+Lcontract_lookup_fail:
+    mov x0, #0
+    mov x1, #-1
+
+Lcontract_lookup_return:
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
 _skip_angle_group:
     stp x29, x30, [sp, #-16]!
     mov x29, sp
@@ -9744,6 +9896,10 @@ Lblueprint_member_return:
 _parse_contract_member:
     stp x29, x30, [sp, #-16]!
     mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+
+    mov x19, x0 // contract id
 
     bl _parse_identifier
     cbz x0, Lcontract_member_fail
@@ -9757,6 +9913,22 @@ _parse_contract_member:
     bl _skip_whitespace
     bl _parse_identifier
     cbz x0, Lcontract_member_fail
+    mov x21, x0
+    mov x22, x1
+    // Persist required method name in contract table.
+    LOAD_ADDR x9, contract_method_counts
+    ldr x10, [x9, x19, lsl #3]
+    cmp x10, #8
+    b.ge Lcontract_member_fail
+    mov x11, x19
+    lsl x11, x11, #3
+    add x11, x11, x10
+    LOAD_ADDR x12, contract_method_names
+    str x21, [x12, x11, lsl #3]
+    LOAD_ADDR x12, contract_method_name_lens
+    str x22, [x12, x11, lsl #3]
+    add x10, x10, #1
+    str x10, [x9, x19, lsl #3]
     bl _skip_whitespace
     mov w0, #'('
     bl _expect_char
@@ -9786,11 +9958,15 @@ Lcontract_member_ret_single:
 Lcontract_member_done:
     bl _consume_optional_semicolon
     mov x0, #0
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
     ldp x29, x30, [sp], #16
     ret
 
 Lcontract_member_fail:
     mov x0, #1
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
     ldp x29, x30, [sp], #16
     ret
 
