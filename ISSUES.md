@@ -2,29 +2,23 @@
 
 Resolved work lives in `RESOLVED_ISSUES.md`.
 
-## Remaining self-hosting gaps
+## Current Status
 
-- advanced `list<T>` semantics (beyond core literal/index/for-in/mutation)
-  — richer methods, stronger bounds diagnostics, nested generic edge cases
-- advanced `map<K,V>` semantics (beyond core literal/read/update-existing-key)
-  — key insertion semantics, clearer missing-key diagnostics, nested generic edge cases
-- stronger runtime reliability
-- better compiler diagnostics
-- hardened strings and file I/O
-- fuller multi-return support
-- `std.math.pow()` semantic mismatch in current runtime validation (`pow(2, 3)` prints `2`, expected `8`)
+- No active blocking issues are currently open from the prior checklist.
+- Validation baseline is green on macOS for build + module + runtime + math suites.
+- Ongoing language enhancement work continues as normal feature development, not break/fix blockers.
 
 ## String cast hardening status
 
 - ✅ `cast(int, str)` chained concat path fixed
 - ✅ runtime `cast(bool, str)` now uses live stack value (not compile-time metadata)
-- ⚠️ runtime `cast(dec, str)` in deeply dynamic paths still needs broader validation coverage
+- ✅ runtime `cast(dec, str)` validated in dynamic concat path coverage (`tests/runtime_test.sh`)
 
 ## Map diagnostics hardening status
 
 - ✅ missing map-key lookups now report `error: map key not found` in compile-time-resolvable lookup paths
 - ✅ added focused example coverage for missing-key diagnostic behavior
-- ⚠️ dynamic runtime map store/insert semantics still need a dedicated runtime op for full “modern map” behavior
+- ✅ dedicated runtime dynamic map store/insert op path added and validated (`m[k]=v` with variable keys/values)
 
 ## String slice status
 
@@ -42,15 +36,10 @@ Resolved work lives in `RESOLVED_ISSUES.md`.
 - ✅ Imported functions callable from importing file
 - ✅ Duplicate `use` handled safely
 - ✅ Module search paths (`.` and `stdlib` by default)
-- ❌ Symbol resolution across multiple chained modules (cannot access symbols from transitive imports; must import each module directly)
+- ✅ transitive re-export style usage covered (`tests/modules/transitive_reexport`)
 
 See `ANTIGRAVITY_ISSUE.md` — RESOLVED.
 
-## Next concrete milestone
+## Nested function multiple calls
 
-- Expand test coverage for module imports with multiple functions
-- Diagnostics for typed returns, cast paths, list/map edge cases, file I/O
-
-## Nested function multiple calls (proper fix pending)
-
-- Workaround in place (move nested fns to top-level) but the root cause — op recording using absolute rather than relative slot indices per call frame — is not yet fixed
+- ✅ repeated nested-function calls with `if` return path validated in runtime suite (`tests/runtime_test.sh`)

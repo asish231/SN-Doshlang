@@ -15,11 +15,11 @@ Tracks who is working on what right now. Update this before starting work to avo
 
 | Zone | File(s) | Agent | Status | Last Updated |
 |---|---|---|---|---|
-| codegen | `src/codegen.s` | Agent A | in progress | 2026-05-01 |
-| parser | `src/parser.s` | Agent A | in progress | 2026-05-01 |
+| codegen | `src/codegen.s` | Agent A | idle | 2026-05-01 |
+| parser | `src/parser.s` | Agent A | idle | 2026-05-01 |
 | vars | `src/vars.s` | — | idle | — |
 | utils | `src/utils.s` | — | idle | — |
-| data | `src/data.s` | Agent A | in progress | 2026-05-01 |
+| data | `src/data.s` | Agent A | idle | 2026-05-01 |
 | lexer | `src/lexer.s` | — | idle | — |
 | main | `src/main.s` | — | idle | — |
 
@@ -35,6 +35,7 @@ Tracks who is working on what right now. Update this before starting work to avo
 - Optimized `_string_slice` runtime helper to correctly handle length boundaries.
 
 ### Agent A (most recent first)
+- Closed the remaining tracked blockers: fixed `pow` semantics, added runtime dynamic map store/lookup overlay (`op 88` + `_map_store/_map_lookup_ext`), expanded module/runtime regressions (including transitive imports and nested multi-calls), and verified full macOS validation matrix.
 - Completed Cursor SSH workflow: pushed to `origin/main`, pulled/rebuilt on Mac, and verified `tests/test_modules.sh`, `tests/test_math.sh`, and slice repro programs all pass.
 - Hardened `_string_slice` bounds/null handling in `src/data.s` and rebuilt `stdlib/std/math.sn` to complete/compat syntax.
 - Restored the empty collection literal parsing logic (`[]` and `{}`) that was accidentally reverted. Verified that `map<str, int> m = {}` along with map key insertion (`m["first"] = 100`) compiles and runs correctly.
@@ -54,7 +55,7 @@ Tracks who is working on what right now. Update this before starting work to avo
 
 Things that are currently broken or mid-fix. If you touch something and break it, add it here so the other agent doesn't build on top of broken code.
 
-- `std.math.pow(2, 3)` currently returns `2` during macOS `tests/test_math.sh` runtime output (expected `8`).
+_None currently._
 
 ---
 
@@ -71,6 +72,8 @@ This is the critical section. When one agent changes a function signature, label
 | `find_var` | `vars.s` | `parser.s`, `codegen.s` | x0=name_ptr, x1=len → x0=slot or -1 | — |
 | `write_str` | `utils.s` | `codegen.s`, `parser.s` | x0=str_ptr, x1=len → void | — |
 | `match_keyword` | `utils.s` | `parser.s` | x0=cursor, x1=keyword_ptr, x2=len → x0=1/0 | — |
+| `_map_store` | emitted runtime helpers (`data.s`) | emitted op88 (`codegen.s`) | x0=map_base, x1=key, x2=key_type, x3=key_len, x4=val, x5=val_type, x6=val_len → void | 2026-05-01 |
+| `_map_lookup_ext` | emitted runtime helpers (`data.s`) | emitted map load (`codegen.s`) | x0=map_base, x1=count, x2=key, x3=key_type, x4=key_len → x0=val, x1=len, x2=found | 2026-05-01 |
 
 Add new rows here whenever you add or change a cross-file interface.
 

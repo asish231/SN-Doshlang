@@ -179,3 +179,23 @@ This file tracks issues that have been fixed and locally verified.
 - **Problem:** `clamp` used `value` as a parameter name, colliding with reserved `value` keyword and causing parser failure in `tests/test_math.sn`.
 - **Fix:** Renamed `clamp(int value, ...)` to `clamp(int n, ...)` and updated internal references.
 - **Verified:** macOS SSH run passes `tests/test_math.sh`; module suite (`tests/test_modules.sh`) also passes all cases.
+
+### 35) `std.math.pow()` semantic mismatch
+- **Problem:** `pow(2, 3)` produced `2` instead of `8` in runtime validation.
+- **Fix:** Reworked `pow` implementation in `stdlib/std/math.sn` and tightened `tests/test_math.sh` to assert exact expected output.
+- **Verified:** macOS SSH run passes `tests/test_math.sh` with `pow(2, 3) = 8`.
+
+### 36) Runtime dynamic map store/insert semantics
+- **Problem:** Variable-key/value map mutations (`m[k] = v`) lacked a dedicated runtime path and failed in dynamic scenarios.
+- **Fix:** Added parser+codegen op 88 plumbing and emitted runtime dynamic map helpers (`_map_store`, `_map_lookup_ext`) with overlay lookup/store behavior.
+- **Verified:** macOS runtime suite passes `Runtime map key/value store via vars`.
+
+### 37) Transitive module symbol usage and nested-function multi-call coverage
+- **Problem:** Prior issue tracker marked transitive symbol access and nested multi-call behavior as unresolved.
+- **Fix:** Added regressions for transitive module usage (`tests/modules/transitive_reexport`) and repeated nested calls with conditional returns (`tests/runtime_test.sh`).
+- **Verified:** macOS module suite and runtime suite both pass these new regressions.
+
+### 38) Runtime test harness false-positive passes
+- **Problem:** `tests/runtime_test.sh` returned early on compile/link errors without incrementing failures, masking broken tests.
+- **Fix:** Updated harness to count and display compile/link failures explicitly.
+- **Verified:** macOS runtime suite now reports accurate PASS/FAIL totals (`PASS=10 FAIL=0` in current baseline).
