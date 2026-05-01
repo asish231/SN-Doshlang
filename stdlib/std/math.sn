@@ -20,13 +20,10 @@ fn min(int a, int b) -> int {
 }
 
 fn pow(int base, int exp) -> int {
-    int result = 1
-    int i = 0
-    while (i < exp) {
-        result = result * base
-        i = i + 1
+    if (exp <= 0) {
+        return 1
     }
-    return result
+    return base * pow(base, exp - 1)
 }
 
 fn clamp(int n, int lo, int hi) -> int {

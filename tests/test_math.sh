@@ -17,7 +17,32 @@ clang out.s -o out
 
 if [ -f "out" ]; then
     echo -e "${GREEN}Running tests/test_math...${NC}"
-    ./out
+    ACTUAL="$(./out)"
+    EXPECTED="$(cat <<'EOF'
+Testing Math Stdlib:
+abs(-10):
+10
+max(5, 10):
+10
+min(5, 10):
+5
+pow(2, 3):
+8
+clamp(15, 0, 10):
+10
+sign(-42):
+-1
+EOF
+)"
+    if [ "$ACTUAL" != "$EXPECTED" ]; then
+        echo -e "${RED}test_math output mismatch${NC}"
+        echo "----- expected -----"
+        echo "$EXPECTED"
+        echo "----- actual -----"
+        echo "$ACTUAL"
+        exit 1
+    fi
+    echo -e "${GREEN}test_math passed${NC}"
 else
     echo -e "${RED}Compilation failed, no output binary found.${NC}"
     exit 1
