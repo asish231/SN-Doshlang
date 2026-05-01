@@ -5506,7 +5506,9 @@ Lprimary_member_slice_source_ready:
     b.ne Lprimary_member_slice_start_var
     b Lprimary_member_slice_start_done
 Lprimary_member_slice_start_var:
-    add x20, x21, #100
+    mov x9, #1
+    lsl x9, x9, #63
+    orr x20, x21, x9
 Lprimary_member_slice_start_done:
 
     // Encode end arg (immediate or var+100).
@@ -5514,7 +5516,9 @@ Lprimary_member_slice_start_done:
     b.ne Lprimary_member_slice_end_var
     b Lprimary_member_slice_end_done
 Lprimary_member_slice_end_var:
-    add x22, x25, #100
+    mov x9, #1
+    lsl x9, x9, #63
+    orr x22, x25, x9
 Lprimary_member_slice_end_done:
 
     // op 90: string_slice(dest, src_var, start, end)

@@ -1,5 +1,5 @@
 fn isEmpty(str s) -> bool {
-    if (length(s) == 0) {
+    if (s.length() == 0) {
         return true
     }
     return false

@@ -291,9 +291,9 @@ Lemit_emit_runtime_helpers:
     mov x1, #1
     bl _write_cstr_fd
     
-    // LOAD_ADDR x0, asm_string_slice_runtime
-    // mov x1, #1
-    // bl _write_cstr_fd
+    LOAD_ADDR x0, asm_string_slice_runtime
+    mov x1, #1
+    bl _write_cstr_fd
 
 Lemit_program_done:
     ldp x21, x22, [sp], #16
@@ -2030,8 +2030,8 @@ Lemit_map_load_miss_done:
 
 Lemit_op_string_slice:
     // arg0 = dest slot, arg2 = source slot
-    // arg3 = start (immediate if < 100, else slot = val-100)
-    // arg4 = end   (immediate if < 100, else slot = val-100)
+    // arg3 = start (immediate, or var-slot with bit63 set)
+    // arg4 = end   (immediate, or var-slot with bit63 set)
 
     // x0 = source string ptr: ldur x0, [x29, #-<source_slot*8>]
     LOAD_ADDR x0, asm_load_x0_var
@@ -2048,8 +2048,7 @@ Lemit_op_string_slice:
     // x1 = start
     LOAD_ADDR x20, op_arg3
     ldr x22, [x20, x19, lsl #3]
-    cmp x22, #100
-    b.ge Lslice_emit_start_var
+    tbnz x22, #63, Lslice_emit_start_var
     LOAD_ADDR x0, asm_mov_x1_imm
     mov x1, #1
     bl _write_cstr_fd
@@ -2064,7 +2063,9 @@ Lslice_emit_start_var:
     LOAD_ADDR x0, asm_load_x1_var
     mov x1, #1
     bl _write_cstr_fd
-    sub x0, x22, #100
+    mov x9, #1
+    lsl x9, x9, #63
+    bic x0, x22, x9
     mov x1, #1
     bl _write_stack_offset_fd
     LOAD_ADDR x0, asm_close_bracket
@@ -2075,8 +2076,7 @@ Lslice_emit_end:
     // x2 = end
     LOAD_ADDR x20, op_arg4
     ldr x22, [x20, x19, lsl #3]
-    cmp x22, #100
-    b.ge Lslice_emit_end_var
+    tbnz x22, #63, Lslice_emit_end_var
     LOAD_ADDR x0, asm_mov_x2_imm
     mov x1, #1
     bl _write_cstr_fd
@@ -2091,7 +2091,9 @@ Lslice_emit_end_var:
     LOAD_ADDR x0, asm_load_x2_var
     mov x1, #1
     bl _write_cstr_fd
-    sub x0, x22, #100
+    mov x9, #1
+    lsl x9, x9, #63
+    bic x0, x22, x9
     mov x1, #1
     bl _write_stack_offset_fd
     LOAD_ADDR x0, asm_close_bracket
