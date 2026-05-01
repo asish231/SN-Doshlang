@@ -25,6 +25,12 @@ Resolved work lives in `RESOLVED_ISSUES.md`.
 - ✅ added focused example coverage for missing-key diagnostic behavior
 - ⚠️ dynamic runtime map store/insert semantics still need a dedicated runtime op for full “modern map” behavior
 
+## String slice status
+
+- ✅ parser and codegen wiring for `str.slice(start, end)` has been added
+- ✅ runtime helper `_string_slice` is emitted again
+- ⚠️ `tests/test_slice_only.sn`, `tests/test_slice_literals.sn`, and `tests/test_slice.sn` still crash at runtime on macOS and need a deeper fix
+
 ## Module system
 
 - ✅ `use module.path` syntax parsing
@@ -41,6 +47,7 @@ See `ANTIGRAVITY_ISSUE.md` — RESOLVED.
 ## Next concrete milestone
 
 - Expand test coverage for module imports with multiple functions
+- Finish `str.slice(start, end)` runtime stabilization
 - Diagnostics for typed returns, cast paths, list/map edge cases, file I/O
 
 ## Nested function multiple calls (proper fix pending)

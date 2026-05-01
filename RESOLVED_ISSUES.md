@@ -154,3 +154,13 @@ This file tracks issues that have been fixed and locally verified.
 - **Problem:** `Lemit_op_map_load` and `Lemit_op_list_load` in `codegen.s` were generating invalid stack offsets (`ldur x10, [x29, #-0]`) for constant index/keys. Additionally, `parser.s` had a bug where it passed the map/list variable ID instead of the key/index ID to the runtime lookup logic.
 - **Fix:** Fixed parser ID assignment to correctly pass the key ID or set an immediate flag. Updated `codegen.s` to properly handle the immediate flag for Ops 80 and 82, emitting `mov x10, #imm` or `adrp x0, print_val_...` instead of a stack load. Added missing `asm_mov_x3_imm` for Op 82.
 - **Verified:** Programs executing `m["b"]` and `l[2]` correctly load immediate key/index values natively at runtime without crashing.
+
+### 30) Map link-time alignment and `cast(int, str)` runtime crash
+- **Problem:** macOS builds were failing to link map-heavy programs with `ld: pointer not aligned in 'print_fmt_int'`, and `cast(int, str)` inside concat chains could segfault at runtime.
+- **Fix:** Realigned map key table emission after string-key payloads, and corrected the runtime cast temp propagation path.
+- **Verified:** `examples/map_mutation.sn`, `examples/map_runtime_key_lookup_safe.sn`, `tests/test_map_insert.sn`, `tests/test_map_runtime.sn`, and `examples/cast_string_concat.sn` now compile, link, and run on the Mac.
+
+### 31) String library test updated to current API
+- **Problem:** `tests/test_string_lib.sn` referenced `string.isEmpty` and `length(...)`, which did not match the current exported string API.
+- **Fix:** Updated the test to use `isEmpty()` with `s.length()`.
+- **Verified:** `tests/test_string.sh` passes on the Mac.
