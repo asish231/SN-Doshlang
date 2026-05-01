@@ -15,11 +15,11 @@ Tracks who is working on what right now. Update this before starting work to avo
 
 | Zone | File(s) | Agent | Status | Last Updated |
 |---|---|---|---|---|
-| codegen | `src/codegen.s` | Agent B | in progress | 2026-05-01 |
-| parser | `src/parser.s` | Agent B | in progress | 2026-05-01 |
+| codegen | `src/codegen.s` | Agent B | idle | 2026-05-01 |
+| parser | `src/parser.s` | Agent B | idle | 2026-05-01 |
 | vars | `src/vars.s` | — | idle | — |
 | utils | `src/utils.s` | — | idle | — |
-| data | `src/data.s` | Agent B | in progress | 2026-05-01 |
+| data | `src/data.s` | Agent B | idle | 2026-05-01 |
 | lexer | `src/lexer.s` | — | idle | — |
 | main | `src/main.s` | — | idle | — |
 
@@ -40,7 +40,11 @@ Tracks who is working on what right now. Update this before starting work to avo
 - Fixed map (`m[k]`) and list (`l[i]`) runtime lookups for constant/immediate keys by passing `is_imm` flag natively to codegen and emitting `mov x10, #imm` or string pool pointers instead of broken `ldur` instructions.
 
 ### Agent B (most recent first)
-_Nothing yet._
+- Fixed macOS map link-time alignment errors by aligning map `.quad` table emission after string-key literals in `src/codegen.s`; validated map runtime/mutation programs now compile+link+run on Mac.
+- Fixed runtime `cast(int, str)` usage in chained concatenation (`examples/cast_string_concat.sn`) by correcting cast temp propagation; validated output `k=2, j=5` on Mac.
+- Fixed shell test portability/runtime issues: normalized script line endings and corrected `tests/test_modules.sh` repo-root resolution.
+- Fixed `tests/test_string.sh` path by updating `stdlib/std/string.sn` + `tests/test_string_lib.sn` to current supported string API (`isEmpty` with `s.length()`).
+- Implemented `str.slice(start, end)` parse/codegen wiring (op 90), enabled `_string_slice` runtime helper emission, and corrected op90 arg-slot mapping; slice tests still runtime-crash on Mac (see Known Broken Things).
 
 ---
 
@@ -48,7 +52,12 @@ _Nothing yet._
 
 Things that are currently broken or mid-fix. If you touch something and break it, add it here so the other agent doesn't build on top of broken code.
 
-_None currently. (Agent A has taken over Kiro's module fix)._
+- `str.slice(start, end)` currently compiles/links but runtime crashes (exit 139) on macOS for:
+  - `tests/test_slice_only.sn`
+  - `tests/test_slice_literals.sn`
+  - `tests/test_slice.sn`
+- `tests/test_modules.sh` still reports 3 failing module cases (`single_use`, `stdlib_math`, `multi_fn`) due compile errors.
+- `tests/test_math.sh` still fails compile of `tests/test_math.sn` with generic parser errors (`line line 5`, `line line 10`).
 
 ---
 
