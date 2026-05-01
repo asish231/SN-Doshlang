@@ -164,3 +164,13 @@ This file tracks issues that have been fixed and locally verified.
 - **Problem:** `tests/test_string_lib.sn` referenced `string.isEmpty` and `length(...)`, which did not match the current exported string API.
 - **Fix:** Updated the test to use `isEmpty()` with `s.length()`.
 - **Verified:** `tests/test_string.sh` passes on the Mac.
+
+### 32) stdlib `math` module was incomplete and used unsupported unary syntax
+- **Problem:** `stdlib/std/math.sn` only had partial functions and still used `return -x`, causing parser/compile failures in math/module tests.
+- **Fix:** Rebuilt `stdlib/std/math.sn` with `abs`, `max`, `min`, `pow`, `clamp`, and `sign`, and replaced unary-negation return with `0 - x`.
+- **Verified:** Local verification is blocked in this environment (no `clang` / runnable `snc` binary); pending macOS SSH run.
+
+### 33) `_string_slice` runtime helper could read out of bounds
+- **Problem:** `_string_slice` did not guard null source or clamp `start/end` to source length, which could lead to runtime crashes on macOS.
+- **Fix:** Hardened helper in `src/data.s` with null checks, start/end normalization, bounds clamping, and safe empty-string fallback.
+- **Verified:** Pending macOS SSH test run for `tests/test_slice_only.sn`, `tests/test_slice_literals.sn`, and `tests/test_slice.sn`.

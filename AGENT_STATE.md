@@ -19,7 +19,7 @@ Tracks who is working on what right now. Update this before starting work to avo
 | parser | `src/parser.s` | Agent B | idle | 2026-05-01 |
 | vars | `src/vars.s` | — | idle | — |
 | utils | `src/utils.s` | — | idle | — |
-| data | `src/data.s` | Agent B | idle | 2026-05-01 |
+| data | `src/data.s` | Agent A | idle | 2026-05-01 |
 | lexer | `src/lexer.s` | — | idle | — |
 | main | `src/main.s` | — | idle | — |
 
@@ -35,6 +35,7 @@ Tracks who is working on what right now. Update this before starting work to avo
 - Optimized `_string_slice` runtime helper to correctly handle length boundaries.
 
 ### Agent A (most recent first)
+- Hardened `_string_slice` bounds/null handling in `src/data.s` and rebuilt `stdlib/std/math.sn` to complete/compat syntax; macOS verification still pending due local toolchain/SSH constraints.
 - Restored the empty collection literal parsing logic (`[]` and `{}`) that was accidentally reverted. Verified that `map<str, int> m = {}` along with map key insertion (`m["first"] = 100`) compiles and runs correctly.
 - Re-applied the runtime map index immediate flag propagation logic in the parser (`Lprimary_map_lookup_runtime`), ensuring `print(m["first"])` loads correctly natively instead of using broken stack offsets.
 - Fixed map (`m[k]`) and list (`l[i]`) runtime lookups for constant/immediate keys by passing `is_imm` flag natively to codegen and emitting `mov x10, #imm` or string pool pointers instead of broken `ldur` instructions.

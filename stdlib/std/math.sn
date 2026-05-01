@@ -1,6 +1,6 @@
 fn abs(int x) -> int {
     if (x < 0) {
-        return -x
+        return 0 - x
     }
     return x
 }
@@ -17,4 +17,34 @@ fn min(int a, int b) -> int {
         return a
     }
     return b
+}
+
+fn pow(int base, int exp) -> int {
+    int result = 1
+    int i = 0
+    while (i < exp) {
+        result = result * base
+        i = i + 1
+    }
+    return result
+}
+
+fn clamp(int value, int lo, int hi) -> int {
+    if (value < lo) {
+        return lo
+    }
+    if (value > hi) {
+        return hi
+    }
+    return value
+}
+
+fn sign(int x) -> int {
+    if (x < 0) {
+        return -1
+    }
+    if (x > 0) {
+        return 1
+    }
+    return 0
 }
