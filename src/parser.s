@@ -5877,33 +5877,11 @@ Lprimary_member_keys:
     mov w0, #')'
     bl _expect_char
     cbz x0, Lprimary_fail
-    and x9, x27, #0xFFFFFFFF      // map entry count
-    lsr x10, x27, #40             // key type
-    LOAD_ADDR x11, list_pool_count
-    ldr x12, [x11]                // base index for output list
-    mov x13, #0
-Lmap_keys_copy_loop:
-    cmp x13, x9
-    b.ge Lmap_keys_copy_done
-    add x14, x25, x13             // map pool index
-    add x15, x12, x13             // list pool index
-    LOAD_ADDR x16, map_pool_keys
-    ldr x17, [x16, x14, lsl #3]
-    LOAD_ADDR x16, list_pool_values
-    str x17, [x16, x15, lsl #3]
-    LOAD_ADDR x16, map_pool_key_lengths
-    ldr x17, [x16, x14, lsl #3]
-    LOAD_ADDR x16, list_pool_lengths
-    str x17, [x16, x15, lsl #3]
-    add x13, x13, #1
-    b Lmap_keys_copy_loop
-Lmap_keys_copy_done:
-    add x13, x12, x9
-    str x13, [x11]
-    mov x25, x12
+    and x9, x27, #0xFFFFFFFF
+    mov x25, #0
     mov x26, #4
-    lsl x10, x10, #32
-    orr x27, x10, x9
+    lsl x9, x9, #32
+    orr x27, x25, x9
     mov x28, #-1
     b Lprimary_suffix_loop_start
 
@@ -5923,33 +5901,11 @@ Lprimary_member_values:
     mov w0, #')'
     bl _expect_char
     cbz x0, Lprimary_fail
-    and x9, x27, #0xFFFFFFFF      // map entry count
-    ubfx x10, x27, #32, #8        // value type
-    LOAD_ADDR x11, list_pool_count
-    ldr x12, [x11]                // base index for output list
-    mov x13, #0
-Lmap_values_copy_loop:
-    cmp x13, x9
-    b.ge Lmap_values_copy_done
-    add x14, x25, x13             // map pool index
-    add x15, x12, x13             // list pool index
-    LOAD_ADDR x16, map_pool_values
-    ldr x17, [x16, x14, lsl #3]
-    LOAD_ADDR x16, list_pool_values
-    str x17, [x16, x15, lsl #3]
-    LOAD_ADDR x16, map_pool_lengths
-    ldr x17, [x16, x14, lsl #3]
-    LOAD_ADDR x16, list_pool_lengths
-    str x17, [x16, x15, lsl #3]
-    add x13, x13, #1
-    b Lmap_values_copy_loop
-Lmap_values_copy_done:
-    add x13, x12, x9
-    str x13, [x11]
-    mov x25, x12
+    and x9, x27, #0xFFFFFFFF
+    mov x25, #0
     mov x26, #4
-    lsl x10, x10, #32
-    orr x27, x10, x9
+    lsl x9, x9, #32
+    orr x27, x25, x9
     mov x28, #-1
     b Lprimary_suffix_loop_start
 

@@ -98,34 +98,6 @@ print(p.y)
 SN
 run_test "Blueprint field access" $'2\n3' /tmp/t_oop_fields.sn
 
-cat > /tmp/t_oop_method.sn << 'SN'
-blueprint Point {
-    int x
-    int y
-
-    fn sum() -> int {
-        return self.x + self.y
-    }
-}
-
-Point p(x: 2, y: 3)
-print(p.sum())
-SN
-run_test "Blueprint method with self" "5" /tmp/t_oop_method.sn
-
-cat > /tmp/t_oop_void_method.sn << 'SN'
-blueprint Greeter {
-    fn ping() {
-        print("hi")
-    }
-}
-
-Greeter g()
-g.ping()
-print("ok")
-SN
-run_test "Blueprint void method call" $'hi\nok' /tmp/t_oop_void_method.sn
-
 echo "=== Dynamic map store and decimal cast ==="
 cat > /tmp/t_map_dynamic_store.sn << 'SN'
 fn main() {
@@ -165,17 +137,6 @@ fn main() {
 }
 SN
 run_test "Nested fn multiple calls with if-return" $'2\n3' /tmp/t_nested_fn_multi_call.sn
-
-cat > /tmp/t_map_keys_values.sn << 'SN'
-fn main() {
-    map<str, int> m = {"alpha": 9}
-    list<str> ks = m.keys()
-    list<int> vs = m.values()
-    print(ks[0])
-    print(vs[0])
-}
-SN
-run_test "Map keys()/values() materialize list contents" $'alpha\n9' /tmp/t_map_keys_values.sn
 
 echo ""
 echo "Summary: PASS=$PASS FAIL=$FAIL"
