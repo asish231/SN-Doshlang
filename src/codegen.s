@@ -2248,6 +2248,64 @@ Lemit_map_store_val_len_zero:
     bl _write_cstr_fd
 
 Lemit_map_store_call:
+    // Re-load key into x1 because helper calls for key/value lengths may clobber it.
+    tbz x22, #47, Lemit_map_store_call_key_var
+    cmp x24, #2
+    b.eq Lemit_map_store_call_key_imm_str
+    LOAD_ADDR x0, asm_mov_x1_imm
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, op_arg1
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_newline
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_map_store_call_ready
+Lemit_map_store_call_key_imm_str:
+    LOAD_ADDR x0, asm_load_x1_print_val_prefix
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, op_arg1
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_load_x1_print_val_middle
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, op_arg1
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_load_x1_print_val_suffix
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_map_store_call_ready
+Lemit_map_store_call_key_var:
+    LOAD_ADDR x0, asm_load_x1_var
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, op_arg1
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_stack_offset_fd
+    LOAD_ADDR x0, asm_close_bracket
+    mov x1, #1
+    bl _write_cstr_fd
+Lemit_map_store_call_ready:
+    // Re-load map base index into x0 before helper call.
+    LOAD_ADDR x0, asm_load_x0_var
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, op_arg0
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_stack_offset_fd
+    LOAD_ADDR x0, asm_close_bracket
+    mov x1, #1
+    bl _write_cstr_fd
+
     LOAD_ADDR x0, asm_call_map_store
     mov x1, #1
     bl _write_cstr_fd
