@@ -115,5 +115,27 @@ print("ok")
 SN
 run_test "Blueprint void method call" $'hi\nok' /tmp/t_oop_void_method.sn
 
+echo "=== Dynamic map store and decimal cast ==="
+cat > /tmp/t_map_dynamic_store.sn << 'SN'
+fn main() {
+    map<str, int> m = {"seed": 1}
+    str kbase = "new"
+    str k = kbase + ""
+    int v = 7
+    m[k] = v
+    print(m[k])
+}
+SN
+run_test "Runtime map key/value store via vars" "7" /tmp/t_map_dynamic_store.sn
+
+cat > /tmp/t_cast_dec_runtime.sn << 'SN'
+fn main() {
+    dec(2) d = 10.50
+    dec(2) e = d + 1.25
+    print("e=" + cast(e, str))
+}
+SN
+run_test "Runtime decimal cast in concat" "e=11.75" /tmp/t_cast_dec_runtime.sn
+
 echo ""
 echo "Summary: PASS=$PASS FAIL=$FAIL"

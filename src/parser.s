@@ -1916,6 +1916,7 @@ Lstmt_index_assign:
     mov x9, x1  // target start index in pool
     mov x10, x2 // target type
     mov x11, x3 // target metadata
+    mov x18, x4 // target variable slot id
 
     // If rhs comes from var/temp, load concrete value+len now.
     cmn x28, #1
@@ -1977,6 +1978,13 @@ Lstmt_index_assign_map:
     b.ne Lstmt_type_mismatch
     cmp x26, x13
     b.ne Lstmt_type_mismatch
+
+    // Runtime dynamic map store path: if key or value comes from a variable slot,
+    // emit op 88 and defer key matching/insertion to runtime helper.
+    cmn x24, #1
+    b.ne Lstmt_index_map_runtime
+    cmn x28, #1
+    b.ne Lstmt_index_map_runtime
 
     // If key came from a variable, read actual key value+len.
     cmn x24, #1
@@ -2066,6 +2074,66 @@ Lstmt_index_map_store:
     LOAD_ADDR x17, map_pool_lengths
     str x27, [x17, x16, lsl #3]
 Lstmt_index_map_store_done:
+    bl _consume_optional_semicolon
+    mov x0, #0
+    b Lstmt_return
+
+Lstmt_index_map_runtime:
+    // Build op 88 payload:
+    //   arg0=map_var_slot
+    //   arg1=key (slot or immediate value/data-id)
+    //   arg2=value (slot or immediate value/data-id)
+    //   arg3=packed(key_type,val_type,key_is_imm,val_is_imm)
+    //   arg4=key_len (for immediate string keys only, else 0)
+    mov x15, x24 // key operand
+    mov x17, x28 // value operand
+    mov x5, #0   // immediate key length (str only)
+    mov x4, x12
+    lsl x4, x4, #56
+    orr x4, x4, x13, lsl #48
+
+    // Key operand encode
+    cmn x24, #1
+    b.ne Lstmt_index_map_runtime_key_done
+    // immediate key path
+    orr x4, x4, #(1 << 47)
+    cmp x12, #2
+    b.ne Lstmt_index_map_runtime_key_int_imm
+    // immediate string key -> materialize data-id
+    mov x0, x21
+    mov x1, #2
+    mov x2, x23
+    bl _record_data_value
+    mov x15, x0
+    mov x5, x23
+    b Lstmt_index_map_runtime_key_done
+Lstmt_index_map_runtime_key_int_imm:
+    mov x15, x21
+Lstmt_index_map_runtime_key_done:
+
+    // Value operand encode
+    cmn x28, #1
+    b.ne Lstmt_index_map_runtime_val_done
+    // immediate value path
+    orr x4, x4, #(1 << 46)
+    cmp x13, #2
+    b.ne Lstmt_index_map_runtime_val_imm_non_str
+    mov x0, x25
+    mov x1, #2
+    mov x2, x27
+    bl _record_data_value
+    mov x17, x0
+    b Lstmt_index_map_runtime_val_done
+Lstmt_index_map_runtime_val_imm_non_str:
+    mov x17, x25
+Lstmt_index_map_runtime_val_done:
+
+    mov x0, #88
+    mov x1, x18
+    mov x2, x15
+    mov x3, x17
+    bl _record_operation5
+    cbnz x0, Lstmt_fail
     bl _consume_optional_semicolon
     mov x0, #0
     b Lstmt_return

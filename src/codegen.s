@@ -290,6 +290,10 @@ Lemit_emit_runtime_helpers:
     LOAD_ADDR x0, asm_runtime_helpers
     mov x1, #1
     bl _write_cstr_fd
+
+    LOAD_ADDR x0, asm_map_dynamic_runtime
+    mov x1, #1
+    bl _write_cstr_fd
     
     LOAD_ADDR x0, asm_string_slice_runtime
     mov x1, #1
@@ -407,6 +411,8 @@ _emit_operation:
     b.eq Lemit_op_free
 cmp x21, #87
     b.eq Lemit_op_set_ptr
+    cmp x21, #88
+    b.eq Lemit_op_map_store
     cmp x21, #90
     b.eq Lemit_op_string_slice
     
@@ -2026,6 +2032,225 @@ Lemit_map_load_miss_done:
     mov x1, #1
     bl _write_cstr_fd
     
+    b Lemit_op_done
+
+Lemit_op_map_store:
+    // arg0: map var slot (unused by runtime helper currently, reserved)
+    // arg1: key operand (slot or immediate)
+    // arg2: value operand (slot or immediate)
+    // arg3: packed (key_type<<56 | val_type<<48 | key_is_imm<<47 | val_is_imm<<46)
+    // arg4: immediate string key length (or 0)
+    LOAD_ADDR x20, op_arg3
+    ldr x22, [x20, x19, lsl #3]
+    lsr x24, x22, #56          // key type
+    ubfx x25, x22, #48, #8     // value type
+
+    // x0 = map base index from variable slot value
+    LOAD_ADDR x0, asm_load_x0_var
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, op_arg0
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_stack_offset_fd
+    LOAD_ADDR x0, asm_close_bracket
+    mov x1, #1
+    bl _write_cstr_fd
+
+    // x1 key
+    tbz x22, #47, Lemit_map_store_key_var
+    cmp x24, #2
+    b.eq Lemit_map_store_key_imm_str
+    LOAD_ADDR x0, asm_mov_x1_imm
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, op_arg1
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_newline
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_map_store_key_ready
+Lemit_map_store_key_imm_str:
+    LOAD_ADDR x0, asm_load_x1_print_val_prefix
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, op_arg1
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_load_x1_print_val_middle
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, op_arg1
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_load_x1_print_val_suffix
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_map_store_key_ready
+Lemit_map_store_key_var:
+    LOAD_ADDR x0, asm_load_x1_var
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, op_arg1
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_stack_offset_fd
+    LOAD_ADDR x0, asm_close_bracket
+    mov x1, #1
+    bl _write_cstr_fd
+Lemit_map_store_key_ready:
+
+    // x2 key type
+    LOAD_ADDR x0, asm_mov_x2_imm
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, x24
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_newline
+    mov x1, #1
+    bl _write_cstr_fd
+
+    // x3 key len
+    cmp x24, #2
+    b.ne Lemit_map_store_key_len_zero
+    tbz x22, #47, Lemit_map_store_key_len_from_var
+    LOAD_ADDR x0, asm_mov_x3_imm
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, op_arg4
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_newline
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_map_store_value_prep
+Lemit_map_store_key_len_from_var:
+    LOAD_ADDR x0, asm_mov_x0_x1
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x0, asm_call_cstring_length
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x0, asm_mov_x3_x0
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_map_store_value_prep
+Lemit_map_store_key_len_zero:
+    LOAD_ADDR x0, asm_mov_x3_imm
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, #0
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_newline
+    mov x1, #1
+    bl _write_cstr_fd
+
+Lemit_map_store_value_prep:
+    // x4 value
+    tbz x22, #46, Lemit_map_store_val_var
+    cmp x25, #2
+    b.eq Lemit_map_store_val_imm_str
+    LOAD_ADDR x0, asm_mov_x4_imm
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, op_arg2
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_newline
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_map_store_val_type
+Lemit_map_store_val_imm_str:
+    LOAD_ADDR x0, asm_load_x4_print_val_prefix
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, op_arg2
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_load_x4_print_val_middle
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, op_arg2
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_load_x4_print_val_suffix
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_map_store_val_type
+Lemit_map_store_val_var:
+    LOAD_ADDR x0, asm_load_x4_var
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, op_arg2
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_stack_offset_fd
+    LOAD_ADDR x0, asm_close_bracket
+    mov x1, #1
+    bl _write_cstr_fd
+
+Lemit_map_store_val_type:
+    // x5 value type
+    LOAD_ADDR x0, asm_mov_x5_imm
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, x25
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_newline
+    mov x1, #1
+    bl _write_cstr_fd
+
+    // x6 value len
+    cmp x25, #2
+    b.ne Lemit_map_store_val_len_zero
+    tbz x22, #46, Lemit_map_store_val_len_from_var
+    LOAD_ADDR x0, asm_mov_x0_x4
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x0, asm_call_cstring_length
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x0, asm_mov_x6_x0
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_map_store_call
+Lemit_map_store_val_len_from_var:
+    LOAD_ADDR x0, asm_mov_x0_x4
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x0, asm_call_cstring_length
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x0, asm_mov_x6_x0
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_map_store_call
+Lemit_map_store_val_len_zero:
+    LOAD_ADDR x0, asm_mov_x6_imm
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, #0
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_newline
+    mov x1, #1
+    bl _write_cstr_fd
+
+Lemit_map_store_call:
+    LOAD_ADDR x0, asm_call_map_store
+    mov x1, #1
+    bl _write_cstr_fd
     b Lemit_op_done
 
 Lemit_op_string_slice:

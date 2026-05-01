@@ -205,16 +205,28 @@
 .global asm_call_map_lookup
 .global asm_call_string_slice
 .global asm_string_slice_runtime
+.global asm_map_dynamic_runtime
 .global asm_load_x2_var
 .global asm_mov_x2_imm
 .global asm_mov_x4_x10
 .global asm_call_cstring_length
 .global asm_mov_x4_x0
 .global asm_mov_x0_x10
+.global asm_mov_x0_x1
+.global asm_mov_x0_x4
 .global asm_mov_x2_x10
 .global asm_mov_x11_x2
 .global asm_mov_x3_imm
 .global asm_mov_x10_imm
+.global asm_mov_x3_x0
+.global asm_mov_x5_imm
+.global asm_mov_x6_imm
+.global asm_mov_x6_x0
+.global asm_load_x4_var
+.global asm_load_x4_print_val_prefix
+.global asm_load_x4_print_val_middle
+.global asm_load_x4_print_val_suffix
+.global asm_call_map_store
 .global asm_load_pool_val_x10_from_x12
 .global asm_load_list_pool_lens_x11
 .global asm_load_map_pool_lens_x11
@@ -974,15 +986,21 @@ asm_mov_x2_imm:
 asm_mov_x4_imm:
     .asciz "    mov x4, #"
 asm_call_map_lookup:
-    .asciz "    bl _map_lookup\n"
+    .asciz "    bl _map_lookup_ext\n"
 
 asm_call_string_slice:
     .asciz "    bl _string_slice\n"
 
 asm_string_slice_runtime:
     .asciz "\n.align 4\n.global _string_slice\n_string_slice:\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    stp x19, x20, [sp, #-16]!\n    stp x21, x22, [sp, #-16]!\n    stp x23, x24, [sp, #-16]!\n    mov x19, x0\n    mov x20, x1\n    mov x21, x2\n    cbz x19, Lslice_empty\n    cmp x20, #0\n    b.ge Lslice_start_ok\n    mov x20, #0\nLslice_start_ok:\n    mov x0, x19\n    bl _cstring_length\n    mov x24, x0\n    cmp x20, x24\n    b.ge Lslice_empty\n    cmp x21, x20\n    b.ge Lslice_end_order_ok\n    b Lslice_empty\nLslice_end_order_ok:\n    cmp x21, x24\n    b.le Lslice_end_clamped\n    mov x21, x24\nLslice_end_clamped:\n    sub x22, x21, x20\n    cmp x22, #0\n    b.le Lslice_empty\n    add x0, x22, #1\n    bl _malloc\n    cbz x0, Lslice_ret\n    mov x23, x0\n    mov x24, #0\nLslice_copy:\n    cmp x24, x22\n    b.ge Lslice_done\n    add x9, x19, x20\n    ldrb w10, [x9, x24]\n    strb w10, [x23, x24]\n    add x24, x24, #1\n    b Lslice_copy\nLslice_done:\n    strb wzr, [x23, x22]\n    mov x0, x23\n    b Lslice_ret\nLslice_empty:\n    mov x0, #1\n    bl _malloc\n    cbz x0, Lslice_ret\n    strb wzr, [x0]\nLslice_ret:\n    ldp x23, x24, [sp], #16\n    ldp x21, x22, [sp], #16\n    ldp x19, x20, [sp], #16\n    ldp x29, x30, [sp], #16\n    ret\n"
+asm_map_dynamic_runtime:
+    .asciz "\n.bss\n.align 3\ndyn_map_count:\n    .quad 0\ndyn_map_base:\n    .space 8192\ndyn_map_key:\n    .space 8192\ndyn_map_key_len:\n    .space 8192\ndyn_map_key_type:\n    .space 8192\ndyn_map_val:\n    .space 8192\ndyn_map_val_len:\n    .space 8192\ndyn_map_val_type:\n    .space 8192\n\n.text\n.align 4\n.global _map_lookup_ext\n_map_lookup_ext:\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    stp x19, x20, [sp, #-16]!\n    stp x21, x22, [sp, #-16]!\n    stp x23, x24, [sp, #-16]!\n    stp x25, x26, [sp, #-16]!\n    stp x27, x28, [sp, #-16]!\n    mov x19, x0\n    mov x20, x1\n    mov x21, x2\n    mov x22, x3\n    mov x23, x4\n    adrp x24, dyn_map_count@PAGE\n    add x24, x24, dyn_map_count@PAGEOFF\n    ldr x25, [x24]\n    mov x26, #0\nL_dyn_lookup_loop:\n    cmp x26, x25\n    b.ge L_dyn_lookup_miss\n    adrp x24, dyn_map_base@PAGE\n    add x24, x24, dyn_map_base@PAGEOFF\n    ldr x27, [x24, x26, lsl #3]\n    cmp x27, x19\n    b.ne L_dyn_lookup_next\n    adrp x24, dyn_map_key_type@PAGE\n    add x24, x24, dyn_map_key_type@PAGEOFF\n    ldr x27, [x24, x26, lsl #3]\n    cmp x27, x22\n    b.ne L_dyn_lookup_next\n    cmp x22, #2\n    b.eq L_dyn_lookup_cmp_str\n    adrp x24, dyn_map_key@PAGE\n    add x24, x24, dyn_map_key@PAGEOFF\n    ldr x27, [x24, x26, lsl #3]\n    cmp x27, x21\n    b.eq L_dyn_lookup_found\n    b L_dyn_lookup_next\nL_dyn_lookup_cmp_str:\n    adrp x24, dyn_map_key_len@PAGE\n    add x24, x24, dyn_map_key_len@PAGEOFF\n    ldr x27, [x24, x26, lsl #3]\n    cmp x27, x23\n    b.ne L_dyn_lookup_next\n    adrp x24, dyn_map_key@PAGE\n    add x24, x24, dyn_map_key@PAGEOFF\n    ldr x0, [x24, x26, lsl #3]\n    mov x1, x27\n    mov x2, x21\n    bl _runtime_match_span_span\n    cbz x0, L_dyn_lookup_next\nL_dyn_lookup_found:\n    adrp x24, dyn_map_val@PAGE\n    add x24, x24, dyn_map_val@PAGEOFF\n    ldr x0, [x24, x26, lsl #3]\n    adrp x24, dyn_map_val_len@PAGE\n    add x24, x24, dyn_map_val_len@PAGEOFF\n    ldr x1, [x24, x26, lsl #3]\n    mov x2, #1\n    b L_dyn_lookup_ret\nL_dyn_lookup_next:\n    add x26, x26, #1\n    b L_dyn_lookup_loop\nL_dyn_lookup_miss:\n    mov x0, x19\n    mov x1, x20\n    mov x2, x21\n    mov x3, x22\n    mov x4, x23\n    bl _map_lookup\nL_dyn_lookup_ret:\n    ldp x27, x28, [sp], #16\n    ldp x25, x26, [sp], #16\n    ldp x23, x24, [sp], #16\n    ldp x21, x22, [sp], #16\n    ldp x19, x20, [sp], #16\n    ldp x29, x30, [sp], #16\n    ret\n\n.align 4\n.global _map_store\n_map_store:\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    stp x19, x20, [sp, #-16]!\n    stp x21, x22, [sp, #-16]!\n    stp x23, x24, [sp, #-16]!\n    stp x25, x26, [sp, #-16]!\n    stp x27, x28, [sp, #-16]!\n    mov x19, x0\n    mov x20, x1\n    mov x21, x2\n    mov x22, x3\n    mov x23, x4\n    mov x24, x5\n    mov x25, x6\n    adrp x26, dyn_map_count@PAGE\n    add x26, x26, dyn_map_count@PAGEOFF\n    ldr x27, [x26]\n    mov x28, #0\nL_dyn_store_find:\n    cmp x28, x27\n    b.ge L_dyn_store_append\n    adrp x9, dyn_map_base@PAGE\n    add x9, x9, dyn_map_base@PAGEOFF\n    ldr x10, [x9, x28, lsl #3]\n    cmp x10, x19\n    b.ne L_dyn_store_next\n    adrp x9, dyn_map_key_type@PAGE\n    add x9, x9, dyn_map_key_type@PAGEOFF\n    ldr x10, [x9, x28, lsl #3]\n    cmp x10, x21\n    b.ne L_dyn_store_next\n    cmp x21, #2\n    b.eq L_dyn_store_cmp_str\n    adrp x9, dyn_map_key@PAGE\n    add x9, x9, dyn_map_key@PAGEOFF\n    ldr x10, [x9, x28, lsl #3]\n    cmp x10, x20\n    b.eq L_dyn_store_write\n    b L_dyn_store_next\nL_dyn_store_cmp_str:\n    adrp x9, dyn_map_key_len@PAGE\n    add x9, x9, dyn_map_key_len@PAGEOFF\n    ldr x10, [x9, x28, lsl #3]\n    cmp x10, x22\n    b.ne L_dyn_store_next\n    adrp x9, dyn_map_key@PAGE\n    add x9, x9, dyn_map_key@PAGEOFF\n    ldr x0, [x9, x28, lsl #3]\n    mov x1, x10\n    mov x2, x20\n    bl _runtime_match_span_span\n    cbnz x0, L_dyn_store_write\nL_dyn_store_next:\n    add x28, x28, #1\n    b L_dyn_store_find\nL_dyn_store_append:\n    cmp x27, #1024\n    b.ge L_dyn_store_ret\n    mov x28, x27\n    add x27, x27, #1\n    str x27, [x26]\n    adrp x9, dyn_map_base@PAGE\n    add x9, x9, dyn_map_base@PAGEOFF\n    str x19, [x9, x28, lsl #3]\n    adrp x9, dyn_map_key@PAGE\n    add x9, x9, dyn_map_key@PAGEOFF\n    str x20, [x9, x28, lsl #3]\n    adrp x9, dyn_map_key_len@PAGE\n    add x9, x9, dyn_map_key_len@PAGEOFF\n    str x22, [x9, x28, lsl #3]\n    adrp x9, dyn_map_key_type@PAGE\n    add x9, x9, dyn_map_key_type@PAGEOFF\n    str x21, [x9, x28, lsl #3]\nL_dyn_store_write:\n    adrp x9, dyn_map_val@PAGE\n    add x9, x9, dyn_map_val@PAGEOFF\n    str x23, [x9, x28, lsl #3]\n    adrp x9, dyn_map_val_len@PAGE\n    add x9, x9, dyn_map_val_len@PAGEOFF\n    str x25, [x9, x28, lsl #3]\n    adrp x9, dyn_map_val_type@PAGE\n    add x9, x9, dyn_map_val_type@PAGEOFF\n    str x24, [x9, x28, lsl #3]\nL_dyn_store_ret:\n    ldp x27, x28, [sp], #16\n    ldp x25, x26, [sp], #16\n    ldp x23, x24, [sp], #16\n    ldp x21, x22, [sp], #16\n    ldp x19, x20, [sp], #16\n    ldp x29, x30, [sp], #16\n    ret\n"
 asm_mov_x4_x10:
     .asciz "    mov x4, x10\n"
+asm_mov_x0_x1:
+    .asciz "    mov x0, x1\n"
+asm_mov_x0_x4:
+    .asciz "    mov x0, x4\n"
 asm_mov_x2_x10:
     .asciz "    mov x2, x10\n"
 asm_mov_x11_x2:
@@ -991,6 +1009,24 @@ asm_mov_x10_imm:
     .asciz "    mov x10, #"
 asm_mov_x3_imm:
     .asciz "    mov x3, #"
+asm_mov_x3_x0:
+    .asciz "    mov x3, x0\n"
+asm_mov_x5_imm:
+    .asciz "    mov x5, #"
+asm_mov_x6_imm:
+    .asciz "    mov x6, #"
+asm_mov_x6_x0:
+    .asciz "    mov x6, x0\n"
+asm_load_x4_var:
+    .asciz "    ldur x4, [x29, #-"
+asm_load_x4_print_val_prefix:
+    .asciz "    adrp x4, print_val_"
+asm_load_x4_print_val_middle:
+    .asciz "@PAGE\n    add x4, x4, print_val_"
+asm_load_x4_print_val_suffix:
+    .asciz "@PAGEOFF\n"
+asm_call_map_store:
+    .asciz "    bl _map_store\n"
 asm_newline:
     .asciz "\n"
 asm_load_list_pool_x11:
