@@ -2029,15 +2029,15 @@ Lemit_map_load_miss_done:
     b Lemit_op_done
 
 Lemit_op_string_slice:
-    // arg0 = dest slot, arg2 = source slot
-    // arg3 = start (immediate, or var-slot with bit63 set)
-    // arg4 = end   (immediate, or var-slot with bit63 set)
+    // arg0 = dest slot, arg1 = source slot
+    // arg2 = start (immediate, or var-slot with bit63 set)
+    // arg3 = end   (immediate, or var-slot with bit63 set)
 
     // x0 = source string ptr: ldur x0, [x29, #-<source_slot*8>]
     LOAD_ADDR x0, asm_load_x0_var
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg2
+    LOAD_ADDR x20, op_arg1
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -2046,7 +2046,7 @@ Lemit_op_string_slice:
     bl _write_cstr_fd
 
     // x1 = start
-    LOAD_ADDR x20, op_arg3
+    LOAD_ADDR x20, op_arg2
     ldr x22, [x20, x19, lsl #3]
     tbnz x22, #63, Lslice_emit_start_var
     LOAD_ADDR x0, asm_mov_x1_imm
@@ -2074,7 +2074,7 @@ Lslice_emit_start_var:
 
 Lslice_emit_end:
     // x2 = end
-    LOAD_ADDR x20, op_arg4
+    LOAD_ADDR x20, op_arg3
     ldr x22, [x20, x19, lsl #3]
     tbnz x22, #63, Lslice_emit_end_var
     LOAD_ADDR x0, asm_mov_x2_imm
