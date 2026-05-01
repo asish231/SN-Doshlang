@@ -475,10 +475,23 @@ On PowerShell, you can also build without `make`:
 ./build.ps1
 ```
 
-To cross-build from Windows for ARM64 explicitly:
+On Windows, `build.ps1` now defaults to `aarch64-windows-msvc` because the
+compiler sources are ARM64 assembly. On a typical x64 Windows PC that means:
+
+- you can cross-build `snc.exe`
+- you cannot run that `snc.exe` natively unless the machine is Windows on ARM
+  (or you add external emulation)
+
+To set the ARM64 Windows target explicitly:
 
 ```powershell
 ./build.ps1 -Target aarch64-windows-msvc
+```
+
+If LLVM is installed but `clang` is not on `PATH`, pass it directly:
+
+```powershell
+./build.ps1 -Clang "C:\Program Files\LLVM\bin\clang.exe"
 ```
 
 Emit assembly for the example:

@@ -173,7 +173,8 @@ Lemit_map_key_strs_next:
     add x21, x21, #1
     b Lemit_map_key_strs_loop
 Lemit_map_key_strs_done:
-
+    // Ensure subsequent .quad table is 8-byte aligned even after odd-length
+    // string-key .asciz payloads.
     LOAD_ADDR x0, asm_align_3
     mov x1, #1
     bl _write_cstr_fd

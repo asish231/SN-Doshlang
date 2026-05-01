@@ -11,8 +11,9 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-SNC="$(cd "$(dirname "$0")" && pwd)/snc"
-REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+SNC="$REPO_ROOT/snc"
 TESTS_DIR="tests/modules"
 BUILD_DIR=".build/mod_tests"
 OS=$(uname -s)

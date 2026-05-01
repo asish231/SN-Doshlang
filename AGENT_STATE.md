@@ -15,11 +15,11 @@ Tracks who is working on what right now. Update this before starting work to avo
 
 | Zone | File(s) | Agent | Status | Last Updated |
 |---|---|---|---|---|
-| codegen | `src/codegen.s` | — | idle | 2026-05-01 |
-| parser | `src/parser.s` | — | idle | 2026-05-01 |
+| codegen | `src/codegen.s` | Agent B | in progress | 2026-05-01 |
+| parser | `src/parser.s` | Agent B | in progress | 2026-05-01 |
 | vars | `src/vars.s` | — | idle | — |
 | utils | `src/utils.s` | — | idle | — |
-| data | `src/data.s` | — | idle | 2026-05-01 |
+| data | `src/data.s` | Agent B | in progress | 2026-05-01 |
 | lexer | `src/lexer.s` | — | idle | — |
 | main | `src/main.s` | — | idle | — |
 

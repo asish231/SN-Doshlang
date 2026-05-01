@@ -10,9 +10,22 @@ $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $srcDir = Join-Path $root "src"
 $outDir = Join-Path $root ".build"
 $objDir = Join-Path $outDir "obj"
+$hostArch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
+
+# The compiler sources are ARM64 assembly, so Windows builds need an ARM64 target
+# even on x64 hosts that are only cross-building.
+if (-not $Target -and $IsWindows) {
+    $Target = "aarch64-windows-msvc"
+    Write-Host "Defaulting to ARM64 Windows target: $Target"
+}
+
 $isWindowsTarget = $IsWindows -or ($Target -match "windows")
 $exeName = if ($isWindowsTarget) { "snc.exe" } else { "snc" }
 $exePath = Join-Path $root $exeName
+
+if ($IsWindows -and $isWindowsTarget -and $hostArch -ne "arm64") {
+    Write-Warning "This machine is $hostArch. The build will produce an ARM64 snc.exe that will not run natively on this host."
+}
 
 if ($Clean) {
     if (Test-Path $outDir) {
@@ -39,7 +52,7 @@ if ($Target) {
 
 $objFiles = @()
 Get-ChildItem $srcDir -Filter *.s | Sort-Object Name | ForEach-Object {
-    $objExt = if ($IsWindows) { ".obj" } else { ".o" }
+    $objExt = if ($isWindowsTarget) { ".obj" } else { ".o" }
     $objPath = Join-Path $objDir ($_.BaseName + $objExt)
     & $Clang @commonArgs -c $_.FullName -o $objPath
     if ($LASTEXITCODE -ne 0) {

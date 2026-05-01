@@ -5445,7 +5445,115 @@ Lprimary_str_length_val:
     b Lprimary_suffix_loop_start
 
 Lprimary_member_slice:
-    // Not implemented yet - just fail
+    // str.slice(start, end) -> str
+    cmp x26, #2
+    b.ne Lprimary_fail
+
+    sub sp, sp, #64
+    str x25, [sp]       // source value (ptr for immediate str)
+    str x27, [sp, #8]   // source length
+    str x28, [sp, #16]  // source var id
+
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lprimary_member_slice_fail_cleanup
+
+    // Parse start
+    bl _parse_expr_value
+    cbz x0, Lprimary_member_slice_fail_cleanup
+    mov x19, x1
+    mov x20, x2
+    mov x21, x3
+    mov x22, x4
+    cmp x20, #0
+    b.ne Lprimary_member_slice_fail_cleanup
+    str x19, [sp, #24]  // start value
+    str x22, [sp, #32]  // start var id
+
+    bl _skip_whitespace
+    mov w0, #','
+    bl _expect_char
+    cbz x0, Lprimary_member_slice_fail_cleanup
+
+    // Parse end
+    bl _parse_expr_value
+    cbz x0, Lprimary_member_slice_fail_cleanup
+    mov x19, x1
+    mov x20, x2
+    mov x21, x3
+    mov x22, x4
+    cmp x20, #0
+    b.ne Lprimary_member_slice_fail_cleanup
+    str x19, [sp, #40]  // end value
+    str x22, [sp, #48]  // end var id
+
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lprimary_member_slice_fail_cleanup
+
+    // Materialize source into a temp var when source is an immediate string.
+    ldr x9, [sp, #16]
+    cmn x9, #1
+    b.ne Lprimary_member_slice_source_ready
+    ldr x0, [sp]
+    mov x1, #2
+    ldr x2, [sp, #8]
+    bl _record_data_value
+    mov x23, x0
+    bl _allocate_temp_var
+    mov x9, x0
+    mov x0, #72
+    mov x1, x9
+    mov x2, x23
+    bl _record_operation
+    cbnz x0, Lprimary_member_slice_fail_cleanup
+    str x9, [sp, #16]
+
+Lprimary_member_slice_source_ready:
+    // Encode start arg (immediate or var+100).
+    ldr x9, [sp, #32]
+    cmn x9, #1
+    b.ne Lprimary_member_slice_start_var
+    ldr x9, [sp, #24]
+    b Lprimary_member_slice_start_done
+Lprimary_member_slice_start_var:
+    add x9, x9, #100
+Lprimary_member_slice_start_done:
+    str x9, [sp, #24]
+
+    // Encode end arg (immediate or var+100).
+    ldr x9, [sp, #48]
+    cmn x9, #1
+    b.ne Lprimary_member_slice_end_var
+    ldr x9, [sp, #40]
+    b Lprimary_member_slice_end_done
+Lprimary_member_slice_end_var:
+    add x9, x9, #100
+Lprimary_member_slice_end_done:
+    str x9, [sp, #40]
+
+    // op 90: string_slice(dest, src_var, start, end)
+    bl _allocate_temp_var
+    mov x23, x0
+    mov x0, #90
+    mov x1, x23
+    ldr x2, [sp, #16]
+    ldr x3, [sp, #24]
+    ldr x4, [sp, #40]
+    bl _record_operation4
+    cbnz x0, Lprimary_member_slice_fail_cleanup
+
+    add sp, sp, #64
+    mov x25, #0
+    mov x26, #2
+    mov x27, #0
+    mov x28, x23
+    b Lprimary_suffix_loop_start
+
+Lprimary_member_slice_fail_cleanup:
+    add sp, sp, #64
     b Lprimary_fail
 
 Lprimary_member_push:
@@ -6827,17 +6935,25 @@ Lcast_int_to_str_runtime:
     ldp x23, x24, [sp], #16
     ldp x21, x22, [sp], #16
     ldp x19, x20, [sp], #16
+    sub sp, sp, #16
+    str x25, [sp]
     mov x0, #73
-    mov x1, x25
+    ldr x1, [sp]
     mov x2, x24
     bl _record_operation
-    cbnz x0, Lcast_fail
+    cbnz x0, Lcast_int_to_str_runtime_fail
+    ldr x25, [sp]
+    add sp, sp, #16
     mov x0, #1
     mov x1, #0
     mov x2, #2
     mov x3, #0
     mov x4, x25
     b Lcast_return
+
+Lcast_int_to_str_runtime_fail:
+    add sp, sp, #16
+    b Lcast_fail
 
 Lcast_bool_to_str:
     // Convert bool to "true"/"false" string literals.
