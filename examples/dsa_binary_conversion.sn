@@ -1,24 +1,22 @@
-fn toBinaryDigits(int n) -> int {
+fn toBinaryStr(int n) -> str {
     if (n == 0) {
-        return 0
+        return "0"
     }
 
     int value = n
-    int place = 1
-    int binaryDigits = 0
+    str bits = ""
 
     while (value > 0) {
         int bit = value % 2
-        binaryDigits = binaryDigits + (bit * place)
-        place = place * 10
+        bits = cast(bit, str) + bits
         value = value / 2
     }
 
-    return binaryDigits
+    return bits
 }
 
 fn main() {
-    print(toBinaryDigits(5))   // 101
-    print(toBinaryDigits(10))  // 1010
-    print(toBinaryDigits(19))  // 10011
+    print(toBinaryStr(5))    // 101
+    print(toBinaryStr(10))   // 1010
+    print(toBinaryStr(19))   // 10011
 }
