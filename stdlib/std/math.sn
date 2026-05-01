@@ -29,14 +29,14 @@ fn pow(int base, int exp) -> int {
     return result
 }
 
-fn clamp(int value, int lo, int hi) -> int {
-    if (value < lo) {
+fn clamp(int n, int lo, int hi) -> int {
+    if (n < lo) {
         return lo
     }
-    if (value > hi) {
+    if (n > hi) {
         return hi
     }
-    return value
+    return n
 }
 
 fn sign(int x) -> int {
