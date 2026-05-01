@@ -155,5 +155,16 @@ fn main() {
 SN
 run_test "Nested fn multiple calls with if-return" $'2\n3' /tmp/t_nested_fn_multi_call.sn
 
+cat > /tmp/t_map_keys_values.sn << 'SN'
+fn main() {
+    map<str, int> m = {"alpha": 9}
+    list<str> ks = m.keys()
+    list<int> vs = m.values()
+    print(ks[0])
+    print(vs[0])
+}
+SN
+run_test "Map keys()/values() materialize list contents" $'alpha\n9' /tmp/t_map_keys_values.sn
+
 echo ""
 echo "Summary: PASS=$PASS FAIL=$FAIL"
