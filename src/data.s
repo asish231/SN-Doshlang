@@ -212,6 +212,7 @@
 .global asm_mov_x4_x0
 .global asm_mov_x0_x10
 .global asm_mov_x2_x10
+.global asm_mov_x11_x2
 .global asm_mov_x3_imm
 .global asm_mov_x10_imm
 .global asm_load_pool_val_x10_from_x12
@@ -977,6 +978,8 @@ asm_mov_x4_x10:
     .asciz "    mov x4, x10\n"
 asm_mov_x2_x10:
     .asciz "    mov x2, x10\n"
+asm_mov_x11_x2:
+    .asciz "    mov x11, x2\n"
 asm_mov_x10_imm:
     .asciz "    mov x10, #"
 asm_mov_x3_imm:

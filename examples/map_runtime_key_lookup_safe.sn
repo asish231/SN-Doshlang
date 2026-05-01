@@ -1,0 +1,5 @@
+fn main() {
+    map<str, int> ages = {"Alice": 25, "Bob": 30}
+    str who = "Charlie"
+    print(ages[who])
+}

@@ -13,6 +13,18 @@ Resolved work lives in `RESOLVED_ISSUES.md`.
 - hardened strings and file I/O
 - fuller multi-return support
 
+## String cast hardening status
+
+- ✅ `cast(int, str)` chained concat path fixed
+- ✅ runtime `cast(bool, str)` now uses live stack value (not compile-time metadata)
+- ⚠️ runtime `cast(dec, str)` in deeply dynamic paths still needs broader validation coverage
+
+## Map diagnostics hardening status
+
+- ✅ missing map-key lookups now report `error: map key not found` in compile-time-resolvable lookup paths
+- ✅ added focused example coverage for missing-key diagnostic behavior
+- ⚠️ dynamic runtime map store/insert semantics still need a dedicated runtime op for full “modern map” behavior
+
 ## Module system
 
 - ✅ `use module.path` syntax parsing

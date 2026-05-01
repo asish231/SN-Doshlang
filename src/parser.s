@@ -5817,7 +5817,7 @@ Lprimary_map_lookup_val:
     b.ne Lprimary_fail
 
     and x20, x27, #0xFFFFFFFF // count
-    cbz x20, Lprimary_fail
+    cbz x20, Lmap_lookup_not_found_val
 
     // If key came from a variable/temp slot, emit runtime load.
     cmn x22, #1
@@ -5866,6 +5866,12 @@ Lmap_lookup_next_val:
     add x22, x22, #1
     cmp x22, x20
     b.lt Lmap_lookup_loop_val
+    b Lmap_lookup_not_found_val
+
+Lmap_lookup_not_found_val:
+    LOAD_ADDR x0, msg_key_not_found
+    bl _report_error_prefix
+    bl _write_newline_stderr
     b Lprimary_fail
 
 Lprimary_map_lookup_runtime:
@@ -5879,7 +5885,7 @@ Lprimary_map_lookup_runtime:
     ldp x23, x24, [sp], #16
     ldp x21, x22, [sp], #16
 
-    // op 82: map_load(dest, key_var, base_idx, count | flags)
+    // op 82: map_load(dest, key_var, base_idx, packed_flags, fallback_str_id)
     mov x0, #82
     mov x1, x19 // dest
     mov x2, x22 // use key var slot id
@@ -5889,9 +5895,21 @@ Lprimary_map_lookup_runtime:
     lsl x9, x9, #56
     orr x4, x4, x9
     ubfx x9, x27, #32, #8 // val type
-    cmp x9, #2 // str
     orr x4, x4, x9, lsl #48
-    bl _record_operation4
+    mov x5, #0 // fallback string-id for runtime map miss (only used for str values)
+    cmp x9, #2
+    b.ne Lprimary_map_lookup_runtime_emit
+    LOAD_ADDR x0, kw_none
+    mov x1, #2
+    mov x2, #4
+    bl _record_data_value
+    mov x5, x0
+Lprimary_map_lookup_runtime_emit:
+    mov x0, #82
+    mov x1, x19
+    mov x2, x22
+    mov x3, x25
+    bl _record_operation5
     cbnz x0, Lprimary_fail
 
     mov x25, #0
@@ -6823,11 +6841,9 @@ Lcast_int_to_str_runtime:
 
 Lcast_bool_to_str:
     // Convert bool to "true"/"false" string literals.
+    // Runtime source vars must be converted at runtime, not via compile-time metadata.
     cmp x24, #-1
-    b.eq Lcast_bool_value_ready
-    LOAD_ADDR x9, var_values
-    ldr x19, [x9, x24, lsl #3]
-Lcast_bool_value_ready:
+    b.ne Lcast_bool_to_str_runtime
     mov x0, #1
     mov x2, #2
     cmp x19, #0
@@ -6841,6 +6857,49 @@ Lcast_bool_false:
 Lcast_bool_str_done:
     mov x4, #-1
     b Lcast_return
+
+Lcast_bool_to_str_runtime:
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+    bl _allocate_temp_var
+    mov x25, x0
+
+    LOAD_ADDR x0, kw_true
+    mov x1, #2
+    mov x2, #4
+    bl _record_data_value
+    mov x26, x0
+
+    LOAD_ADDR x0, kw_false
+    mov x1, #2
+    mov x2, #5
+    bl _record_data_value
+    mov x27, x0
+
+    mov x0, #74
+    mov x1, x25
+    mov x2, x24
+    mov x3, x26
+    mov x4, x27
+    bl _record_operation4
+    cbnz x0, Lcast_bool_to_str_runtime_fail
+
+    mov x0, #1
+    mov x1, #0
+    mov x2, #2
+    mov x3, #0
+    mov x4, x25
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    b Lcast_return
+
+Lcast_bool_to_str_runtime_fail:
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    b Lcast_fail
 
 Lcast_dec_to_str:
     // Convert decimal scaled value to a real string.

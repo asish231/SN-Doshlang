@@ -41,6 +41,84 @@ Status:
 - local execution verified in this workspace
 - verified output: `k=2, j=5`
 
+## Runtime Bool Cast Fix
+
+Issue:
+
+- `cast(bool, str)` could read compile-time metadata instead of live runtime values in loops/branches.
+
+Fix:
+
+- Added runtime bool-to-string cast op (`74`) in parser/codegen.
+- Runtime path now branches on the live bool stack slot and stores `"true"`/`"false"` string pointers.
+
+Updated files:
+
+- `src/parser.s`
+- `src/codegen.s`
+- `examples/cast_bool_runtime_toggle.sn`
+
+Validation example:
+
+```sn
+fn main() {
+    bool flag = true
+    print("start=" + cast(flag, str))
+    int i = 0
+    while (i < 3) {
+        if (i == 1) {
+            flag = false
+        }
+        print("i=" + cast(i, str) + ", flag=" + cast(flag, str))
+        i += 1
+    }
+}
+```
+
+## Map Missing-Key Diagnostic Fix
+
+Issue:
+
+- map lookup failures could fall through as generic parser/runtime failures without a specific map-key diagnostic.
+
+Fix:
+
+- map lookup miss in compile-time-resolvable lookup path now emits:
+  `error: map key not found`
+
+Updated files:
+
+- `src/parser.s`
+- `examples/map_missing_key_diagnostic.sn`
+
+Validation example:
+
+```sn
+fn main() {
+    map<str, int> ages = {"Alice": 25, "Bob": 30}
+    print(ages["Alice"])
+    print(ages["Charlie"])
+}
+```
+
+## Runtime Map Lookup Miss Safety (String Values)
+
+Issue:
+
+- runtime map lookup (`ages[keyVar]`) could return null for missing string keys, which is unsafe for later string usage/printing.
+
+Fix:
+
+- parser now emits op `82` with an optional fallback string id for string-valued maps.
+- codegen now checks `_map_lookup` success flag (`x2`) and on miss sets `x0` to fallback string pointer (`"none"` by default) for string maps.
+
+Updated files:
+
+- `src/parser.s`
+- `src/codegen.s`
+- `src/data.s`
+- `examples/map_runtime_key_lookup_safe.sn`
+
 ## [prior: 1] User Claim: Compiler Fix Successful
 
 The user states: "well i have fiex the compiler in all the ways and wel its workign now as hell yeshhh"

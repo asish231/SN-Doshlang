@@ -385,6 +385,8 @@ _emit_operation:
     b.eq Lemit_op_store_str_lit
     cmp x21, #73
     b.eq Lemit_op_cast_int_to_str
+    cmp x21, #74
+    b.eq Lemit_op_cast_bool_to_str
     cmp x21, #78
     b.eq Lemit_op_cast_str_to_int
     cmp x21, #80
@@ -1559,6 +1561,135 @@ Lemit_op_cast_int_to_str:
     bl _write_cstr_fd
     b Lemit_op_done
 
+Lemit_op_cast_bool_to_str:
+    // arg0: dest var idx
+    // arg1: source bool var idx
+    // arg2: print/data id for "true"
+    // arg3: print/data id for "false"
+    stp x23, x24, [sp, #-16]!
+
+    // Load source bool into x11 and branch to false label when zero.
+    LOAD_ADDR x0, asm_math_var_x11_ldr
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, op_arg1
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_stack_offset_fd
+    LOAD_ADDR x0, asm_close_bracket
+    mov x1, #1
+    bl _write_cstr_fd
+
+    bl _get_next_label
+    mov x23, x0 // false label
+    bl _get_next_label
+    mov x24, x0 // end label
+
+    LOAD_ADDR x0, asm_branch_zero
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, x23
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_newline
+    mov x1, #1
+    bl _write_cstr_fd
+
+    // true path: x0 = &print_val_<true_id>
+    LOAD_ADDR x0, asm_load_x0_print_val_prefix
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, op_arg2
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_load_x0_print_val_middle
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, op_arg2
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_load_x0_print_val_suffix
+    mov x1, #1
+    bl _write_cstr_fd
+
+    LOAD_ADDR x0, asm_store_x0_var
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, op_arg0
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_stack_offset_fd
+    LOAD_ADDR x0, asm_close_bracket
+    mov x1, #1
+    bl _write_cstr_fd
+
+    LOAD_ADDR x0, asm_branch
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, x24
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_newline
+    mov x1, #1
+    bl _write_cstr_fd
+
+    // false label
+    LOAD_ADDR x0, asm_label_prefix
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, x23
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_label_suffix
+    mov x1, #1
+    bl _write_cstr_fd
+
+    // false path: x0 = &print_val_<false_id>
+    LOAD_ADDR x0, asm_load_x0_print_val_prefix
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, op_arg3
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_load_x0_print_val_middle
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, op_arg3
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_load_x0_print_val_suffix
+    mov x1, #1
+    bl _write_cstr_fd
+
+    LOAD_ADDR x0, asm_store_x0_var
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, op_arg0
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_stack_offset_fd
+    LOAD_ADDR x0, asm_close_bracket
+    mov x1, #1
+    bl _write_cstr_fd
+
+    // end label
+    LOAD_ADDR x0, asm_label_prefix
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, x24
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_label_suffix
+    mov x1, #1
+    bl _write_cstr_fd
+
+    ldp x23, x24, [sp], #16
+    b Lemit_op_done
+
 Lemit_op_list_load:
     // arg0: dest, arg1: index_var/imm, arg2: base_idx, arg3: flags
     LOAD_ADDR x20, op_arg3
@@ -1664,6 +1795,7 @@ Lemit_op_map_load:
     ldr x22, [x20, x19, lsl #3]
     and x23, x22, #0xFFFFFFFF // count
     lsr x24, x22, #56 // key type
+    ubfx x25, x22, #48, #8 // value type
     
     tbz x22, #47, Lemit_map_load_var
     
@@ -1791,8 +1923,94 @@ Lemit_map_load_ready:
     LOAD_ADDR x0, asm_call_map_lookup
     mov x1, #1
     bl _write_cstr_fd
-    
-    // 5. Store result x0 into dest variable slot
+
+    // 5. Handle miss fallback for string values (x2 == 0 means key not found)
+    bl _get_next_label
+    mov x26, x0 // map miss label
+    bl _get_next_label
+    mov x27, x0 // map end label
+
+    LOAD_ADDR x0, asm_mov_x11_x2
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x0, asm_branch_zero
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, x26
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_newline
+    mov x1, #1
+    bl _write_cstr_fd
+
+    LOAD_ADDR x0, asm_branch
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, x27
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_newline
+    mov x1, #1
+    bl _write_cstr_fd
+
+    // map-miss label
+    LOAD_ADDR x0, asm_label_prefix
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, x26
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_label_suffix
+    mov x1, #1
+    bl _write_cstr_fd
+
+    // for non-string values use zero; for strings use fallback id from op_arg4
+    cmp x25, #2
+    b.ne Lemit_map_load_miss_zero
+    LOAD_ADDR x20, op_arg4
+    ldr x22, [x20, x19, lsl #3]
+    cbz x22, Lemit_map_load_miss_zero
+    LOAD_ADDR x0, asm_load_x0_print_val_prefix
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, x22
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_load_x0_print_val_middle
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, x22
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_load_x0_print_val_suffix
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_map_load_miss_done
+
+Lemit_map_load_miss_zero:
+    LOAD_ADDR x0, asm_mov_x0_imm
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, #0
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_newline
+    mov x1, #1
+    bl _write_cstr_fd
+
+Lemit_map_load_miss_done:
+    // end label
+    LOAD_ADDR x0, asm_label_prefix
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, x27
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_label_suffix
+    mov x1, #1
+    bl _write_cstr_fd
+
+    // 6. Store result x0 into dest variable slot
     LOAD_ADDR x0, asm_input_store_x0_str
     mov x1, #1
     bl _write_cstr_fd

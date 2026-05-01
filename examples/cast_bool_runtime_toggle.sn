@@ -1,0 +1,13 @@
+fn main() {
+    bool flag = true
+    print("start=" + cast(flag, str))
+
+    int i = 0
+    while (i < 3) {
+        if (i == 1) {
+            flag = false
+        }
+        print("i=" + cast(i, str) + ", flag=" + cast(flag, str))
+        i += 1
+    }
+}
