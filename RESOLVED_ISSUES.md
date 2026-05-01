@@ -199,3 +199,8 @@ This file tracks issues that have been fixed and locally verified.
 - **Problem:** `tests/runtime_test.sh` returned early on compile/link errors without incrementing failures, masking broken tests.
 - **Fix:** Updated harness to count and display compile/link failures explicitly.
 - **Verified:** macOS runtime suite now reports accurate PASS/FAIL totals (`PASS=10 FAIL=0` in current baseline).
+
+### 39) Windows PowerShell build flow defaulted poorly on Windows hosts
+- **Problem:** On Windows, `build.ps1` relied on the host default target even though the compiler sources are ARM64 assembly, making the out-of-box build flow misleading on normal `x64` machines.
+- **Fix:** Updated `build.ps1` to default to `aarch64-windows-msvc` on Windows, emit `.obj` files for Windows targets, and warn when cross-building from an `x64` host. Updated `README.md` with the Windows target behavior and direct `-Clang` usage.
+- **Verified:** Script logic and documentation were checked locally in the Windows workspace. Full compile verification is still pending until LLVM/Clang is available.

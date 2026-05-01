@@ -4,9 +4,15 @@ Resolved work lives in `RESOLVED_ISSUES.md`.
 
 ## Current Status
 
-- No active blocking issues are currently open from the prior checklist.
+- No active blocking compiler regressions are currently open from the prior checklist.
 - Validation baseline is green on macOS for build + module + runtime + math suites.
 - Ongoing language enhancement work continues as normal feature development, not break/fix blockers.
+
+## Windows follow-up
+
+- Full Windows build verification is still pending because `clang` is not available on `PATH` in the current Windows workspace.
+- The current Windows build flow targets ARM64, so `snc.exe` is cross-buildable from `x64` Windows but not natively runnable there.
+- Native support for standard `x64` Windows would require a larger port or alternate backend, not just build-script changes.
 
 ## String cast hardening status
 
