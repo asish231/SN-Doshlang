@@ -35,7 +35,8 @@ Tracks who is working on what right now. Update this before starting work to avo
 - Optimized `_string_slice` runtime helper to correctly handle length boundaries.
 
 ### Agent A (most recent first)
-- Hardened `_string_slice` bounds/null handling in `src/data.s` and rebuilt `stdlib/std/math.sn` to complete/compat syntax; macOS verification still pending due local toolchain/SSH constraints.
+- Completed Cursor SSH workflow: pushed to `origin/main`, pulled/rebuilt on Mac, and verified `tests/test_modules.sh`, `tests/test_math.sh`, and slice repro programs all pass.
+- Hardened `_string_slice` bounds/null handling in `src/data.s` and rebuilt `stdlib/std/math.sn` to complete/compat syntax.
 - Restored the empty collection literal parsing logic (`[]` and `{}`) that was accidentally reverted. Verified that `map<str, int> m = {}` along with map key insertion (`m["first"] = 100`) compiles and runs correctly.
 - Re-applied the runtime map index immediate flag propagation logic in the parser (`Lprimary_map_lookup_runtime`), ensuring `print(m["first"])` loads correctly natively instead of using broken stack offsets.
 - Fixed map (`m[k]`) and list (`l[i]`) runtime lookups for constant/immediate keys by passing `is_imm` flag natively to codegen and emitting `mov x10, #imm` or string pool pointers instead of broken `ldur` instructions.
@@ -53,12 +54,7 @@ Tracks who is working on what right now. Update this before starting work to avo
 
 Things that are currently broken or mid-fix. If you touch something and break it, add it here so the other agent doesn't build on top of broken code.
 
-- `str.slice(start, end)` currently compiles/links but runtime crashes (exit 139) on macOS for:
-  - `tests/test_slice_only.sn`
-  - `tests/test_slice_literals.sn`
-  - `tests/test_slice.sn`
-- `tests/test_modules.sh` still reports 3 failing module cases (`single_use`, `stdlib_math`, `multi_fn`) due compile errors.
-- `tests/test_math.sh` still fails compile of `tests/test_math.sn` with generic parser errors (`line line 5`, `line line 10`).
+_None currently._
 
 ---
 

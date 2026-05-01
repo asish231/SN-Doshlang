@@ -173,4 +173,9 @@ This file tracks issues that have been fixed and locally verified.
 ### 33) `_string_slice` runtime helper could read out of bounds
 - **Problem:** `_string_slice` did not guard null source or clamp `start/end` to source length, which could lead to runtime crashes on macOS.
 - **Fix:** Hardened helper in `src/data.s` with null checks, start/end normalization, bounds clamping, and safe empty-string fallback.
-- **Verified:** Pending macOS SSH test run for `tests/test_slice_only.sn`, `tests/test_slice_literals.sn`, and `tests/test_slice.sn`.
+- **Verified:** macOS SSH run now passes for `tests/test_slice_only.sn`, `tests/test_slice_literals.sn`, and `tests/test_slice.sn`.
+
+### 34) `test_math.sh` compile failure after stdlib expansion
+- **Problem:** `clamp` used `value` as a parameter name, colliding with reserved `value` keyword and causing parser failure in `tests/test_math.sn`.
+- **Fix:** Renamed `clamp(int value, ...)` to `clamp(int n, ...)` and updated internal references.
+- **Verified:** macOS SSH run passes `tests/test_math.sh`; module suite (`tests/test_modules.sh`) also passes all cases.

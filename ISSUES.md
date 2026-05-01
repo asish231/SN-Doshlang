@@ -30,7 +30,7 @@ Resolved work lives in `RESOLVED_ISSUES.md`.
 - ✅ parser and codegen wiring for `str.slice(start, end)` has been added
 - ✅ runtime helper `_string_slice` is emitted again
 - ✅ `_string_slice` now clamps bounds and guards null/empty cases to avoid out-of-range reads
-- ⚠️ `tests/test_slice_only.sn`, `tests/test_slice_literals.sn`, and `tests/test_slice.sn` need re-run on macOS to confirm the crash is fully resolved
+- ✅ macOS re-run now passes for `tests/test_slice_only.sn`, `tests/test_slice_literals.sn`, and `tests/test_slice.sn`
 
 ## Module system
 
@@ -48,7 +48,6 @@ See `ANTIGRAVITY_ISSUE.md` — RESOLVED.
 ## Next concrete milestone
 
 - Expand test coverage for module imports with multiple functions
-- Re-run `str.slice(start, end)` suite on macOS and close out if green
 - Diagnostics for typed returns, cast paths, list/map edge cases, file I/O
 
 ## Nested function multiple calls (proper fix pending)
