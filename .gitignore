@@ -3,3 +3,7 @@ snc
 *.o
 .DS_Store
 .amazonq/rules
+# SSH credentials for scripts/mac_ssh_common.py loaders
+scripts/snc_ssh.env
+
+scripts/__pycache__/
