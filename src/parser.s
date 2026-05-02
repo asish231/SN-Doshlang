@@ -7863,7 +7863,6 @@ Lfn_def_parse_param:
 
 Lfn_def_param_store_type:
     // Store param type: fn_param_types[fn_idx * 4 + param_idx]
-    cbnz x26, Lfn_def_param_skip_store
     mov x9, x21
     lsl x9, x9, #2         // fn_idx * 4
     add x9, x9, x22        // + param_idx
@@ -7871,7 +7870,6 @@ Lfn_def_param_store_type:
     str x25, [x10, x9, lsl #3]
     LOAD_ADDR x10, fn_param_lengths
     str x24, [x10, x9, lsl #3]
-Lfn_def_param_skip_store:
 
     // Parse param name
     bl _skip_whitespace
@@ -7881,7 +7879,6 @@ Lfn_def_param_skip_store:
     // Store param name
     mov x23, x0
     mov x24, x1
-    cbnz x26, Lfn_def_param_done
     mov x9, x21
     lsl x9, x9, #2
     add x9, x9, x22
@@ -7939,7 +7936,6 @@ Lfn_def_param_default_check_scale:
     cmp x13, x14
     b.ne Lfn_def_fail
 Lfn_def_param_default_store:
-    cbnz x26, Lfn_def_param_next
     LOAD_ADDR x10, fn_param_default_flags
     mov x14, #1
     str x14, [x10, x9, lsl #3]
@@ -7959,7 +7955,6 @@ Lfn_def_params_done:
     bl _advance_char // consume ')'
 
     // Store param count
-    cbnz x26, Lfn_def_count_done
     LOAD_ADDR x9, fn_param_counts
     str x22, [x9, x21, lsl #3]
 Lfn_def_count_done:
@@ -8014,7 +8009,6 @@ Lfn_def_tuple_return:
     mov x11, x13
     mov x12, x14
 Lfn_def_store_ret:
-    cbnz x26, Lfn_def_expect_body
     LOAD_ADDR x9, fn_return_types
     str x25, [x9, x21, lsl #3]
     LOAD_ADDR x9, fn_return_decl_lengths
@@ -8028,7 +8022,6 @@ Lfn_def_store_ret:
 Lfn_def_no_return_type:
     // No return type, store -1
     mov x25, #-1
-    cbnz x26, Lfn_def_expect_body
     LOAD_ADDR x9, fn_return_types
     str x25, [x9, x21, lsl #3]
     LOAD_ADDR x9, fn_return_decl_lengths
@@ -8044,12 +8037,11 @@ Lfn_def_expect_body:
     bl _expect_char
     cbz x0, Lfn_def_fail
 
-    // Store cursor position of body start
+    // Store cursor position of body start (also when refining preparse stubs)
     LOAD_ADDR x9, cursor_pos
     ldr x23, [x9]
     LOAD_ADDR x9, current_line
     ldr x24, [x9]
-    cbnz x26, Lfn_def_skip_count
     LOAD_ADDR x9, fn_body_cursors
     str x23, [x9, x21, lsl #3]
     LOAD_ADDR x9, fn_body_lines
@@ -8063,7 +8055,7 @@ Lfn_def_expect_body:
     LOAD_ADDR x9, fn_source_lens
     str x10, [x9, x21, lsl #3]
 
-    // Increment fn count
+    cbnz x26, Lfn_def_skip_count
     LOAD_ADDR x9, fn_count
     add x21, x21, #1
     str x21, [x9]
@@ -8728,7 +8720,7 @@ Lfn_call_return:
     ret
 
 // _preparse_blueprint_methods: register blueprint + all its methods with
-// synthesized names (Blueprint__method) so forward calls resolve correctly.
+// synthesized names (Blueprint_method) so forward calls resolve correctly.
 // Called during preparse pass. Leaves cursor after the closing '}'.
 _preparse_blueprint_methods:
     stp x29, x30, [sp, #-16]!
@@ -8958,6 +8950,9 @@ _parse_blueprint:
 
     add x10, x10, #1
     str x10, [x9]
+
+    LOAD_ADDR x9, current_blueprint_parse
+    str x23, [x9]
     b Lblueprint_register_done
 
 Lblueprint_already_registered:

@@ -4,20 +4,10 @@ Resolved work lives in `RESOLVED_ISSUES.md`.
 
 ## Current Status
 
-- No active blocking compiler regressions are currently open from the prior checklist.
-- Validation baseline is green on macOS for build + module + runtime + math suites.
-- Ongoing language enhancement work continues as normal feature development, not break/fix blockers.
+- Blueprint / contract parser fixes below are merged locally; rerun the macOS test scripts after `git pull` on the Mac to confirm the full baseline.
+- Ongoing language enhancement work continues as normal feature development when the harness is green.
 
-## Contract/Follows and Blueprint Methods — compile failure
+## Contract / follows / blueprint methods
 
-- **Problem:** `contract` + `follows` blueprint, blueprint method calls, and general user-defined functions fail to compile.
-- **Root cause:** Multiple issues in parser.s:
-  1. Double underscore bug in method name synthesis (`__method` instead of `_method`)
-  2. `current_blueprint_parse` global not set during blueprint parsing — causes methods to not find their blueprint
-  3. User functions not being emitted by codegen at all — only `_main` and runtime helpers appear in output
-- **Test cases:**
-  - `tests/test_contract_follows.sn` → error: blueprint does not implement required contract method
-  - `tests/test_method_no_contract.sn` → c.draw() generates error: unknown function `_draw`
-  - `tests/test_direct_fn.sn` → draw_simple() generates error: unknown function `_draw_simple`
-- **Status:** UNDER INVESTIGATION
-- **Next steps:** Fix codegen to emit user-defined functions (both top-level and blueprint methods)
+- **Resolved in tree** (see `RESOLVED_ISSUES.md` §41): blueprint bodies now set `current_blueprint_parse` on first registration (not only after preparse lookup), and refining preparse method stubs no longer skips storing body anchors, parameters, and return metadata (those omissions broke contract checks and `obj.method()` dispatch).
+- **Regression:** `tests/test_contract_follows.sn` should compile and run after rebuild.

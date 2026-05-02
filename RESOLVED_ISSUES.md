@@ -240,3 +240,8 @@ This file tracks issues that have been fixed and locally verified.
 - **Nested function multiple calls:**
   - ✅ repeated nested-function calls with `if` return path validated in runtime suite (`tests/runtime_test.sh`)
 - **Verified:** All items marked ✅ were validated on macOS; related test suites pass.
+
+### 41) Blueprint `follows` contract checks and method dispatch after preparse stubs
+- **Problem:** Contract enforcement and blueprint method calls could misbehave or fail: `current_blueprint_parse` was not set when a blueprint was first registered in the main parse path (only when matched as already preparsed), and refining preparse function stubs skipped persisting body cursors, parameter tables, and return-type metadata.
+- **Fix:** Set `current_blueprint_parse` when allocating a new blueprint slot; always record full function metadata and body anchors when overwriting a preparse stub (`x26 == 1`), while still only incrementing `fn_count` for brand-new entries.
+- **Verified:** Logic reviewed on the development host; run `make clean && make && bash tests/compile_test.sh && bash tests/runtime_test.sh` on macOS (or `py scripts/mac_remote_run_tests.py` with `SNC_SSH_PASSWORD`) after pulling this change.
