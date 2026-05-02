@@ -24,11 +24,19 @@ Lprogram_loop:
     cbnz x0, Lprogram_ok
 
     bl _parse_statement
-    cbnz x0, Lprogram_fail
-    b Lprogram_loop
+    cbz x0, Lprogram_loop
+    cmp x0, #5
+    b.eq Lprogram_quiet_fail
+    b Lprogram_fail
 
 Lprogram_ok:
     mov x0, #0
+    ldp x29, x30, [sp], #16
+    ret
+
+// Statement already printed a diagnostic (return code 5); exit without generic message.
+Lprogram_quiet_fail:
+    mov x0, #1
     ldp x29, x30, [sp], #16
     ret
 
@@ -316,12 +324,17 @@ _parse_statement:
 
 Lstmt_blueprint:
     bl _parse_blueprint
+    cbnz x0, Lstmt_return
+    mov x0, #0
     b Lstmt_return
 
 Lstmt_contract:
     bl _parse_contract
+    cbnz x0, Lstmt_return
+    mov x0, #0
     b Lstmt_return
 
+// spawn: compile-time expansion matches a normal call today; OS threads are not scheduled yet.
 Lstmt_spawn:
     bl _skip_whitespace
     bl _parse_identifier
@@ -8980,7 +8993,7 @@ Lblueprint_skip_follows_loop:
     mov x0, x24
     mov x1, x25
     bl _lookup_contract_id
-    cbz x0, Lblueprint_fail_name
+    cbz x0, Lblueprint_fail_unknown_contract
     mov x26, x1
     LOAD_ADDR x9, blueprint_contract_counts
     ldr x10, [x9, x23, lsl #3]
@@ -9048,7 +9061,7 @@ Lblueprint_contract_method_loop:
     mov x1, x0
     mov x0, x23
     bl _lookup_blueprint_method
-    cbz x0, Lblueprint_fail_name
+    cbz x0, Lblueprint_fail_contract_method
     add x27, x27, #1
     b Lblueprint_contract_method_loop
 Lblueprint_contract_next:
@@ -9066,13 +9079,41 @@ Lblueprint_done:
     ldp x29, x30, [sp], #16
     ret
 
+Lblueprint_fail_unknown_contract:
+    LOAD_ADDR x9, current_blueprint_parse
+    str xzr, [x9]
+    LOAD_ADDR x0, msg_contract_not_found
+    bl _report_error_prefix
+    bl _write_newline_stderr
+    mov x0, #5
+    ldp x25, x26, [sp], #16
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+Lblueprint_fail_contract_method:
+    LOAD_ADDR x9, current_blueprint_parse
+    str xzr, [x9]
+    LOAD_ADDR x0, msg_contract_method_missing
+    bl _report_error_prefix
+    bl _write_newline_stderr
+    mov x0, #5
+    ldp x25, x26, [sp], #16
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
 Lblueprint_fail_name:
     LOAD_ADDR x9, current_blueprint_parse
     str xzr, [x9]
     LOAD_ADDR x0, msg_expected_name
     bl _report_error_prefix
     bl _write_newline_stderr
-    mov x0, #1
+    mov x0, #5
     ldp x25, x26, [sp], #16
     ldp x23, x24, [sp], #16
     ldp x21, x22, [sp], #16
@@ -9083,7 +9124,7 @@ Lblueprint_fail_name:
 Lblueprint_fail_too_many:
     LOAD_ADDR x9, current_blueprint_parse
     str xzr, [x9]
-    mov x0, #1
+    mov x0, #5
     ldp x25, x26, [sp], #16
     ldp x23, x24, [sp], #16
     ldp x21, x22, [sp], #16
@@ -9151,7 +9192,7 @@ Lcontract_fail:
     LOAD_ADDR x0, msg_expected_stmt
     bl _report_error_prefix
     bl _write_newline_stderr
-    mov x0, #1
+    mov x0, #5
     ldp x19, x20, [sp], #16
     ldp x29, x30, [sp], #16
     ret

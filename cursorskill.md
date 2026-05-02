@@ -16,7 +16,9 @@ Use the same host you tested with:
 
 - Host: `192.168.0.113`
 - User: `asishsharma`
-- Password: `Asish@2006`
+- **Remote repo path:** `/Users/asishsharma/programming/snc`
+
+Prefer SSH key authentication (`ssh-copy-id`) so builds can run non-interactively.
 
 Recommended approach in Cursor:
 
@@ -32,8 +34,8 @@ Run this cycle on every meaningful change:
 1. Edit locally in Cursor.
 2. Commit locally.
 3. `git push origin main`
-4. On the Mac: `git pull --rebase origin main`
-5. Build: `make clean && make`
+4. On the Mac: `cd /Users/asishsharma/programming/snc && git pull --rebase origin main`
+5. Build: `make clean && make` (from that directory)
 6. Run the relevant tests.
 7. Fix anything that fails.
 8. Repeat.

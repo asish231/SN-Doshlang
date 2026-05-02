@@ -84,5 +84,38 @@ fn main() {
 SN
 run_test "Blueprint, contract, and object declarations parse" "print_val_" /tmp/t_blueprint_decl.sn
 
+echo "=== Contract / follows enforcement ==="
+cat > /tmp/t_contract_unknown.sn << 'SN'
+contract A {
+    fn foo()
+}
+
+blueprint B follows NotDeclaredContract {
+    fn foo() {
+        print("x")
+    }
+}
+
+fn main() {
+    print("ok")
+}
+SN
+run_test "Unknown contract in follows fails compile" "unknown contract in follows" /tmp/t_contract_unknown.sn
+
+cat > /tmp/t_contract_missing_method.sn << 'SN'
+contract NeedFoo {
+    fn foo()
+}
+
+blueprint Bad follows NeedFoo {
+    int x
+}
+
+fn main() {
+    print("ok")
+}
+SN
+run_test "Blueprint missing contract method fails compile" "does not implement required contract method" /tmp/t_contract_missing_method.sn
+
 echo ""
 echo "PASS: $PASS  FAIL: $FAIL"

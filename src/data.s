@@ -8,6 +8,8 @@
 .global msg_colon_space
 .global msg_expected_stmt
 .global msg_expected_name
+.global msg_contract_not_found
+.global msg_contract_method_missing
 .global msg_module_load_error
 .global msg_expected_expr
 .global msg_expected_char
@@ -413,6 +415,8 @@ msg_on_line:       .asciz "line "
 msg_colon_space:   .asciz ": "
 msg_expected_stmt: .asciz "error: expected statement on "
 msg_expected_name: .asciz "error: expected variable name on "
+msg_contract_not_found: .asciz "error: unknown contract in follows on "
+msg_contract_method_missing: .asciz "error: blueprint does not implement required contract method on "
 msg_module_load_error: .asciz "error: failed to load module on "
 default_search_path_current: .asciz "."
 default_search_path_stdlib: .asciz "stdlib"
