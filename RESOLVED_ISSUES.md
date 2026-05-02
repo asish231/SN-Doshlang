@@ -245,3 +245,21 @@ This file tracks issues that have been fixed and locally verified.
 - **Problem:** Contract enforcement and blueprint method calls could misbehave or fail: `current_blueprint_parse` was not set when a blueprint was first registered in the main parse path (only when matched as already preparsed), and refining preparse function stubs skipped persisting body cursors, parameter tables, and return-type metadata.
 - **Fix:** Set `current_blueprint_parse` when allocating a new blueprint slot; always record full function metadata and body anchors when overwriting a preparse stub (`x26 == 1`), while still only incrementing `fn_count` for brand-new entries.
 - **Verified:** Logic reviewed on the development host; run `make clean && make && bash tests/compile_test.sh && bash tests/runtime_test.sh` on macOS (or `py scripts/mac_remote_run_tests.py` with `SNC_SSH_PASSWORD`) after pulling this change.
+
+---
+
+## Session: 2026-05-02 (Parser fixes)
+
+### 42) Double underscore in method synthesis
+- **Problem:** Blueprint method names were generated with TWO underscores as separator (e.g., `__draw` instead of `_draw`), breaking method dispatch.
+- **Fix:** Changed `_build_method_synth_name` in `src/parser.s` to write only ONE underscore separator.
+- **Verified:** Method names now generate correctly (e.g., `Circle_draw`).
+
+### 43) Blueprint tracking during member parsing
+- **Problem:** `current_blueprint_parse` global was not set during blueprint parsing, causing methods to not know their blueprint.
+- **Fix:** Added `current_blueprint_parse` storage during both new blueprint registration and when handling already-registered blueprints.
+- **Verified:** Parser now correctly tracks current blueprint.
+
+### 44) Open issue: User functions not emitted by codegen
+- **Problem:** User-defined functions (top-level and blueprint methods) are NOT being emitted by codegen. Only `_main` and runtime helpers appear in output.
+- **Status:** UNDER INVESTIGATION - deeper codegen fix required.
