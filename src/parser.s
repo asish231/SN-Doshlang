@@ -352,20 +352,15 @@ Lstmt_spawn:
 
 Lstmt_new:
     bl _parse_new_object
+    cbnz x0, Lstmt_return
+    mov x0, #0
     b Lstmt_return
 
 Lstmt_stack_object:
     bl _parse_stack_object
+    cbnz x0, Lstmt_return
+    mov x0, #0
     b Lstmt_return
-
-    LOAD_ADDR x0, msg_unknown_stmt
-    bl _report_error_prefix
-    mov x0, x19
-    mov x1, x20
-    mov x2, #2
-    bl _write_buffer_fd
-    bl _write_newline_stderr
-    b Lstmt_fail
 
 Lstmt_set:
     bl _skip_whitespace
@@ -1328,7 +1323,9 @@ Lstmt_const:
 
     LOAD_ADDR x0, msg_expected_type
     bl _report_error_prefix
-    b Lstmt_fail
+    bl _write_newline_stderr
+    mov x0, #5
+    b Lstmt_return
 
 Lstmt_const_int:
     mov x22, #0
@@ -1565,7 +1562,8 @@ Lstmt_fn_unclosed:
     mov x2, #2
     bl _write_buffer_fd
     bl _write_newline_stderr
-    b Lstmt_fail
+    mov x0, #5
+    b Lstmt_return
 
 Lstmt_if:
     bl _parse_if_statement_after_keyword
@@ -1626,7 +1624,8 @@ Lstmt_stop_outside_loop:
     mov x2, #2
     bl _write_buffer_fd
     bl _write_newline_stderr
-    b Lstmt_fail
+    mov x0, #5
+    b Lstmt_return
 
 Lstmt_skip:
     bl _consume_optional_semicolon
@@ -1653,7 +1652,8 @@ Lstmt_skip_outside_loop:
     mov x2, #2
     bl _write_buffer_fd
     bl _write_newline_stderr
-    b Lstmt_fail
+    mov x0, #5
+    b Lstmt_return
 
 Lstmt_match:
     bl _parse_match_statement_after_keyword
@@ -2359,7 +2359,9 @@ Lstmt_method_pop:
 Lstmt_unknown_var:
     LOAD_ADDR x0, msg_unknown_var
     bl _report_error_prefix
-    b Lstmt_fail
+    bl _write_newline_stderr
+    mov x0, #5
+    b Lstmt_return
 
 Lstmt_assign_set:
     bl _advance_char
@@ -2796,7 +2798,8 @@ Lstmt_assign_divide_zero:
     LOAD_ADDR x0, msg_divide_zero
     bl _report_error_prefix
     bl _write_newline_stderr
-    b Lstmt_fail
+    mov x0, #5
+    b Lstmt_return
 
 Lstmt_assign_store:
     mov x25, x21
@@ -3006,7 +3009,8 @@ Lstmt_unknown_var_assign:
     mov x2, #2
     bl _write_buffer_fd
     bl _write_newline_stderr
-    b Lstmt_fail
+    mov x0, #5
+    b Lstmt_return
 
 Lstmt_unknown:
     LOAD_ADDR x0, msg_unknown_stmt
@@ -3016,7 +3020,8 @@ Lstmt_unknown:
     mov x2, #2
     bl _write_buffer_fd
     bl _write_newline_stderr
-    b Lstmt_fail
+    mov x0, #5
+    b Lstmt_return
 
 Lstmt_type_mismatch:
     LOAD_ADDR x0, msg_type_mismatch
@@ -3027,28 +3032,36 @@ Lstmt_type_mismatch:
     // mov x0, x24
     // bl _print_int_debug
     bl _write_newline_stderr
-    b Lstmt_fail
+    mov x0, #5
+    b Lstmt_return
 
 Lstmt_decimal_scale_error:
     LOAD_ADDR x0, msg_decimal_scale
     bl _report_error_prefix
     bl _write_newline_stderr
-    b Lstmt_fail
+    mov x0, #5
+    b Lstmt_return
 
 Lstmt_need_keyword:
     LOAD_ADDR x0, msg_expected_stmt
     bl _report_error_prefix
-    b Lstmt_fail
+    bl _write_newline_stderr
+    mov x0, #5
+    b Lstmt_return
 
 Lstmt_need_name:
     LOAD_ADDR x0, msg_expected_name
     bl _report_error_prefix
+    bl _write_newline_stderr
+    mov x0, #5
+    b Lstmt_return
 
+// Generic failure: print location only (_report_error_prefix already emits "line N: ")
 Lstmt_fail:
-    LOAD_ADDR x0, msg_on_line
+    LOAD_ADDR x0, msg_empty
     bl _report_error_prefix
     bl _write_newline_stderr
-    mov x0, #1
+    mov x0, #5
 
 Lstmt_return:
     ldp x27, x28, [sp], #16
@@ -9353,7 +9366,7 @@ Lnew_object_fail:
     LOAD_ADDR x0, msg_expected_stmt
     bl _report_error_prefix
     bl _write_newline_stderr
-    mov x0, #1
+    mov x0, #5
 
 Lnew_object_return:
     ldp x25, x26, [sp], #16
@@ -9513,7 +9526,7 @@ Lstack_object_fail:
     LOAD_ADDR x0, msg_expected_stmt
     bl _report_error_prefix
     bl _write_newline_stderr
-    mov x0, #1
+    mov x0, #5
 
 Lstack_object_return:
     ldp x25, x26, [sp], #16
@@ -10350,6 +10363,7 @@ _call_object_method:
     // x0=synth name ptr, x1=synth name len
 
     bl _call_function
+    cbnz x0, Lcall_object_method_fail_restore
 
     // Restore self
     LOAD_ADDR x9, current_self_instance
@@ -10363,8 +10377,19 @@ _call_object_method:
     str x10, [x9]
     b Lcall_object_method_return
 
-Lcall_object_method_fail:
+Lcall_object_method_fail_restore:
+    LOAD_ADDR x9, current_self_instance
+    ldr x10, [sp]
+    str x10, [x9]
+    LOAD_ADDR x9, current_self_type
+    ldr x10, [sp, #8]
+    str x10, [x9]
+    LOAD_ADDR x9, current_self_meta
+    ldr x10, [sp, #16]
+    str x10, [x9]
     mov x0, #1
+    b Lcall_object_method_return
+
 Lcall_object_method_return:
     add sp, sp, #32
     ldp x25, x26, [sp], #16

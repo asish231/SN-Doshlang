@@ -43,3 +43,7 @@ See `ANTIGRAVITY_ISSUE.md` — RESOLVED.
 ## Nested function multiple calls
 
 - ✅ repeated nested-function calls with `if` return path validated in runtime suite (`tests/runtime_test.sh`)
+
+## Contract / spawn runtime case
+
+- The `tests/runtime_test.sh` “Contract/Follows and Spawn” case uses **`new Task t()`** (heap) inside `worker()` rather than **`Task t()`** (stack) when the worker is invoked through **`spawn`/compile-time `_call_function`**. Stack-slot blueprint instances nested that way previously failed with generic diagnostics; heap `new` is the robust pattern until stack nesting is tightened in the compiler.

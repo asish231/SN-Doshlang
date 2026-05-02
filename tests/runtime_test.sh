@@ -151,7 +151,7 @@ blueprint Task follows Worker {
 }
 
 fn worker() {
-    Task t()
+    new Task t()
     t.run()
 }
 
