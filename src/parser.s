@@ -1826,7 +1826,10 @@ Lstmt_self_member:
 Lstmt_object_member:
     mov x23, x1
     mov x24, x2
-    mov x25, x3
+    // Blueprint id for dispatch: use object_blueprint_ids[instance] (authoritative at alloc).
+    // var_lengths can disagree in nested/spawn-expanded bodies, yielding synth names like "_run".
+    LOAD_ADDR x9, object_blueprint_ids
+    ldr x25, [x9, x23, lsl #3]
 Lstmt_object_member_ready:
     bl _advance_char
     bl _parse_identifier
@@ -5481,6 +5484,8 @@ Lprimary_member_access:
     b Lprimary_fail
 
 Lprimary_member_object:
+    LOAD_ADDR x9, object_blueprint_ids
+    ldr x27, [x9, x25, lsl #3]
     bl _skip_whitespace
     bl _peek_char
     cmp w0, #'('

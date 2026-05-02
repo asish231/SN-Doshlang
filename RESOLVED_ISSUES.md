@@ -246,6 +246,11 @@ This file tracks issues that have been fixed and locally verified.
 - **Fix:** Set `current_blueprint_parse` when allocating a new blueprint slot; always record full function metadata and body anchors when overwriting a preparse stub (`x26 == 1`), while still only incrementing `fn_count` for brand-new entries.
 - **Verified:** Logic reviewed on the development host; run `make clean && make && bash tests/compile_test.sh && bash tests/runtime_test.sh` on macOS (or `py scripts/mac_remote_run_tests.py` with `SNC_SSH_PASSWORD`) after pulling this change.
 
+### 46) Object methods used `var_lengths` as blueprint id (`_run` / unknown function)
+- **Problem:** `obj.method()` dispatch built synthesized names like `_run` instead of `Blueprint_run` when `var_lengths` no longer matched the real blueprint id for that instance (notably under nested functions / `spawn`-expanded bodies). That made `_build_method_synth_name` see an empty blueprint prefix and produce `_` + method only.
+- **Fix:** For statement and primary-expression object member paths, load the blueprint id from `object_blueprint_ids[instance_id]` (written in `_reserve_object_instance`) instead of trusting `var_lengths` for types 10/11.
+- **Verified:** Rebuild and run `bash tests/runtime_test.sh` (Contract/Follows and Spawn case expects `1\n2`).
+
 ---
 
 ## Session: 2026-05-02 (Parser fixes)
