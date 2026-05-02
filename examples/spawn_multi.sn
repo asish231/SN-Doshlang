@@ -1,0 +1,17 @@
+fn task_a() {
+    int i = 0
+    while (i < 3) {
+        print(i)
+        i += 1
+    }
+}
+
+fn task_b() {
+    print("task b running")
+}
+
+fn main() {
+    spawn task_a()
+    spawn task_b()
+    print("main continues")
+}

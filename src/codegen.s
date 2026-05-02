@@ -86,28 +86,47 @@ _emit_program:
 
 Lemit_no_stack_alloc:
 
-    LOAD_ADDR x19, op_count
+    // Emit top-level ops (main)
+    bl _emit_main_body
+
+    // Now emit all user-defined functions
+    LOAD_ADDR x19, fn_count
     ldr x20, [x19]
     mov x21, #0
-
-Lemit_body_loop:
+Lemit_user_fns_loop:
     cmp x21, x20
-    b.ge Lemit_body_done
-    mov x0, x21
-    bl _emit_operation
-    add x21, x21, #1
-    b Lemit_body_loop
+    b.ge Lemit_user_fns_done
+    
+    // Skip "main" - we already emitted it as the entry point
+    LOAD_ADDR x9, fn_name_ptrs
+    ldr x0, [x9, x21, lsl #3]
+    LOAD_ADDR x9, fn_name_lens
+    ldr x1, [x9, x21, lsl #3]
+    LOAD_ADDR x2, kw_main
+    bl _match_cstr_span
+    cbnz x0, Lemit_user_fns_next
 
-Lemit_body_done:
+    // Emit this function
+    mov x0, x21
+    bl _emit_user_function
+
+Lemit_user_fns_next:
+    add x21, x21, #1
+    b Lemit_user_fns_loop
+
+Lemit_user_fns_done:
+
     LOAD_ADDR x0, asm_main_epilogue
     mov x1, #1
     bl _write_cstr_fd
 #ifndef _WIN32
     bl Lemit_spawn_worker_functions
 #endif
+    bl Lemit_emit_runtime_helpers
     LOAD_ADDR x0, asm_dot_data_intro
     mov x1, #1
     bl _write_cstr_fd
+
 
     mov x21, #0
 
@@ -365,9 +384,12 @@ Lemit_map_pool_lens_loop:
     add x21, x21, #1
     b Lemit_map_pool_lens_loop
 Lemit_map_pool_lens_done:
+    b Lemit_program_done
 
 #ifndef _WIN32
 Lemit_maybe_spawn_thread_runtime:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
     LOAD_ADDR x19, fn_count
     ldr x19, [x19]
     mov x21, #0
@@ -389,6 +411,7 @@ Lemit_mstr_have:
     mov x1, #1
     bl _write_cstr_fd
 Lemit_mstr_done:
+    ldp x29, x30, [sp], #16
     ret
 
 Lemit_spawn_worker_functions:
@@ -405,6 +428,9 @@ Lemit_spawn_worker_functions:
     mov x21, #0
     mov x28, #0
 Lssp_any_scan_loop:
+    LOAD_ADDR x19, fn_count
+    ldr x19, [x19]
+    add x19, x19, #1
     cmp x21, x19
     b.ge Lssp_any_scan_done
     LOAD_ADDR x9, spawn_fn_op_counts
@@ -424,6 +450,9 @@ Lssp_any_scan_done:
 
     mov x21, #0
 Lssp_dispatch_outer:
+    LOAD_ADDR x19, fn_count
+    ldr x19, [x19]
+    add x19, x19, #1
     cmp x21, x19
     b.ge Lssp_dispatch_emit_done
     LOAD_ADDR x9, spawn_fn_op_counts
@@ -472,11 +501,18 @@ Lssp_dispatch_emit_done:
 
     mov x21, #0
 Lssp_thr_outer:
+    LOAD_ADDR x19, fn_count
+    ldr x19, [x19]
+    add x19, x19, #1 // check up to index 63 if needed
     cmp x21, x19
     b.ge Lemit_spawn_worker_functions_exit
     LOAD_ADDR x9, spawn_fn_op_counts
     ldr x23, [x9, x21, lsl #3]
     cbz x23, Lssp_thr_outer_next
+
+    LOAD_ADDR x0, current_table_id
+    add x1, x21, #1
+    str x1, [x0]
 
     LOAD_ADDR x0, asm_spawn_thr_glob
     mov x1, #1
@@ -543,6 +579,8 @@ Lemit_spawn_worker_functions_exit:
 #endif
 
 Lemit_emit_runtime_helpers:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
     LOAD_ADDR x0, asm_runtime_helpers
     mov x1, #1
     bl _write_cstr_fd
@@ -557,9 +595,41 @@ Lemit_emit_runtime_helpers:
 #ifndef _WIN32
     bl Lemit_maybe_spawn_thread_runtime
 #endif
+    ldp x29, x30, [sp], #16
+    ret
 
 Lemit_program_done:
     ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+_emit_label_name:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    mov x19, x0 // index
+
+    LOAD_ADDR x0, asm_label_prefix
+    mov x1, #1
+    bl _write_cstr_fd
+
+    LOAD_ADDR x0, current_table_id
+    ldr x0, [x0]
+    mov x1, #1
+    bl _write_u64_fd
+
+    LOAD_ADDR x0, single_char
+    mov w9, #'_'
+    strb w9, [x0]
+    mov x1, #1
+    mov x2, #1
+    bl _write_buffer_fd
+
+    mov x0, x19
+    mov x1, #1
+    bl _write_u64_fd
+
     ldp x19, x20, [sp], #16
     ldp x29, x30, [sp], #16
     ret
@@ -590,6 +660,9 @@ _emit_operation:
     b.eq Lemit_op_if_else
     cmp x21, #35
     b.eq Lemit_op_if_end
+    cmp x21, #13
+    b.eq Lemit_op_fn_call
+
     cmp x21, #36
     b.eq Lemit_op_while_start
     cmp x21, #37
@@ -1993,19 +2066,14 @@ Lemit_op_cast_bool_to_str:
     mov x1, #1
     bl _write_cstr_fd
     mov x0, x24
-    mov x1, #1
-    bl _write_u64_fd
+    bl _emit_label_name
     LOAD_ADDR x0, asm_newline
     mov x1, #1
     bl _write_cstr_fd
 
     // false label
-    LOAD_ADDR x0, asm_label_prefix
-    mov x1, #1
-    bl _write_cstr_fd
     mov x0, x23
-    mov x1, #1
-    bl _write_u64_fd
+    bl _emit_label_name
     LOAD_ADDR x0, asm_label_suffix
     mov x1, #1
     bl _write_cstr_fd
@@ -2044,12 +2112,8 @@ Lemit_op_cast_bool_to_str:
     bl _write_cstr_fd
 
     // end label
-    LOAD_ADDR x0, asm_label_prefix
-    mov x1, #1
-    bl _write_cstr_fd
     mov x0, x24
-    mov x1, #1
-    bl _write_u64_fd
+    bl _emit_label_name
     LOAD_ADDR x0, asm_label_suffix
     mov x1, #1
     bl _write_cstr_fd
@@ -2327,19 +2391,14 @@ Lemit_map_load_ready:
     mov x1, #1
     bl _write_cstr_fd
     mov x0, x27
-    mov x1, #1
-    bl _write_u64_fd
+    bl _emit_label_name
     LOAD_ADDR x0, asm_newline
     mov x1, #1
     bl _write_cstr_fd
 
     // map-miss label
-    LOAD_ADDR x0, asm_label_prefix
-    mov x1, #1
-    bl _write_cstr_fd
     mov x0, x26
-    mov x1, #1
-    bl _write_u64_fd
+    bl _emit_label_name
     LOAD_ADDR x0, asm_label_suffix
     mov x1, #1
     bl _write_cstr_fd
@@ -2381,12 +2440,8 @@ Lemit_map_load_miss_zero:
 
 Lemit_map_load_miss_done:
     // end label
-    LOAD_ADDR x0, asm_label_prefix
-    mov x1, #1
-    bl _write_cstr_fd
     mov x0, x27
-    mov x1, #1
-    bl _write_u64_fd
+    bl _emit_label_name
     LOAD_ADDR x0, asm_label_suffix
     mov x1, #1
     bl _write_cstr_fd
@@ -2859,8 +2914,7 @@ Lemit_op_if_start:
     LOAD_ADDR x20, emit_tbl_arg1
     ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
-    mov x1, #1
-    bl _write_u64_fd
+    bl _emit_label_name
     
     LOAD_ADDR x0, newline_char
     mov x1, #1
@@ -2878,8 +2932,7 @@ Lemit_op_if_else:
     LOAD_ADDR x20, emit_tbl_arg1
     ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
-    mov x1, #1
-    bl _write_u64_fd
+    bl _emit_label_name
     
     LOAD_ADDR x0, newline_char
     mov x1, #1
@@ -2887,15 +2940,10 @@ Lemit_op_if_else:
     bl _write_buffer_fd
     
     // place ELSE label (op_arg0)
-    LOAD_ADDR x0, asm_label_prefix
-    mov x1, #1
-    bl _write_cstr_fd
-    
     LOAD_ADDR x20, emit_tbl_arg0
     ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
-    mov x1, #1
-    bl _write_u64_fd
+    bl _emit_label_name
     
     LOAD_ADDR x0, asm_label_suffix
     mov x1, #1
@@ -2905,15 +2953,10 @@ Lemit_op_if_else:
 
 Lemit_op_if_end:
     // place END label (op_arg0)
-    LOAD_ADDR x0, asm_label_prefix
-    mov x1, #1
-    bl _write_cstr_fd
-    
     LOAD_ADDR x20, emit_tbl_arg0
     ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
-    mov x1, #1
-    bl _write_u64_fd
+    bl _emit_label_name
     
     LOAD_ADDR x0, asm_label_suffix
     mov x1, #1
@@ -2923,15 +2966,10 @@ Lemit_op_if_end:
 
 Lemit_op_while_start:
     // place START label (op_arg0)
-    LOAD_ADDR x0, asm_label_prefix
-    mov x1, #1
-    bl _write_cstr_fd
-    
     LOAD_ADDR x20, emit_tbl_arg0
     ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
-    mov x1, #1
-    bl _write_u64_fd
+    bl _emit_label_name
     
     LOAD_ADDR x0, asm_label_suffix
     mov x1, #1
@@ -2963,8 +3001,7 @@ Lemit_op_while_cond:
     LOAD_ADDR x20, emit_tbl_arg1
     ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
-    mov x1, #1
-    bl _write_u64_fd
+    bl _emit_label_name
     
     LOAD_ADDR x0, newline_char
     mov x1, #1
@@ -2982,8 +3019,7 @@ Lemit_op_while_end:
     LOAD_ADDR x20, emit_tbl_arg0
     ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
-    mov x1, #1
-    bl _write_u64_fd
+    bl _emit_label_name
     
     LOAD_ADDR x0, newline_char
     mov x1, #1
@@ -2991,20 +3027,41 @@ Lemit_op_while_end:
     bl _write_buffer_fd
     
     // place END label (op_arg1)
-    LOAD_ADDR x0, asm_label_prefix
-    mov x1, #1
-    bl _write_cstr_fd
-    
     LOAD_ADDR x20, emit_tbl_arg1
     ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
-    mov x1, #1
-    bl _write_u64_fd
+    bl _emit_label_name
     
     LOAD_ADDR x0, asm_label_suffix
     mov x1, #1
     bl _write_cstr_fd
     
+    b Lemit_op_done
+
+Lemit_op_fn_call:
+    LOAD_ADDR x9, emit_tbl_arg0
+    ldr x9, [x9]
+    ldr x19, [x9, x0, lsl #3] // fn index
+    
+    LOAD_ADDR x0, single_char
+    mov w9, #' '
+    strb w9, [x0]
+    mov x1, #1
+    mov x2, #1
+    bl _write_buffer_fd
+    
+    // bl _name
+    LOAD_ADDR x0, asm_bl_prefix
+    mov x1, #1
+    bl _write_cstr_fd
+    
+    LOAD_ADDR x9, fn_name_ptrs
+    ldr x0, [x9, x19, lsl #3]
+    LOAD_ADDR x9, fn_name_lens
+    ldr x1, [x9, x19, lsl #3]
+    mov x2, #1
+    bl _write_buffer_fd
+    bl _write_newline_stdout
     b Lemit_op_done
 
 Lemit_op_jump:
@@ -3110,15 +3167,10 @@ Lemit_op_logic_not:
     b Lemit_op_logic_store
 
 Lemit_op_update_label:
-    LOAD_ADDR x0, asm_label_prefix
-    mov x1, #1
-    bl _write_cstr_fd
-    
     LOAD_ADDR x20, emit_tbl_arg0
     ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
-    mov x1, #1
-    bl _write_u64_fd
+    bl _emit_label_name
     
     LOAD_ADDR x0, asm_label_suffix
     mov x1, #1
@@ -3722,3 +3774,177 @@ _write_stack_offset_fd:
     bl _write_u64_fd
     ldp x29, x30, [sp], #16
     ret
+
+_emit_main_body:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+
+    LOAD_ADDR x0, current_table_id
+    mov x1, #0
+    str x1, [x0]
+
+    LOAD_ADDR x19, max_var_count
+    ldr x19, [x19]
+    LOAD_ADDR x20, var_count
+    ldr x20, [x20]
+    cmp x20, x19
+    csel x19, x20, x19, hi
+    mov x20, #8
+    mul x19, x19, x20
+    add x19, x19, #15
+    and x19, x19, #0xFFFFFFFFFFFFFFF0
+    cbz x19, Lemit_main_no_stack_alloc
+
+    LOAD_ADDR x0, asm_sub_sp_prefix
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, x19
+    mov x1, #1
+    bl _write_i64_fd
+    LOAD_ADDR x0, single_char
+    mov w9, #'\n'
+    strb w9, [x0]
+    mov x1, #1
+    mov x2, #1
+    bl _write_buffer_fd
+
+Lemit_main_no_stack_alloc:
+    LOAD_ADDR x19, global_op_count
+    ldr x20, [x19]
+    mov x21, #0
+Lemit_main_body_loop:
+    cmp x21, x20
+    b.ge Lemit_main_body_check_fn_main
+    mov x0, x21
+    bl _emit_operation
+    add x21, x21, #1
+    b Lemit_main_body_loop
+
+Lemit_main_body_check_fn_main:
+    // Also emit code from user function "main" if it exists
+    LOAD_ADDR x0, kw_main
+    mov x1, #4
+    bl _lookup_function
+    cbz x0, Lemit_main_body_done
+    mov x19, x1 // fn_id of "main"
+    
+    LOAD_ADDR x0, current_table_id
+    add x1, x19, #100
+    str x1, [x0]
+
+    LOAD_ADDR x9, fn_op_starts
+    ldr x21, [x9, x19, lsl #3]
+    LOAD_ADDR x9, fn_op_counts
+    ldr x22, [x9, x19, lsl #3]
+    
+    mov x20, #0
+Lemit_main_fn_loop:
+    cmp x20, x22
+    b.ge Lemit_main_body_done
+    add x0, x21, x20
+    bl _emit_operation
+    add x20, x20, #1
+    b Lemit_main_fn_loop
+
+Lemit_main_body_done:
+    // main epilogue
+    LOAD_ADDR x0, asm_ret
+    mov x1, #1
+    bl _write_cstr_fd
+    
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+_emit_user_function:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+
+    mov x19, x0 // fn index
+
+    LOAD_ADDR x0, current_table_id
+    add x1, x19, #100
+    str x1, [x0]
+
+    // Emit newline
+    LOAD_ADDR x0, single_char
+    mov w9, #'\n'
+    strb w9, [x0]
+    mov x1, #1
+    mov x2, #1
+    bl _write_buffer_fd
+
+    // Emit global prefix
+    LOAD_ADDR x0, asm_global_prefix
+    mov x1, #1
+    bl _write_cstr_fd
+
+    LOAD_ADDR x9, fn_name_ptrs
+    ldr x20, [x9, x19, lsl #3] // ptr
+    LOAD_ADDR x9, fn_name_lens
+    ldr x21, [x9, x19, lsl #3] // len
+    
+    mov x0, x20
+    mov x1, x21
+    mov x2, #1
+    bl _write_buffer_fd
+    bl _write_newline_stdout
+
+    // Emit label
+    mov x0, x20
+    mov x1, x21
+    mov x2, #1
+    bl _write_buffer_fd
+    LOAD_ADDR x0, single_char
+    mov w9, #':'
+    strb w9, [x0]
+    mov x1, #1
+    mov x2, #1
+    bl _write_buffer_fd
+    bl _write_newline_stdout
+
+    // Prologue
+    LOAD_ADDR x0, asm_prologue
+    mov x1, #1
+    bl _write_cstr_fd
+
+    // Stack allocation for this function
+    LOAD_ADDR x0, asm_sub_sp_prefix
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, #128
+    mov x1, #1
+    bl _write_i64_fd
+    bl _write_newline_stdout
+    
+    // Emit the operations
+    LOAD_ADDR x9, fn_op_starts
+    ldr x22, [x9, x19, lsl #3] // start index
+    LOAD_ADDR x9, fn_op_counts
+    ldr x23, [x9, x19, lsl #3] // count
+    
+    mov x24, #0
+Lemit_fn_ops_loop:
+    cmp x24, x23
+    b.ge Lemit_fn_ops_done
+    add x0, x22, x24
+    bl _emit_operation
+    add x24, x24, #1
+    b Lemit_fn_ops_loop
+
+Lemit_fn_ops_done:
+    // Epilogue
+    LOAD_ADDR x0, asm_fn_epilogue
+    mov x1, #1
+    bl _write_cstr_fd
+
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+

@@ -1,0 +1,9 @@
+fn test_fn() {
+    print("Function called!")
+}
+
+fn main() {
+    print("Main start")
+    test_fn()
+    print("Main end")
+}

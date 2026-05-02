@@ -155,7 +155,15 @@
 .global emit_tbl_arg2
 .global emit_tbl_arg3
 .global emit_tbl_arg4
+.global compilation_mode
+.global asm_ret
+.global asm_global_prefix
+.global asm_prologue
+.global asm_comment_prefix
+.global msg_fn_body_stub
+.global asm_bl_prefix
 .global asm_header
+
 .global asm_runtime_helpers
 .global asm_sub_sp_prefix
 .global asm_close_bracket
@@ -856,8 +864,28 @@ asm_spawn_thread_runtime:
 #ifdef _WIN32
     .asciz ""
 #else
-    .asciz "\n.bss\n.align 3\nsnc_spawn_fn_arg:\n    .space 4\n\n.text\n.align 4\n.global _snc_pthread_trampoline\n_snc_pthread_trampoline:\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    adrp x0, snc_spawn_fn_arg@PAGE\n    add x0, x0, snc_spawn_fn_arg@PAGEOFF\n    ldr w0, [x0]\n    bl _snc_spawn_dispatch\n    mov x0, xzr\n    ldp x29, x30, [sp], #16\n    ret\n\n.align 4\n.global _snc_spawn_go\n_snc_spawn_go:\n    stp x29, x30, [sp, #-96]!\n    mov x29, sp\n    adrp x8, snc_spawn_fn_arg@PAGE\n    add x8, x8, snc_spawn_fn_arg@PAGEOFF\n    str w0, [x8]\n    add x0, sp, #64\n    mov x1, xzr\n    adrp x2, _snc_pthread_trampoline@PAGE\n    add x2, x2, _snc_pthread_trampoline@PAGEOFF\n    mov x3, xzr\n    bl _pthread_create\n    cbnz w0, L_snc_sg_fail\n    ldr x0, [sp, #64]\n    mov x1, xzr\n    bl _pthread_join\n    mov sp, x29\n    ldp x29, x30, [sp], #96\n    ret\nL_snc_sg_fail:\n    mov sp, x29\n    ldp x29, x30, [sp], #96\n    ret\n"
+    .asciz "\n.text\n.align 4\n.global _snc_pthread_trampoline\n_snc_pthread_trampoline:\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    bl _snc_spawn_dispatch\n    mov x0, xzr\n    ldp x29, x30, [sp], #16\n    ret\n\n.align 4\n.global _snc_spawn_go\n_snc_spawn_go:\n    stp x29, x30, [sp, #-32]!\n    mov x29, sp\n    mov x3, x0\n    add x0, sp, #16\n    mov x1, xzr\n    adrp x2, _snc_pthread_trampoline@PAGE\n    add x2, x2, _snc_pthread_trampoline@PAGEOFF\n    bl _pthread_create\n    cbnz w0, L_snc_sg_fail\n    ldr x0, [sp, #16]\n    bl _pthread_detach\n    mov sp, x29\n    ldp x29, x30, [sp], #32\n    ret\nL_snc_sg_fail:\n    mov sp, x29\n    ldp x29, x30, [sp], #32\n    ret\n"
 #endif
+
+asm_ret:
+    .asciz "    ret\n"
+.global asm_fn_epilogue
+asm_fn_epilogue:
+    .asciz "    mov sp, x29\n    ldp x29, x30, [sp], #16\n    ret\n"
+asm_global_prefix:
+    .asciz ".global "
+asm_prologue:
+    .asciz "    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n"
+asm_comment_prefix:
+    .asciz "    // "
+msg_fn_body_stub:
+    .asciz "function body emission pending fix"
+
+asm_bl_prefix:
+    .asciz "    bl "
+asm_data_intro:
+    .asciz "    mov w0, #0\n    mov sp, x29\n    ldp x29, x30, [sp], #16\n    ret\n\n.data\nprint_fmt_int:\n    .asciz \"%lld\\n\"\nprint_fmt_str:\n    .asciz \"%s\\n\"\nprint_fmt_dec:\n    .asciz \"%s%lld.%0*lld\\n\"\nprint_fmt_int_noline:\n    .asciz \"%lld\"\nprint_fmt_str_noline:\n    .asciz \"%s\"\nprint_fmt_dec_noline:\n    .asciz \"%s%lld.%0*lld\"\ndec_sign_empty:\n    .asciz \"\"\ndec_sign_minus:\n    .asciz \"-\"\n.align 3\n"
+
 asm_data_value_prefix:
     .asciz "print_val_"
 asm_data_value_mid:
@@ -899,11 +927,11 @@ asm_label_suffix:
 asm_pageoff_suffix:
     .asciz "@PAGEOFF\n"
 asm_branch:
-    .asciz "    b L_snl_"
+    .asciz "    b "
 asm_branch_zero:
-    .asciz "    cbz x11, L_snl_"
+    .asciz "    cbz x11, "
 asm_branch_nonzero:
-    .asciz "    cbnz x11, L_snl_"
+    .asciz "    cbnz x11, "
 asm_cmp_x11_x10:
     .asciz "    cmp x11, x10\n"
 asm_cset_gt:
@@ -1139,6 +1167,7 @@ single_char:       .byte 0
 close_brace_char:  .byte 125
 .align 3
 label_counter:     .quad 1
+compilation_mode:  .quad 1
 
 .bss
 .align 4
@@ -1156,6 +1185,8 @@ stmt_target_len: .quad 0
 print_count:    .space 8
 print_noline_flag: .space 8
 op_count:       .space 8
+.global global_op_count
+global_op_count: .space 8
 current_loop_start: .space 8
 current_loop_end: .space 8
 loop_context_depth: .space 8
@@ -1200,6 +1231,8 @@ op_arg2:        .space 32768
 op_arg3:        .space 32768
 op_arg4:        .space 32768
 fn_count:       .space 8
+.global current_table_id
+current_table_id: .space 8
 fn_name_ptrs:   .space 512         // 64 functions * 8 bytes
 fn_name_lens:   .space 512
 fn_body_cursors: .space 512
@@ -1222,6 +1255,8 @@ fn_param_default_lengths: .space 2048
 fn_return_decl_lengths: .space 512
 fn_return_extra_types: .space 512
 fn_return_extra_decl_lengths: .space 512
+.global fn_blueprint_ids
+fn_blueprint_ids: .space 512         // 64 functions * 8 bytes (-1 if not a method)
 fn_return_value: .space 8
 fn_return_length: .space 8
 fn_return_flag:  .space 8

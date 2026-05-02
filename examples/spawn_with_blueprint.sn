@@ -1,0 +1,18 @@
+blueprint Printer {
+    str label
+
+    fn run() {
+        print(self.label)
+    }
+}
+
+fn do_work() {
+    print("worker running")
+}
+
+fn main() {
+    Printer p(label: "spawned printer")
+    spawn do_work()
+    p.run()
+    print("done")
+}

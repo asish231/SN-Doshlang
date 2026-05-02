@@ -1,0 +1,19 @@
+blueprint Counter {
+    int value
+
+    fn increment() {
+        self.value += 1
+    }
+
+    fn get() -> int {
+        return self.value
+    }
+}
+
+fn main() {
+    Counter c(value: 0)
+    c.increment()
+    c.increment()
+    c.increment()
+    print(c.get())
+}

@@ -6,7 +6,8 @@
  .global _report_error_prefix
  .global _write_cstr_fd
  .global _write_buffer_fd
- .global _write_newline_stderr
+ .global _write_newline_stdout
+.global _write_newline_stderr
  .global _write_u64_fd
  .global _write_i64_fd
  .global _write_decimal_raw_fd
@@ -145,6 +146,12 @@ Lwrite_buffer_done:
     ldp x19, x20, [sp], #16
     ldp x29, x30, [sp], #16
     ret
+
+_write_newline_stdout:
+    LOAD_ADDR x0, newline_char
+    mov x1, #1
+    mov x2, #1
+    b _write_buffer_fd
 
 _write_newline_stderr:
     LOAD_ADDR x0, newline_char

@@ -54,6 +54,21 @@ Lmain_have_input:
     str x1, [x2]
     LOAD_ADDR x2, fn_count
     str x1, [x2]
+    
+    // Initialize fn_blueprint_ids to -1
+    mov x3, #-1
+    mov x4, #0
+Linit_fn_bp_ids:
+    cmp x4, #64
+    b.ge Linit_fn_bp_ids_done
+    LOAD_ADDR x5, fn_blueprint_ids
+    str x3, [x5, x4, lsl #3]
+    add x4, x4, #1
+    b Linit_fn_bp_ids
+Linit_fn_bp_ids_done:
+
+    LOAD_ADDR x2, label_counter
+    str x1, [x2]
     LOAD_ADDR x2, op_count
     str x1, [x2]
 #ifndef _WIN32
@@ -76,67 +91,34 @@ Lmain_have_input:
     bl _parse_program
     cbnz x0, Lmain_fail
 
-    // Auto-call main() if it was defined
-    LOAD_ADDR x9, fn_count
-    ldr x9, [x9]
-    cbz x9, Lmain_no_main_fn
+    // Save global op count (ops recorded during _parse_program)
+    LOAD_ADDR x0, op_count
+    ldr x0, [x0]
+    LOAD_ADDR x1, global_op_count
+    str x0, [x1]
 
-    // Look up "main"
-    LOAD_ADDR x0, kw_main
-    bl _cstring_length
-    mov x1, x0
-    LOAD_ADDR x0, kw_main
-    bl _lookup_function
-    cbz x0, Lmain_no_main_fn
-    // x1 = fn index
-    mov x19, x1
+    // Now parse all defined functions
+    LOAD_ADDR x19, fn_count
+    ldr x20, [x19]
+    mov x21, #0
+Lmain_parse_fns_loop:
+    cmp x21, x20
+    b.ge Lmain_parse_fns_done
+    
+    mov x0, x21
+    bl _parse_function_body
+    add x21, x21, #1
+    b Lmain_parse_fns_loop
+Lmain_parse_fns_done:
 
-    // Save current cursor
-    LOAD_ADDR x9, cursor_pos
-    ldr x20, [x9]
 
-    // Clear return flag
-    LOAD_ADDR x9, fn_return_flag
-    str xzr, [x9]
-
-    // Jump cursor to function body
-    LOAD_ADDR x9, fn_body_cursors
-    ldr x10, [x9, x19, lsl #3]
-    LOAD_ADDR x9, cursor_pos
-    str x10, [x9]
-    LOAD_ADDR x9, fn_body_lines
-    ldr x10, [x9, x19, lsl #3]
-    LOAD_ADDR x9, current_line
-    str x10, [x9]
-
-    // Execute function body
-Lmain_fn_body_loop:
-    LOAD_ADDR x9, fn_return_flag
-    ldr x10, [x9]
-    cbnz x10, Lmain_fn_body_done
-
-    bl _skip_whitespace
-    bl _peek_char
-    cmp w0, #'}'
-    b.eq Lmain_fn_body_done
-    cbz w0, Lmain_fail
-
-    bl _parse_statement
-    cbz x0, Lmain_fn_body_loop
-    cmp x0, #4 // return
-    b.eq Lmain_fn_body_done
-    b Lmain_fail
-
-Lmain_fn_body_done:
-    // Clear return flag
-    LOAD_ADDR x9, fn_return_flag
-    str xzr, [x9]
-
-Lmain_no_main_fn:
     bl _emit_program
 
     mov w0, #0
     bl _exit
+
+Lmain_no_main_fn:
+
 
 Lmain_fail:
     mov w0, #1

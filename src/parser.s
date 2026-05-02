@@ -1,9 +1,11 @@
 #include "platform.inc"
  .text
  .align 4
- .global _parse_program
- .global _parse_statement
- .global _pow10_u64
+.global _parse_program
+.global _parse_statement
+.global _parse_function_body
+.global _pow10_u64
+
 
 _parse_program:
     stp x29, x30, [sp, #-16]!
@@ -342,6 +344,73 @@ Lstmt_spawn:
     cbz x0, Lstmt_fail
     mov x21, x0
     mov x22, x1
+    
+    // Check if it is a method call: obj.method()
+    LOAD_ADDR x9, source_ptr
+    ldr x9, [x9]
+    LOAD_ADDR x10, cursor_pos
+    ldr x10, [x10]
+    ldrb w11, [x9, x10]
+    cmp w11, #'.'
+    b.ne Lstmt_spawn_simple
+
+    // Method call detected
+    add x10, x10, #1
+    LOAD_ADDR x9, cursor_pos
+    str x10, [x9]
+    bl _parse_identifier
+    cbz x0, Lstmt_fail
+    mov x23, x0 // method name
+    mov x24, x1
+
+    // Look up object
+    mov x0, x21
+    mov x1, x22
+    bl _lookup_variable
+    cbz x0, Lstmt_fail
+    // x0=value, x1=type, x2=meta (blueprint id if type=10/11), x3=slot
+    
+    // Only support stack/heap objects (10/11)
+    cmp x1, #10
+    b.eq Lstmt_spawn_method_ok
+    cmp x1, #11
+    b.ne Lstmt_spawn_simple // fallback or fail
+
+Lstmt_spawn_method_ok:
+    // Capture method call into spawn buffer
+    LOAD_ADDR x9, spawn_capture_fn_id
+    mov x10, #63 // use slot 63 for method spawns
+    str x10, [x9]
+    
+    // Clear spawn buffer for this slot
+    LOAD_ADDR x9, spawn_fn_op_counts
+    str xzr, [x9, x10, lsl #3]
+
+    // This will record the synthetic method call into the spawn buffer
+    mov x0, x3   // instance id (slot)
+    mov x1, x1   // type (10/11)
+    mov x2, x2   // blueprint id
+    mov x3, x23  // method name ptr
+    mov x4, x24  // method name len
+    bl _call_object_method
+    mov x24, x0
+    
+    LOAD_ADDR x9, spawn_capture_fn_id
+    mov x10, #-1
+    str x10, [x9]
+    cbnz x24, Lstmt_fail
+    
+    // Record spawn op for the captured method in main stream
+    mov x0, #91
+    mov x1, #63
+    mov x2, #0
+    bl _record_operation
+    cbnz x0, Lstmt_fail
+    bl _consume_optional_semicolon
+    mov x0, #0
+    b Lstmt_return
+
+Lstmt_spawn_simple:
     LOAD_ADDR x9, spawn_capture_fn_id
     ldr x10, [x9]
     cmn x10, #1
@@ -358,18 +427,37 @@ Lstmt_spawn:
     LOAD_ADDR x9, fn_param_counts
     ldr x10, [x9, x23, lsl #3]
     cbnz x10, Lstmt_spawn_params_fail
-    LOAD_ADDR x9, spawn_fn_op_counts
-    str xzr, [x9, x23, lsl #3]
+    
+    // Consume '()'
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lstmt_fail
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lstmt_fail
+
+    // Set capture mode
     LOAD_ADDR x9, spawn_capture_fn_id
     str x23, [x9]
-    mov x0, x21
-    mov x1, x22
-    bl _call_function
-    mov x24, x0
+    
+    // Clear spawn buffer for this function
+    LOAD_ADDR x9, spawn_fn_op_counts
+    str xzr, [x9, x23, lsl #3]
+
+    // Record a simple call to the function into its own spawn buffer.
+    // This is much cleaner than re-parsing the body.
+    mov x0, #13
+    mov x1, x23
+    bl _record_operation
+    
+    // Reset capture mode
     LOAD_ADDR x9, spawn_capture_fn_id
     mov x10, #-1
     str x10, [x9]
-    cbnz x24, Lstmt_fail
+
+    // Record the spawn op in the main stream
     mov x0, #91
     mov x1, x23
     mov x2, #0
@@ -1617,6 +1705,29 @@ Lstmt_print_done:
     b Lstmt_return
 
 Lstmt_fn:
+    LOAD_ADDR x9, compilation_mode
+    ldr x9, [x9]
+    cbz x9, Lstmt_fn_real
+
+    // Compilation mode: skip the whole definition to avoid recording in global stream
+    // We already matched 'fn'.
+Lstmt_fn_skip_loop:
+    bl _skip_whitespace
+    bl _peek_char
+    cbz w0, Lstmt_fail
+    cmp w0, #'{'
+    b.eq Lstmt_fn_skip_body
+    bl _advance_char
+    b Lstmt_fn_skip_loop
+
+Lstmt_fn_skip_body:
+    bl _advance_char // '{'
+    bl _skip_block_contents
+    cbnz x0, Lstmt_fail
+    mov x0, #0
+    b Lstmt_return
+
+Lstmt_fn_real:
     bl _parse_fn_definition
     cbnz x0, Lstmt_fail
     mov x0, #0
@@ -7859,6 +7970,33 @@ Lstr_val_fail:
 .global _advance_char
 .global _get_cursor_ptr
 
+_skip_fn_definition:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    
+    // We are right after 'fn'. Skip to '{'
+Lskip_fn_find_body:
+    bl _skip_whitespace
+    bl _peek_char
+    cbz w0, Lskip_fn_fail
+    cmp w0, #'{'
+    b.eq Lskip_fn_found_body
+    bl _advance_char
+    b Lskip_fn_find_body
+
+Lskip_fn_found_body:
+    bl _advance_char // consume '{'
+    bl _skip_block_contents
+    
+    mov x0, #0
+    ldp x29, x30, [sp], #16
+    ret
+
+Lskip_fn_fail:
+    mov x0, #1
+    ldp x29, x30, [sp], #16
+    ret
+
 _parse_fn_definition:
     stp x29, x30, [sp, #-16]!
     mov x29, sp
@@ -8496,8 +8634,34 @@ Lfn_call_args_ready:
     ldr x10, [x9]
     str x10, [sp, #24]
 
+    // Check if we are in compilation mode
+    LOAD_ADDR x9, compilation_mode
+    ldr x10, [x9]
+    cbz x10, Lfn_call_interpret
+    
+    // Refresh saved call-site location
+    ldr x10, [sp, #16]
+    LOAD_ADDR x9, source_ptr
+    str x10, [x9]
+    ldr x10, [sp, #24]
+    LOAD_ADDR x9, source_len
+    str x10, [x9]
+    LOAD_ADDR x9, cursor_pos
+    str x25, [x9]
+    LOAD_ADDR x9, current_line
+    str x26, [x9]
+
+    // COMPILATION MODE: record Op 13.
+    mov x0, #13
+    mov x1, x21
+    bl _record_operation
+    mov x0, #0
+    b Lfn_call_return
+
+Lfn_call_interpret:
     // Clear return flag
     LOAD_ADDR x9, fn_return_flag
+
     str xzr, [x9]
     LOAD_ADDR x9, fn_return_length
     str xzr, [x9]
@@ -10000,6 +10164,11 @@ Lblueprint_member_method:
     LOAD_ADDR x9, fn_count
     ldr x23, [x9]
     sub x23, x23, #1
+    
+    // Save blueprint ID for this function
+    LOAD_ADDR x9, fn_blueprint_ids
+    str x21, [x9, x23, lsl #3]
+
     LOAD_ADDR x9, blueprint_method_fn_ids
     str x23, [x9, x10, lsl #3]
     LOAD_ADDR x9, blueprint_method_counts
@@ -10551,6 +10720,112 @@ Linst_object_field_done:
 Linst_object_field_fail:
     mov x0, #0
 Linst_object_field_return:
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+_parse_function_body:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+
+    mov x19, x0 // fn index
+
+    // Save scope base
+    LOAD_ADDR x9, var_count
+    ldr x21, [x9] // x21 = saved var_count
+    
+    // Check if it is a method
+    LOAD_ADDR x9, fn_blueprint_ids
+    ldr x20, [x9, x19, lsl #3]
+    cmn x20, #1
+    b.eq Lparse_fn_body_params
+    
+    // Define 'self'
+    LOAD_ADDR x0, kw_self
+    mov x1, #4
+    mov x2, #10 // type object
+    mov x3, x20 // blueprint id
+    mov x4, #0
+    mov x5, #1 // const
+    bl _define_variable
+
+Lparse_fn_body_params:
+    // Define parameters
+    LOAD_ADDR x9, fn_param_counts
+    ldr x22, [x9, x19, lsl #3]
+    mov x23, #0
+Lparse_fn_body_param_loop:
+    cmp x23, x22
+    b.ge Lparse_fn_body_start
+    
+    mov x9, x19
+    lsl x9, x9, #2
+    add x9, x9, x23
+    
+    LOAD_ADDR x10, fn_param_name_ptrs
+    ldr x0, [x10, x9, lsl #3]
+    LOAD_ADDR x10, fn_param_name_lens
+    ldr x1, [x10, x9, lsl #3]
+    LOAD_ADDR x10, fn_param_types
+    ldr x2, [x10, x9, lsl #3]
+    LOAD_ADDR x10, fn_param_lengths
+    ldr x3, [x10, x9, lsl #3]
+    mov x4, #0
+    mov x5, #0
+    bl _define_variable
+    
+    add x23, x23, #1
+    b Lparse_fn_body_param_loop
+
+Lparse_fn_body_start:
+    // Record start op
+    LOAD_ADDR x9, op_count
+    ldr x10, [x9]
+    LOAD_ADDR x9, fn_op_starts
+    str x10, [x9, x19, lsl #3]
+
+    // Set cursor
+    LOAD_ADDR x9, fn_body_cursors
+    ldr x10, [x9, x19, lsl #3]
+    LOAD_ADDR x9, cursor_pos
+    str x10, [x9]
+    LOAD_ADDR x9, fn_body_lines
+    ldr x10, [x9, x19, lsl #3]
+    LOAD_ADDR x9, current_line
+    str x10, [x9]
+
+    // Parse body loop
+Lparse_fn_body_loop:
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, #'}'
+    b.eq Lparse_fn_body_done
+    cbz w0, Lparse_fn_body_done
+    
+    bl _parse_statement
+    cbnz x0, Lparse_fn_body_done // EXIT ON ERROR
+    b Lparse_fn_body_loop
+
+
+Lparse_fn_body_done:
+    // Record count
+    LOAD_ADDR x9, op_count
+    ldr x11, [x9]
+    LOAD_ADDR x9, fn_op_starts
+    ldr x10, [x9, x19, lsl #3]
+    sub x11, x11, x10
+    LOAD_ADDR x9, fn_op_counts
+    str x11, [x9, x19, lsl #3]
+
+    // Restore scope
+    LOAD_ADDR x9, var_count
+    str x21, [x9]
+
     ldp x23, x24, [sp], #16
     ldp x21, x22, [sp], #16
     ldp x19, x20, [sp], #16

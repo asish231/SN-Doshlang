@@ -1,0 +1,6 @@
+fn test_fn() {
+}
+
+fn main() {
+    test_fn()
+}

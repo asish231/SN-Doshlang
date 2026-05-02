@@ -1,0 +1,8 @@
+fn worker() {
+    print("hello from thread")
+}
+
+fn main() {
+    spawn worker()
+    print("main done")
+}
