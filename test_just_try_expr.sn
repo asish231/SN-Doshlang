@@ -1,0 +1,4 @@
+// Just try expression
+fn main() {
+    try 1 catch 2
+}

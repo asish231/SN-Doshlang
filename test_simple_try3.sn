@@ -1,0 +1,5 @@
+// Minimal try test - no assignment
+fn main() {
+    try 1 catch 2
+    return 0
+}

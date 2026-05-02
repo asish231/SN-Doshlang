@@ -1,0 +1,5 @@
+// Debug test
+fn main() {
+    x = 1
+    return 0
+}

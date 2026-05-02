@@ -105,6 +105,10 @@
 .global kw_from
 .global kw_self
 .global kw_create
+.global kw_throw
+.global kw_try
+.global kw_catch
+.global kw_error
 .global blueprint_count
 .global blueprint_name_ptrs
 .global blueprint_name_lens
@@ -352,11 +356,28 @@
 .global asm_input_null_body
 .global asm_input_store_x10_str
 .global asm_input_buffer_space
+.global asm_adrp_error_flag
+.global asm_ldr_x11_error_flag
+.global asm_str_x1_error_flag
+.global asm_str_xzr_error_flag
+.global asm_adrp_error_value
+.global asm_str_x0_error_value
+.global asm_cmp_x11_imm_0
+.global asm_beq_label
+.global asm_b_suffix
+.global asm_mov_x1_imm_1
+.global asm_exit_1
+.global asm_error_flag_label
+.global asm_error_value_label
+.global asm_quad_0
+.global error_flag
+.global error_value
 .global newline_char
 .global zero_qword
 .global single_char
 .global close_brace_char
 .global label_counter
+.global current_label_id
 .global current_loop_start
 .global current_loop_end
 .global loop_context_depth
@@ -555,6 +576,10 @@ kw_guarded:       .asciz "guarded"
 kw_from:          .asciz "from"
 kw_self:          .asciz "self"
 kw_create:        .asciz "create"
+kw_throw:         .asciz "throw"
+kw_try:           .asciz "try"
+kw_catch:         .asciz "catch"
+kw_error:         .asciz "error"
 asm_sub_sp_prefix:
     .asciz "    sub sp, sp, #"
 asm_header:
@@ -1161,12 +1186,63 @@ asm_load_map_pool_lens_x11:
     .asciz "    adrp x11, map_pool_lengths@PAGE\n    add x11, x11, map_pool_lengths@PAGEOFF\n"
 asm_input_buffer_space:
     .asciz ":\n    .space 256\n"
+
+// Error handling assembly strings
+#ifdef _WIN32
+asm_adrp_error_flag:
+    .asciz "    adrp x11, error_flag\n    add x11, x11, :lo12:error_flag\n"
+asm_ldr_x11_error_flag:
+    .asciz "    ldr x11, [x11]\n"
+asm_str_x1_error_flag:
+    .asciz "    str x1, [x11]\n"
+asm_str_xzr_error_flag:
+    .asciz "    str xzr, [x11]\n"
+asm_adrp_error_value:
+    .asciz "    adrp x12, error_value\n    add x12, x12, :lo12:error_value\n"
+asm_str_x0_error_value:
+    .asciz "    str x0, [x12]\n"
+#else
+asm_adrp_error_flag:
+    .asciz "    adrp x11, error_flag@PAGE\n    add x11, x11, error_flag@PAGEOFF\n"
+asm_ldr_x11_error_flag:
+    .asciz "    ldr x11, [x11]\n"
+asm_str_x1_error_flag:
+    .asciz "    str x1, [x11]\n"
+asm_str_xzr_error_flag:
+    .asciz "    str xzr, [x11]\n"
+asm_adrp_error_value:
+    .asciz "    adrp x12, error_value@PAGE\n    add x12, x12, error_value@PAGEOFF\n"
+asm_str_x0_error_value:
+    .asciz "    str x0, [x12]\n"
+#endif
+asm_cmp_x11_imm_0:
+    .asciz "    cmp x11, #0\n"
+asm_beq_label:
+    .asciz "    b.ne L_snl_"
+asm_b_suffix:
+    .asciz "    b L_snl_"
+asm_mov_x1_imm_1:
+    .asciz "    mov x1, #1\n"
+asm_exit_1:
+#ifdef _WIN32
+    .asciz "    mov x0, #1\n    bl exit\n"
+#else
+    .asciz "    mov x0, #1\n    bl _exit\n"
+#endif
+asm_error_flag_label:
+    .asciz "error_flag:\n"
+asm_error_value_label:
+    .asciz "error_value:\n"
+asm_quad_0:
+    .asciz "    .quad 0\n"
+
 newline_char:      .byte 10
 zero_qword:        .quad 0
 single_char:       .byte 0
 close_brace_char:  .byte 125
 .align 3
 label_counter:     .quad 1
+current_label_id:  .quad 1
 compilation_mode:  .quad 1
 
 .bss
@@ -1185,6 +1261,8 @@ stmt_target_len: .quad 0
 print_count:    .space 8
 print_noline_flag: .space 8
 op_count:       .space 8
+error_flag:     .space 8        // 0 = no error, 1 = error occurred
+error_value:    .space 8        // pointer to error message string
 .global global_op_count
 global_op_count: .space 8
 current_loop_start: .space 8

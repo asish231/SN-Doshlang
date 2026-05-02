@@ -1,0 +1,7 @@
+// Simple try test
+
+fn main() {
+    print("before")
+    result = try 42 catch 0
+    print("after")
+}

@@ -1,0 +1,6 @@
+// Minimal try test
+fn main() {
+    let x = try 1 catch 2
+    print("done")
+    return 0
+}

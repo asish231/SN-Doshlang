@@ -384,6 +384,22 @@ Lemit_map_pool_lens_loop:
     add x21, x21, #1
     b Lemit_map_pool_lens_loop
 Lemit_map_pool_lens_done:
+    // Emit error handling variables
+    LOAD_ADDR x0, asm_align_3
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x0, asm_error_flag_label
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x0, asm_quad_0
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x0, asm_error_value_label
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x0, asm_quad_0
+    mov x1, #1
+    bl _write_cstr_fd
     b Lemit_program_done
 
 #ifndef _WIN32
@@ -742,7 +758,7 @@ _emit_operation:
     b.eq Lemit_op_alloc
     cmp x21, #86
     b.eq Lemit_op_free
-cmp x21, #87
+    cmp x21, #87
     b.eq Lemit_op_set_ptr
     cmp x21, #88
     b.eq Lemit_op_map_store
@@ -752,7 +768,11 @@ cmp x21, #87
     cmp x21, #91
     b.eq Lemit_op_spawn
 #endif
-    
+    cmp x21, #95
+    b.eq Lemit_op_throw
+    cmp x21, #96
+    b.eq Lemit_op_try_catch
+
     b Lemit_op_done
 
 #ifndef _WIN32
@@ -2847,8 +2867,211 @@ Lstring_slice_call:
     LOAD_ADDR x0, asm_close_bracket
     mov x1, #1
     bl _write_cstr_fd
-    
+
     b Lemit_op_done
+
+Lemit_op_throw:
+    // arg0 = error message pointer (string literal addr)
+    // arg1 = string length
+    // Emit: mov x0, #error_msg_addr
+    //       bl _print_error_and_exit
+    LOAD_ADDR x0, asm_mov_x0_imm_prefix
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_newline
+    mov x1, #1
+    bl _write_cstr_fd
+
+    // Store error message in error_value global
+    LOAD_ADDR x0, asm_adrp_error_value
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x0, asm_str_x0_error_value
+    mov x1, #1
+    bl _write_cstr_fd
+
+    // Set error flag
+    LOAD_ADDR x0, asm_adrp_error_flag
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x0, asm_mov_x1_imm_1
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x0, asm_str_x1_error_flag
+    mov x1, #1
+    bl _write_cstr_fd
+
+    // Exit with error code
+    LOAD_ADDR x0, asm_exit_1
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_op_done
+
+Lemit_op_try_catch:
+    // arg0 = try expression value
+    // arg1 = try expression var_idx (-1 = immediate, >=0 = var slot)
+    // arg2 = fallback value
+    // arg3 = fallback var_idx (-1 = immediate, >=0 = var slot)
+    // Simplified: just load try value, check if error flag set
+    // If error, use fallback; otherwise continue with try value
+
+    // Save callee-saved registers
+    stp x23, x24, [sp, #-16]!
+
+    // Check if try value is immediate (var_idx == -1) or variable
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
+    ldr x23, [x20, x19, lsl #3]  // x23 = try var_idx
+    cmp x23, #-1
+    b.ne Lemit_try_catch_try_var
+
+Lemit_try_catch_try_imm:
+    // Load immediate try value into x10
+    LOAD_ADDR x0, asm_mov_x10_imm
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
+    ldr x0, [x20, x19, lsl #3]  // try value
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_newline
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_try_catch_check_error
+
+Lemit_try_catch_try_var:
+    // Load try value from variable slot into x10
+    LOAD_ADDR x0, asm_math_var_x10_ldr
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, x23  // try meta = var slot
+    mov x1, #1
+    bl _write_stack_offset_fd
+    LOAD_ADDR x0, asm_close_bracket
+    mov x1, #1
+    bl _write_cstr_fd
+
+Lemit_try_catch_check_error:
+    // Generate unique label for catch block
+    LOAD_ADDR x20, current_label_id
+    ldr x21, [x20]
+    add x22, x21, #1
+    str x22, [x20]
+
+    // Check error flag
+    LOAD_ADDR x0, asm_adrp_error_flag
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x0, asm_ldr_x11_error_flag
+    mov x1, #1
+    bl _write_cstr_fd
+
+    // Compare with 0
+    LOAD_ADDR x0, asm_cmp_x11_imm_0
+    mov x1, #1
+    bl _write_cstr_fd
+
+    // Branch to catch if error (error_flag != 0)
+    LOAD_ADDR x0, asm_beq_label
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, x21
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_newline
+    mov x1, #1
+    bl _write_cstr_fd
+
+    // No error - jump over catch block to continue
+    LOAD_ADDR x0, asm_b_suffix
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, x22
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_newline
+    mov x1, #1
+    bl _write_cstr_fd
+
+    // Catch block label
+    LOAD_ADDR x0, asm_label_prefix
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, x21
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_label_suffix
+    mov x1, #1
+    bl _write_cstr_fd
+
+    // Check if fallback value is immediate (var_idx == -1) or variable
+    LOAD_ADDR x20, emit_tbl_arg3
+    ldr x20, [x20]
+    ldr x24, [x20, x19, lsl #3]  // x24 = fallback var_idx
+    cmp x24, #-1
+    b.ne Lemit_try_catch_fallback_var
+
+Lemit_try_catch_fallback_imm:
+    // Load immediate fallback value into x10
+    LOAD_ADDR x0, asm_mov_x10_imm
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, emit_tbl_arg2
+    ldr x20, [x20]
+    ldr x0, [x20, x19, lsl #3]  // fallback value
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_newline
+    mov x1, #1
+    bl _write_cstr_fd
+    // Skip over variable fallback path to continue label
+    b Lemit_try_catch_continue_label
+
+Lemit_try_catch_fallback_var:
+    // Load fallback value from variable slot into x10
+    LOAD_ADDR x0, asm_math_var_x10_ldr
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, x24  // fallback meta = var slot
+    mov x1, #1
+    bl _write_stack_offset_fd
+    LOAD_ADDR x0, asm_close_bracket
+    mov x1, #1
+    bl _write_cstr_fd
+
+Lemit_try_catch_continue_label:
+    // Continue label (after catch block)
+    LOAD_ADDR x0, asm_label_prefix
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, x22
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_label_suffix
+    mov x1, #1
+    bl _write_cstr_fd
+
+Lemit_try_catch_clear_flag:
+    // Clear error flag after handling
+    LOAD_ADDR x0, asm_adrp_error_flag
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x0, asm_str_xzr_error_flag
+    mov x1, #1
+    bl _write_cstr_fd
+
+    // Restore callee-saved registers and return from operation
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
 
 Lemit_op_done:
     ldp x21, x22, [sp], #16
@@ -3848,11 +4071,8 @@ Lemit_main_fn_loop:
     b Lemit_main_fn_loop
 
 Lemit_main_body_done:
-    // main epilogue
-    LOAD_ADDR x0, asm_ret
-    mov x1, #1
-    bl _write_cstr_fd
-    
+    // main epilogue will be emitted by Lemit_user_fns_done (asm_main_epilogue)
+    // Just restore registers and return
     ldp x19, x20, [sp], #16
     ldp x29, x30, [sp], #16
     ret

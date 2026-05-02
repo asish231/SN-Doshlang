@@ -1,0 +1,14 @@
+// Test error handling
+
+fn main() {
+    // Test throw statement
+    print("Testing throw...")
+    
+    // Test try-catch expression form
+    value = try 42 catch 0
+    print("Try value: " + int_to_str(value))
+    
+    // Test with error type
+    msg: error = "something went wrong"
+    print("Error message ready")
+}

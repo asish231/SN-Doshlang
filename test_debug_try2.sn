@@ -1,0 +1,5 @@
+// Debug test with try
+fn main() {
+    x = try 1
+    return 0
+}

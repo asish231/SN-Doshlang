@@ -1,0 +1,4 @@
+// Just try assignment
+fn main() {
+    x = try 1 catch 2
+}

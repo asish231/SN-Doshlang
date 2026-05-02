@@ -1,0 +1,7 @@
+// Test try as statement
+
+fn main() {
+    print("before")
+    try { print("in try") }
+    print("after")
+}

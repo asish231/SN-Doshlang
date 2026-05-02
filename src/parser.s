@@ -306,6 +306,18 @@ _parse_statement:
 
     mov x0, x19
     mov x1, x20
+    LOAD_ADDR x2, kw_throw
+    bl _match_cstr_span
+    cbnz x0, Lstmt_throw
+
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_try
+    bl _match_cstr_span
+    cbnz x0, Lstmt_try
+
+    mov x0, x19
+    mov x1, x20
     LOAD_ADDR x2, kw_set
     bl _match_cstr_span
     cbnz x0, Lstmt_set
@@ -596,6 +608,103 @@ Lstmt_free:
     mov x0, #0
     b Lstmt_return
 
+Lstmt_throw:
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lstmt_fail
+
+    bl _skip_whitespace
+    bl _parse_expr_value
+    cbz x0, Lstmt_fail
+    mov x21, x1 // error message value
+    mov x22, x2 // type ID (should be str)
+    mov x23, x4 // meta
+
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lstmt_fail
+
+    bl _consume_optional_semicolon
+
+    // Emit throw operation (95)
+    mov x0, #95 // op_throw
+    mov x1, x21 // error message pointer
+    mov x2, x23 // string length
+    bl _record_operation
+    cbnz x0, Lstmt_fail
+
+    mov x0, #0
+    b Lstmt_return
+
+Lstmt_try:
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, #'{'
+    b.eq Lstmt_try_block
+
+    // Expression form: try expr catch (e) { ... } or try expr catch fallback
+    bl _parse_expr_value
+    cbz x0, Lstmt_fail
+    mov x21, x1 // try expression value
+    mov x22, x2 // try expression type
+    mov x23, x4 // try expression meta
+
+    bl _skip_whitespace
+    LOAD_ADDR x0, kw_catch
+    bl _consume_keyword
+    cbz x0, Lstmt_fail
+
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, #'('
+    b.eq Lstmt_try_catch_block_form
+
+    // Simple form: try expr catch fallback_expr
+    bl _parse_expr_value
+    cbz x0, Lstmt_fail
+    mov x24, x1 // fallback value
+    mov x25, x2 // fallback type
+    mov x26, x4 // fallback meta
+
+    // Type check: try result and fallback must be compatible
+    cmp x22, x25
+    b.ne Lstmt_type_mismatch
+
+    // Emit try-catch operation (96)
+    mov x0, #96 // op_try_catch
+    mov x1, x21 // try value
+    mov x2, x23 // try meta
+    mov x3, x24 // fallback value
+    mov x4, x26 // fallback meta
+    bl _record_operation5
+    cbnz x0, Lstmt_fail
+
+    mov x0, #0
+    b Lstmt_return
+
+Lstmt_try_catch_block_form:
+    // Form: try expr catch (e) { statements }
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lstmt_fail
+
+    bl _skip_whitespace
+    bl _parse_identifier
+    cbz x0, Lstmt_need_name
+    // Store error variable name for catch block
+
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lstmt_fail
+
+Lstmt_try_block:
+    // Block form: try { ... } catch (e) { ... }
+    // TODO: Implement full block try-catch with error variable
+    // For now, error out
+    b Lstmt_fail
 
 Lstmt_let:
     bl _skip_whitespace
@@ -5563,7 +5672,75 @@ _parse_primary_value:
     b.lt Lprimary_identifier
     cmp w0, #'9'
     b.le Lprimary_number
-    b Lprimary_identifier
+    // Check for 'try' keyword expression before treating as identifier
+    b Lprimary_check_try
+
+Lprimary_check_try:
+    // Check for 'try' keyword expression
+    // Use x21, x22, x23 temporarily (callee-saved, will be restored)
+    // Get pointer to current position
+    LOAD_ADDR x9, source_ptr
+    ldr x21, [x9]       // x21 = source_ptr
+    LOAD_ADDR x9, cursor_pos
+    ldr x22, [x9]       // x22 = cursor_pos
+    add x23, x21, x22   // x23 = pointer to current position
+    // For _match_cstr_span: x0=pointer, x1=length (like in statement parsing)
+    mov x0, x23         // x0 = pointer to current position
+    mov x1, #3          // x1 = length of "try"
+    LOAD_ADDR x2, kw_try
+    bl _match_cstr_span
+    cbz x0, Lprimary_identifier
+    // Matched 'try', now parse try expression
+    b Lprimary_try_expr
+
+Lprimary_try_expr:
+    // try expr catch fallback
+    // First advance past 'try' (3 characters)
+    LOAD_ADDR x9, cursor_pos
+    ldr x21, [x9]
+    add x21, x21, #3
+    str x21, [x9]
+    bl _skip_whitespace
+    bl _parse_expr_value
+    cbz x0, Lprimary_fail
+    mov x25, x1 // try value
+    mov x26, x2 // try type
+    mov x27, x3 // try meta
+    mov x28, x4 // try var idx
+
+    bl _skip_whitespace
+    LOAD_ADDR x0, kw_catch
+    bl _consume_keyword
+    cbz x0, Lprimary_fail
+
+    bl _skip_whitespace
+    bl _parse_expr_value
+    cbz x0, Lprimary_fail
+    // x1=fallback value, x2=fallback type, x3=fallback meta, x4=fallback var idx
+
+    // Type check: try result and fallback must be compatible
+    cmp x26, x2
+    b.ne Lprimary_type_mismatch
+
+    // Record try-catch operation (96)
+    // Store the result to a new hidden variable and return that
+    // x28 = try var idx, x4 = fallback var idx
+    mov x0, #96 // op_try_catch
+    mov x1, x25 // try value
+    mov x2, x28 // try var_idx (-1 = immediate, >=0 = var slot)
+    mov x3, x1  // fallback value
+    // x4 already contains fallback var_idx
+    bl _record_operation5
+    cbnz x0, Lprimary_fail
+
+    // Return the result as a computed value
+    // The try-catch operation returns the value in x10
+    // We need to store it to a variable and return that
+    mov x1, x25
+    mov x2, x26
+    mov x3, #-1  // immediate result
+    mov x4, #-1
+    b Lprimary_suffix_loop
 
 Lprimary_unary_plus:
     bl _advance_char
@@ -6895,6 +7072,13 @@ Lprimary_unknown_var:
     bl _write_buffer_fd
     bl _write_newline_stderr
 
+Lprimary_type_mismatch:
+    LOAD_ADDR x0, msg_type_mismatch
+    bl _report_error_prefix
+    bl _write_newline_stderr
+    mov x0, #0
+    b Lprimary_return
+
 Lprimary_fail:
     mov x0, #0
 
@@ -6993,6 +7177,12 @@ _parse_type_spec:
 
     mov x0, x19
     mov x1, x20
+    LOAD_ADDR x2, kw_error
+    bl _match_cstr_span
+    cbnz x0, Lparse_type_error
+
+    mov x0, x19
+    mov x1, x20
     LOAD_ADDR x2, kw_list
     bl _match_cstr_span
     cbnz x0, Lparse_type_list
@@ -7050,6 +7240,12 @@ Lparse_type_dec:
     mov x2, x1
     mov x1, #6
     mov x0, #1
+    b Lparse_type_return
+
+Lparse_type_error:
+    mov x0, #1
+    mov x1, #7
+    mov x2, #0
     b Lparse_type_return
 
 Lparse_type_list:
