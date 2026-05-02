@@ -8969,6 +8969,10 @@ Lblueprint_already_registered:
     LOAD_ADDR x11, blueprint_method_counts
     str xzr, [x11, x23, lsl #3]
 
+    // Store current blueprint id for member parsing
+    LOAD_ADDR x9, current_blueprint_parse
+    str x23, [x9]
+
 Lblueprint_register_done:
 
     bl _skip_whitespace
@@ -10257,7 +10261,6 @@ Lbuild_method_copy_bp:
     b Lbuild_method_copy_bp
 Lbuild_method_sep1:
     mov w11, #'_'
-    strb w11, [x24], #1
     strb w11, [x24], #1
     mov x10, #0
 Lbuild_method_copy_name:

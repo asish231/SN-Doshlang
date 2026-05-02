@@ -1,53 +1,41 @@
-# Handoff State: Native `string.split()` Implementation
+# Handoff State — 2026-05-02
 
-This document summarizes the current state of the native `string.split()` implementation and the ongoing debugging process for the next agent.
+## Current Issue: Contract/Follows and Blueprint Methods Not Working
 
-## Objective
-Implement native `.split(delimiter)` support for strings in SNlang, returning a `list<str>`.
+### Summary
+The contract/follows feature and blueprint methods are currently broken. Tests fail during compile with errors about missing required methods, even when they are defined.
 
-## Current Status
-- **Parser**: Syntax `.split(delim)` is recognized. It emits Op 91.
-- **Codegen**: Op 91 generates a call to `_string_split` in the runtime.
-- **Runtime**: `_string_split` is implemented in `data.s` and correctly populates the `list_pool`.
-- **Feature Extension**: Updated List Indexing (Op 80) to support "dynamic bases" (where the list pool index is stored in a stack slot rather than being a compile-time constant).
+### What Was Done
+1. Fixed double-underscore bug in `_build_method_synth_name` (was writing `__method` instead of `_method`)
+2. Added `current_blueprint_parse` storage during blueprint registration
 
-## The Blocker
-A test case `tests/test_string_split.sn` fails with a parser error: `line line 4:`.
-Line 4 is: `str x = p[0]` (where `p` is the result of `s.split(",")`).
+### Root Cause (Still Blocking)
+**User functions are NOT being emitted by codegen at all.** The generated assembly only contains:
+- `_main` entry point
+- Runtime helpers (`_cstring_length`, `_str_concat`, etc.)
+- Print format strings in `.data`
 
-### Observations:
-1. The compiler fails during parsing, not at runtime.
-2. `p` is correctly typed as `List` (type 4).
-3. The metadata for `p` has the element type `str` (type 2) in the upper 32 bits.
-4. `Lprimary_indexing` in `parser.s` is triggered.
-5. I recently fixed a register clobbering bug in `Lprimary_list_index_runtime` (line 6057), but the "line line 4" error remains.
+But NO user-defined functions like `draw_simple()` or blueprint methods like `Circle__draw()` are generated.
 
-## Technical Details
+### Test Failures
+```
+tests/test_contract_follows.sn → error: blueprint does not implement required contract method
+tests/test_method_no_contract.sn → error: unknown function _draw  
+tests/test_direct_fn.sn → error: unknown function _draw_simple
+```
 
-### Op Codes Involved
-- **Op 91**: `string_split(result_slot, source_slot, delimiter_slot)`.
-- **Op 80**: `list_load(dest_slot, index, base, flags)`.
-  - Flags bit 0: Element is a string.
-  - Flags bit 1: Index is immediate (vs slot).
-  - **Flags bit 2 (New)**: Base is a slot (vs immediate). Used for dynamic lists.
+### Investigation Notes
+- Parser correctly parses definitions (verified via trace)
+- `_lookup_function` returns failure in codegen path
+- No `.global` directives for user functions in output
+- Function body operations not being converted to emitted assembly
 
-### Files Modified
-- `src/parser.s`: 
-  - Added `Lprimary_member_split`.
-  - Updated `Lprimary_indexing` and `Lprimary_list_index_runtime` for bit 2 flags.
-  - Simplified the `.` member dispatcher in `Lprimary_suffix_loop_start`.
-- `src/codegen.s`:
-  - Added `Lemit_op_string_split` (Op 91).
-  - Updated `Lemit_op_list_load` (Op 80) to support bit 2 of flags (loading base from slot).
-- `src/data.s`:
-  - Added `_string_split` and its helper `L_snl_split_copy_token`.
-  - Added `asm_call_string_split` and `asm_add_x10_x10_x11`.
+### Next Steps (for next agent)
+1. Investigate why `_emit_operation` doesn't emit user functions
+2. Check if function bodies are being visited during codegen traversal
+3. The fix likely requires adding a codegen pass that iterates function table and emits each defined function
 
-### Unfinished Work / Bugs
-- **Parser Crash**: Why is `p[0]` failing to parse? The error prefix `line line 4: ` implies `_expect_char` or similar failed inside `Lprimary_indexing`.
-- **Runtime Length**: `p.length()` currently returns 0 because the compiler doesn't know the count at compile-time and there is no runtime list-length lookup yet.
-
-## Next Steps for the Next LLM
-1. **Debug `parser.s:Lprimary_indexing`**: Use print-debugging in the compiler or trace the `_parse_expr_value` call for the index.
-2. **Verify `_lookup_variable`**: Ensure that when `p` is looked up, its type (4) and metadata are correctly returned in `x2` and `x3`.
-3. **Check `out.s` generation**: If you can get the compiler to emit `out.s` before it crashes (by commenting out the failing line), verify the stack offsets for the dynamic list base.
+### Code Locations
+- `_emit_program`: `src/codegen.s:6`
+- `_emit_operation`: `src/codegen.s` (search for this)
+- Function tables: `src/data.s` (fn_name_ptrs, fn_body_cursors, etc.)

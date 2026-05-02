@@ -86,9 +86,18 @@ This file tracks issues that have been fixed and locally verified.
 - **Fix:** Updated example to use two separate functions with single returns
 - **Verified:** `make test` passes all 34 tests
 
+### 41) Contract/Follows parser fixes — double underscore and blueprint tracking
+
+- **Problem:** Method names were generated incorrectly and contract enforcement failed with unclear errors.
+- **Fixes applied:**
+  1. Fixed `_build_method_synth_name` in `src/parser.s` to write only ONE underscore separator (was writing TWO)
+  2. Added `current_blueprint_parse` storage during blueprint registration (both new and pre-registered blueprints)
+- **Verified:** Partial — parser now tracks blueprints correctly, but codegen is not emitting user functions (deeper issue)
+- **Status:** Parser fixes applied; codegen fix still needed for full functionality
+
 ---
 
-## Session: current
+## Session: 2026-05-02
 
 ### 16) Print in same line not working
 - **Problem:** No way to print without a trailing newline
