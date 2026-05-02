@@ -204,3 +204,30 @@ This file tracks issues that have been fixed and locally verified.
 - **Problem:** On Windows, `build.ps1` relied on the host default target even though the compiler sources are ARM64 assembly, making the out-of-box build flow misleading on normal `x64` machines.
 - **Fix:** Updated `build.ps1` to default to `aarch64-windows-msvc` on Windows, emit `.obj` files for Windows targets, and warn when cross-building from an `x64` host. Updated `README.md` with the Windows target behavior and direct `-Clang` usage.
 - **Verified:** Script logic and documentation were checked locally in the Windows workspace. Full compile verification is still pending until LLVM/Clang is available.
+
+### 40) Batch resolution of prior open issues (moved from ISSUES.md)
+- **String cast hardening status:**
+  - ✅ `cast(int, str)` chained concat path fixed
+  - ✅ runtime `cast(bool, str)` now uses live stack value (not compile-time metadata)
+  - ✅ runtime `cast(dec, str)` validated in dynamic concat path coverage (`tests/runtime_test.sh`)
+- **Map diagnostics hardening status:**
+  - ✅ missing map-key lookups now report `error: map key not found` in compile-time-resolvable lookup paths
+  - ✅ added focused example coverage for missing-key diagnostic behavior
+  - ✅ dedicated runtime dynamic map store/insert op path added and validated (`m[k]=v` with variable keys/values)
+- **String slice status:**
+  - ✅ parser and codegen wiring for `str.slice(start, end)` has been added
+  - ✅ runtime helper `_string_slice` is emitted again
+  - ✅ `_string_slice` now clamps bounds and guards null/empty cases to avoid out-of-range reads
+  - ✅ macOS re-run now passes for `tests/test_slice_only.sn`, `tests/test_slice_literals.sn`, and `tests/test_slice.sn`
+- **Module system:**
+  - ✅ `use module.path` syntax parsing
+  - ✅ Single and multiple module imports work
+  - ✅ Dotted module paths
+  - ✅ Module file loading and parsing
+  - ✅ Imported functions callable from importing file
+  - ✅ Duplicate `use` handled safely
+  - ✅ Module search paths (`.` and `stdlib` by default)
+  - ✅ transitive re-export style usage covered (`tests/modules/transitive_reexport`)
+- **Nested function multiple calls:**
+  - ✅ repeated nested-function calls with `if` return path validated in runtime suite (`tests/runtime_test.sh`)
+- **Verified:** All items marked ✅ were validated on macOS; related test suites pass.
