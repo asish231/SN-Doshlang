@@ -5,6 +5,7 @@
 .global msg_read_error
 .global msg_truncated
 .global msg_on_line
+.global msg_empty
 .global msg_colon_space
 .global msg_expected_stmt
 .global msg_expected_name
@@ -412,6 +413,7 @@ msg_open_error:    .asciz "error: could not open "
 msg_read_error:    .asciz "error: failed to read source input\n"
 msg_truncated:     .asciz "warning: source truncated to 65535 bytes\n"
 msg_on_line:       .asciz "line "
+msg_empty:         .byte 0
 msg_colon_space:   .asciz ": "
 msg_expected_stmt: .asciz "error: expected statement on "
 msg_expected_name: .asciz "error: expected variable name on "
