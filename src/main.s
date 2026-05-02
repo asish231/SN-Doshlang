@@ -56,6 +56,11 @@ Lmain_have_input:
     str x1, [x2]
     LOAD_ADDR x2, op_count
     str x1, [x2]
+#ifndef _WIN32
+    mov x3, #-1
+    LOAD_ADDR x4, spawn_capture_fn_id
+    str x3, [x4]
+#endif
     LOAD_ADDR x2, current_loop_start
     str x1, [x2]
     LOAD_ADDR x2, current_loop_end

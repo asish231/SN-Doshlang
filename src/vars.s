@@ -554,6 +554,12 @@ _record_operation3:
     mov x24, #0
 
 Lrecord_operation_common:
+#ifndef _WIN32
+    LOAD_ADDR x26, spawn_capture_fn_id
+    ldr x26, [x26]
+    cmn x26, #1
+    b.ne Lrecord_spawn_op
+#endif
     LOAD_ADDR x23, op_count
     ldr x9, [x23]
     cmp x9, #4096
@@ -590,6 +596,41 @@ Lrecord_op_full:
     mov x0, #1
     bl _exit
     ret
+
+#ifndef _WIN32
+Lrecord_spawn_op:
+    LOAD_ADDR x8, spawn_fn_op_counts
+    ldr x9, [x8, x26, lsl #3]
+    cmp x9, #256
+    b.ge Lrecord_spawn_op_full
+    mov x11, #256
+    mul x11, x26, x11
+    add x11, x11, x9
+    LOAD_ADDR x10, spawn_fn_op_kinds
+    str x19, [x10, x11, lsl #3]
+    LOAD_ADDR x10, spawn_fn_op_arg0
+    str x20, [x10, x11, lsl #3]
+    LOAD_ADDR x10, spawn_fn_op_arg1
+    str x21, [x10, x11, lsl #3]
+    LOAD_ADDR x10, spawn_fn_op_arg2
+    str x22, [x10, x11, lsl #3]
+    LOAD_ADDR x10, spawn_fn_op_arg3
+    str x24, [x10, x11, lsl #3]
+    LOAD_ADDR x10, spawn_fn_op_arg4
+    str x25, [x10, x11, lsl #3]
+    add x9, x9, #1
+    str x9, [x8, x26, lsl #3]
+    mov x0, #0
+    b Lrecord_op_return
+
+Lrecord_spawn_op_full:
+    LOAD_ADDR x0, msg_spawn_ops
+    mov x1, #2
+    bl _write_cstr_fd
+    mov x0, #1
+    bl _exit
+    ret
+#endif
 
 .global _allocate_temp_var
 _allocate_temp_var:

@@ -3,6 +3,48 @@
  .align 4
  .global _emit_program
 
+_emit_point_emit_tables_main:
+    LOAD_ADDR x0, op_kinds
+    LOAD_ADDR x1, emit_tbl_kinds
+    str x0, [x1]
+    LOAD_ADDR x0, op_arg0
+    LOAD_ADDR x1, emit_tbl_arg0
+    str x0, [x1]
+    LOAD_ADDR x0, op_arg1
+    LOAD_ADDR x1, emit_tbl_arg1
+    str x0, [x1]
+    LOAD_ADDR x0, op_arg2
+    LOAD_ADDR x1, emit_tbl_arg2
+    str x0, [x1]
+    LOAD_ADDR x0, op_arg3
+    LOAD_ADDR x1, emit_tbl_arg3
+    str x0, [x1]
+    LOAD_ADDR x0, op_arg4
+    LOAD_ADDR x1, emit_tbl_arg4
+    str x0, [x1]
+    ret
+
+_emit_point_emit_tables_spawn:
+    LOAD_ADDR x0, spawn_fn_op_kinds
+    LOAD_ADDR x1, emit_tbl_kinds
+    str x0, [x1]
+    LOAD_ADDR x0, spawn_fn_op_arg0
+    LOAD_ADDR x1, emit_tbl_arg0
+    str x0, [x1]
+    LOAD_ADDR x0, spawn_fn_op_arg1
+    LOAD_ADDR x1, emit_tbl_arg1
+    str x0, [x1]
+    LOAD_ADDR x0, spawn_fn_op_arg2
+    LOAD_ADDR x1, emit_tbl_arg2
+    str x0, [x1]
+    LOAD_ADDR x0, spawn_fn_op_arg3
+    LOAD_ADDR x1, emit_tbl_arg3
+    str x0, [x1]
+    LOAD_ADDR x0, spawn_fn_op_arg4
+    LOAD_ADDR x1, emit_tbl_arg4
+    str x0, [x1]
+    ret
+
 _emit_program:
     stp x29, x30, [sp, #-16]!
     mov x29, sp
@@ -12,6 +54,8 @@ _emit_program:
     LOAD_ADDR x0, asm_header
     mov x1, #1
     bl _write_cstr_fd
+
+    bl _emit_point_emit_tables_main
 
     LOAD_ADDR x19, max_var_count
     ldr x19, [x19]
@@ -55,7 +99,13 @@ Lemit_body_loop:
     b Lemit_body_loop
 
 Lemit_body_done:
-    LOAD_ADDR x0, asm_data_intro
+    LOAD_ADDR x0, asm_main_epilogue
+    mov x1, #1
+    bl _write_cstr_fd
+#ifndef _WIN32
+    bl Lemit_spawn_worker_functions
+#endif
+    LOAD_ADDR x0, asm_dot_data_intro
     mov x1, #1
     bl _write_cstr_fd
 
@@ -78,12 +128,42 @@ Lemit_store_data_begin:
     mov x21, #0
     Lemit_store_data_loop:
     cmp x21, x20
-    b.ge Lemit_pools
+    b.ge Lemit_main_store_done
     mov x0, x21
     bl _emit_store_data
     add x21, x21, #1
     b Lemit_store_data_loop
 
+Lemit_main_store_done:
+#ifndef _WIN32
+    bl _emit_point_emit_tables_main
+    LOAD_ADDR x19, fn_count
+    ldr x19, [x19]
+    mov x21, #0
+Lemit_spawn_store_outer:
+    cmp x21, x19
+    b.ge Lemit_spawn_store_done_u
+    LOAD_ADDR x9, spawn_fn_op_counts
+    ldr x22, [x9, x21, lsl #3]
+    cbz x22, Lemit_spawn_store_fn_next_u
+    bl _emit_point_emit_tables_spawn
+    mov x23, #0
+Lemit_spawn_store_inner_u:
+    cmp x23, x22
+    b.ge Lemit_spawn_store_inner_done_u
+    mov x24, #256
+    mul x24, x21, x24
+    add x0, x24, x23
+    bl _emit_store_data
+    add x23, x23, #1
+    b Lemit_spawn_store_inner_u
+Lemit_spawn_store_inner_done_u:
+    bl _emit_point_emit_tables_main
+Lemit_spawn_store_fn_next_u:
+    add x21, x21, #1
+    b Lemit_spawn_store_outer
+Lemit_spawn_store_done_u:
+#endif
 
 Lemit_pools:
     // .align 3
@@ -286,6 +366,182 @@ Lemit_map_pool_lens_loop:
     b Lemit_map_pool_lens_loop
 Lemit_map_pool_lens_done:
 
+#ifndef _WIN32
+Lemit_maybe_spawn_thread_runtime:
+    LOAD_ADDR x19, fn_count
+    ldr x19, [x19]
+    mov x21, #0
+    mov x22, #0
+Lemit_mstr_scan:
+    cmp x21, x19
+    b.ge Lemit_mstr_have
+    LOAD_ADDR x9, spawn_fn_op_counts
+    ldr x23, [x9, x21, lsl #3]
+    cbz x23, Lemit_mstr_next_fn
+    mov x22, #1
+    b Lemit_mstr_have
+Lemit_mstr_next_fn:
+    add x21, x21, #1
+    b Lemit_mstr_scan
+Lemit_mstr_have:
+    cbz x22, Lemit_mstr_done
+    LOAD_ADDR x0, asm_spawn_thread_runtime
+    mov x1, #1
+    bl _write_cstr_fd
+Lemit_mstr_done:
+    ret
+
+Lemit_spawn_worker_functions:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+    stp x25, x26, [sp, #-16]!
+    stp x27, x28, [sp, #-16]!
+
+    LOAD_ADDR x19, fn_count
+    ldr x19, [x19]
+    mov x21, #0
+    mov x28, #0
+Lssp_any_scan_loop:
+    cmp x21, x19
+    b.ge Lssp_any_scan_done
+    LOAD_ADDR x9, spawn_fn_op_counts
+    ldr x23, [x9, x21, lsl #3]
+    cbz x23, Lssp_any_scan_next
+    mov x28, #1
+    b Lssp_any_scan_done
+Lssp_any_scan_next:
+    add x21, x21, #1
+    b Lssp_any_scan_loop
+Lssp_any_scan_done:
+    cbz x28, Lemit_spawn_worker_functions_exit
+
+    LOAD_ADDR x0, asm_spawn_dispatch_head
+    mov x1, #1
+    bl _write_cstr_fd
+
+    mov x21, #0
+Lssp_dispatch_outer:
+    cmp x21, x19
+    b.ge Lssp_dispatch_emit_done
+    LOAD_ADDR x9, spawn_fn_op_counts
+    ldr x23, [x9, x21, lsl #3]
+    cbz x23, Lssp_dispatch_outer_next
+
+    LOAD_ADDR x0, asm_spawn_dispatch_cmp
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, x21
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_newline
+    mov x1, #1
+    bl _write_cstr_fd
+
+    LOAD_ADDR x0, asm_spawn_dispatch_beq
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, x21
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_newline
+    mov x1, #1
+    bl _write_cstr_fd
+
+Lssp_dispatch_outer_next:
+    add x21, x21, #1
+    b Lssp_dispatch_outer
+
+Lssp_dispatch_emit_done:
+    LOAD_ADDR x0, asm_spawn_dispatch_ret
+    mov x1, #1
+    bl _write_cstr_fd
+
+    LOAD_ADDR x25, max_var_count
+    ldr x25, [x25]
+    LOAD_ADDR x26, var_count
+    ldr x26, [x26]
+    cmp x26, x25
+    csel x25, x26, x25, hi
+    mov x26, #8
+    mul x25, x25, x26
+    add x25, x25, #15
+    and x25, x25, #0xFFFFFFFFFFFFFFF0
+
+    mov x21, #0
+Lssp_thr_outer:
+    cmp x21, x19
+    b.ge Lemit_spawn_worker_functions_exit
+    LOAD_ADDR x9, spawn_fn_op_counts
+    ldr x23, [x9, x21, lsl #3]
+    cbz x23, Lssp_thr_outer_next
+
+    LOAD_ADDR x0, asm_spawn_thr_glob
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, x21
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_spawn_thr_label_mid
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, x21
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_label_suffix
+    mov x1, #1
+    bl _write_cstr_fd
+
+    LOAD_ADDR x0, asm_spawn_thr_enter
+    mov x1, #1
+    bl _write_cstr_fd
+    cbz x25, Lssp_thr_stack_skip
+    LOAD_ADDR x0, asm_sub_sp_prefix
+    mov x1, #1
+    bl _write_cstr_fd
+    mov x0, x25
+    mov x1, #1
+    bl _write_i64_fd
+    LOAD_ADDR x0, single_char
+    mov w9, #'\n'
+    strb w9, [x0]
+    mov x1, #1
+    mov x2, #1
+    bl _write_buffer_fd
+Lssp_thr_stack_skip:
+    bl _emit_point_emit_tables_spawn
+    mov x24, #0
+Lssp_thr_emit_ops:
+    cmp x24, x23
+    b.ge Lssp_thr_emit_done
+    mov x11, #256
+    mul x11, x21, x11
+    add x0, x11, x24
+    bl _emit_operation
+    add x24, x24, #1
+    b Lssp_thr_emit_ops
+Lssp_thr_emit_done:
+    bl _emit_point_emit_tables_main
+    LOAD_ADDR x0, asm_spawn_thr_leave
+    mov x1, #1
+    bl _write_cstr_fd
+
+Lssp_thr_outer_next:
+    add x21, x21, #1
+    b Lssp_thr_outer
+
+Lemit_spawn_worker_functions_exit:
+    ldp x27, x28, [sp], #16
+    ldp x25, x26, [sp], #16
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+#endif
+
 Lemit_emit_runtime_helpers:
     LOAD_ADDR x0, asm_runtime_helpers
     mov x1, #1
@@ -298,6 +554,9 @@ Lemit_emit_runtime_helpers:
     LOAD_ADDR x0, asm_string_slice_runtime
     mov x1, #1
     bl _write_cstr_fd
+#ifndef _WIN32
+    bl Lemit_maybe_spawn_thread_runtime
+#endif
 
 Lemit_program_done:
     ldp x21, x22, [sp], #16
@@ -312,7 +571,8 @@ _emit_operation:
     stp x21, x22, [sp, #-16]!
 
     mov x19, x0
-    LOAD_ADDR x20, op_kinds
+    LOAD_ADDR x20, emit_tbl_kinds
+    ldr x20, [x20]
     ldr x21, [x20, x19, lsl #3]
 
     cmp x21, #0
@@ -415,15 +675,39 @@ cmp x21, #87
     b.eq Lemit_op_map_store
     cmp x21, #90
     b.eq Lemit_op_string_slice
+#ifndef _WIN32
+    cmp x21, #91
+    b.eq Lemit_op_spawn
+#endif
     
     b Lemit_op_done
+
+#ifndef _WIN32
+Lemit_op_spawn:
+    LOAD_ADDR x0, asm_mov_x0_imm_prefix
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_newline
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x0, asm_call_spawn_go
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_op_done
+#endif
 
 Lemit_op_address:
     LOAD_ADDR x0, asm_sub_x10_x29_imm
     mov x1, #1
     bl _write_cstr_fd
     
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -436,7 +720,8 @@ Lemit_op_address:
     mov x1, #1
     bl _write_cstr_fd
     
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -451,7 +736,8 @@ Lemit_op_deref:
     mov x1, #1
     bl _write_cstr_fd
     
-    LOAD_ADDR x20, op_arg2
+    LOAD_ADDR x20, emit_tbl_arg2
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -460,7 +746,8 @@ Lemit_op_deref:
     mov x1, #1
     bl _write_cstr_fd
     
-    LOAD_ADDR x20, op_arg3
+    LOAD_ADDR x20, emit_tbl_arg3
+    ldr x20, [x20]
     ldr x22, [x20, x19, lsl #3]
     cmp x22, #3
     b.eq Lemit_op_deref_byte
@@ -480,7 +767,8 @@ Lemit_op_deref_store:
     mov x1, #1
     bl _write_cstr_fd
     
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -491,7 +779,8 @@ Lemit_op_deref_store:
     b Lemit_op_done
 
 Lemit_op_alloc:
-    LOAD_ADDR x20, op_arg2
+    LOAD_ADDR x20, emit_tbl_arg2
+    ldr x20, [x20]
     ldr x22, [x20, x19, lsl #3]
     cmp x22, #-1
     b.eq Lemit_op_alloc_imm
@@ -511,7 +800,8 @@ Lemit_op_alloc_imm:
     LOAD_ADDR x0, asm_mov_x0_imm_prefix
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -527,7 +817,8 @@ Lemit_op_alloc_call:
     LOAD_ADDR x0, asm_store_x0_var
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -540,7 +831,8 @@ Lemit_op_free:
     LOAD_ADDR x0, asm_load_x0_var
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -557,7 +849,8 @@ Lemit_op_set_ptr:
     LOAD_ADDR x0, asm_math_var_x11_ldr
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -565,7 +858,8 @@ Lemit_op_set_ptr:
     mov x1, #1
     bl _write_cstr_fd
     
-    LOAD_ADDR x20, op_arg2
+    LOAD_ADDR x20, emit_tbl_arg2
+    ldr x20, [x20]
     ldr x22, [x20, x19, lsl #3]
     cmp x22, #-1
     b.eq Lemit_op_set_ptr_imm
@@ -599,7 +893,8 @@ Lemit_op_set_ptr_imm:
     bl _write_cstr_fd
 
 Lemit_op_set_ptr_store:
-    LOAD_ADDR x20, op_arg3
+    LOAD_ADDR x20, emit_tbl_arg3
+    ldr x20, [x20]
     ldr x22, [x20, x19, lsl #3]
     cmp x22, #3
     b.eq Lemit_op_set_ptr_byte
@@ -616,7 +911,8 @@ Lemit_op_set_ptr_byte:
     b Lemit_op_done
 
 Lemit_op_print_value:
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     bl _emit_print_call
     b Lemit_op_done
@@ -637,7 +933,8 @@ Lemit_op_store_var:
     LOAD_ADDR x0, asm_store_var_str
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -647,7 +944,8 @@ Lemit_op_store_var:
     b Lemit_op_done
 
 Lemit_op_print_var:
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x22, [x20, x19, lsl #3]
     cmp x22, #2
     b.eq Lemit_op_print_var_str
@@ -658,7 +956,8 @@ Lemit_op_print_var:
     LOAD_ADDR x0, asm_print_var_ldr
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -674,7 +973,8 @@ Lemit_op_print_var_str:
     LOAD_ADDR x0, asm_print_var_ldr
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -687,7 +987,8 @@ Lemit_op_print_dec_var:
     LOAD_ADDR x0, asm_math_var_x11_ldr
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -695,7 +996,8 @@ Lemit_op_print_dec_var:
     mov x1, #1
     bl _write_cstr_fd
 
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x22, [x20, x19, lsl #3]
     mov x0, x22
     bl _pow10_u64
@@ -769,7 +1071,8 @@ Lemit_op_input_str:
     LOAD_ADDR x0, asm_input_len_prefix
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg2
+    LOAD_ADDR x20, emit_tbl_arg2
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -881,7 +1184,8 @@ Lemit_op_input_str:
     LOAD_ADDR x0, asm_input_store_x10_str
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -894,7 +1198,8 @@ Lemit_op_store_math_imm:
     LOAD_ADDR x0, asm_math_var_x11_ldr
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -925,7 +1230,8 @@ Lemit_op_store_math_imm:
     LOAD_ADDR x0, asm_math_store_x11_str
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -942,7 +1248,8 @@ Lemit_op_print_math_imm:
     LOAD_ADDR x0, asm_math_var_x1_ldr
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -979,7 +1286,8 @@ Lemit_op_store_math_var:
     LOAD_ADDR x0, asm_math_var_x11_ldr
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -990,7 +1298,8 @@ Lemit_op_store_math_var:
     LOAD_ADDR x0, asm_math_var_x10_ldr
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -1005,7 +1314,8 @@ Lemit_op_store_math_var:
     LOAD_ADDR x0, asm_math_store_x11_str
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -1022,7 +1332,8 @@ Lemit_op_print_math_var:
     LOAD_ADDR x0, asm_math_var_x1_ldr
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -1033,7 +1344,8 @@ Lemit_op_print_math_var:
     LOAD_ADDR x0, asm_math_var_x10_ldr
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -1054,7 +1366,8 @@ Lemit_op_store_math_target_imm:
     LOAD_ADDR x0, asm_math_var_x11_ldr
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -1085,7 +1398,8 @@ Lemit_op_store_math_target_imm:
     LOAD_ADDR x0, asm_math_store_x11_str
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -1098,7 +1412,8 @@ Lemit_op_store_math_target_var:
     LOAD_ADDR x0, asm_math_var_x11_ldr
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -1109,7 +1424,8 @@ Lemit_op_store_math_target_var:
     LOAD_ADDR x0, asm_math_var_x10_ldr
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg2
+    LOAD_ADDR x20, emit_tbl_arg2
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -1124,7 +1440,8 @@ Lemit_op_store_math_target_var:
     LOAD_ADDR x0, asm_math_store_x11_str
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -1138,7 +1455,8 @@ Lemit_op_store_var_var:
     LOAD_ADDR x0, asm_math_var_x10_ldr
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -1153,7 +1471,8 @@ Lemit_op_store_var_var:
     LOAD_ADDR x0, asm_input_store_x10_str
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -1168,14 +1487,16 @@ Lemit_op_store_str_lit:
     LOAD_ADDR x0, asm_load_x0_print_val_prefix
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
     LOAD_ADDR x0, asm_load_x0_print_val_middle
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -1190,7 +1511,8 @@ Lemit_op_store_str_lit:
     LOAD_ADDR x0, asm_input_store_x10_str
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -1203,7 +1525,8 @@ Lemit_op_store_dec_target_imm:
     LOAD_ADDR x0, asm_math_var_x11_ldr
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -1232,7 +1555,8 @@ Lemit_op_store_dec_target_var:
     LOAD_ADDR x0, asm_math_var_x11_ldr
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -1243,7 +1567,8 @@ Lemit_op_store_dec_target_var:
     LOAD_ADDR x0, asm_math_var_x10_ldr
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg2
+    LOAD_ADDR x20, emit_tbl_arg2
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -1252,7 +1577,8 @@ Lemit_op_store_dec_target_var:
     bl _write_cstr_fd
 
 Lemit_op_store_dec_target_common:
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x22, [x20, x19, lsl #3]
     mov x0, x22
     bl _pow10_u64
@@ -1301,7 +1627,8 @@ Lemit_op_store_dec_math_write:
     LOAD_ADDR x0, asm_math_store_x11_str
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -1312,7 +1639,8 @@ Lemit_op_store_dec_math_write:
 
 Lemit_op_str_concat:
     // arg0: dest, arg1: left, arg2: right, arg3: flags
-    LOAD_ADDR x20, op_arg3
+    LOAD_ADDR x20, emit_tbl_arg3
+    ldr x20, [x20]
     ldr x22, [x20, x19, lsl #3] // flags
 
     // Load left into x0
@@ -1321,14 +1649,16 @@ Lemit_op_str_concat:
     LOAD_ADDR x0, asm_load_x0_print_val_prefix
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
     LOAD_ADDR x0, asm_load_x0_print_val_middle
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -1341,7 +1671,8 @@ Lemit_str_concat_left_var:
     LOAD_ADDR x0, asm_load_x0_var
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -1356,14 +1687,16 @@ Lemit_str_concat_right:
     LOAD_ADDR x0, asm_load_x1_print_val_prefix
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg2
+    LOAD_ADDR x20, emit_tbl_arg2
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
     LOAD_ADDR x0, asm_load_x1_print_val_middle
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg2
+    LOAD_ADDR x20, emit_tbl_arg2
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -1376,7 +1709,8 @@ Lemit_str_concat_right_var:
     LOAD_ADDR x0, asm_load_x1_var
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg2
+    LOAD_ADDR x20, emit_tbl_arg2
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -1393,7 +1727,8 @@ Lemit_str_concat_call:
     LOAD_ADDR x0, asm_store_x0_var
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -1404,7 +1739,8 @@ Lemit_str_concat_call:
 
 Lemit_op_file_read:
     // arg0: dest, arg1: path, arg3: flags
-    LOAD_ADDR x20, op_arg3
+    LOAD_ADDR x20, emit_tbl_arg3
+    ldr x20, [x20]
     ldr x22, [x20, x19, lsl #3] // flags
 
     // Load path into x0
@@ -1412,14 +1748,16 @@ Lemit_op_file_read:
     LOAD_ADDR x0, asm_load_x0_print_val_prefix
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
     LOAD_ADDR x0, asm_load_x0_print_val_middle
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -1431,7 +1769,8 @@ Lemit_file_read_path_var:
     LOAD_ADDR x0, asm_load_x0_var
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -1447,7 +1786,8 @@ Lemit_file_read_call:
     LOAD_ADDR x0, asm_store_x0_var
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -1458,7 +1798,8 @@ Lemit_file_read_call:
 
 Lemit_op_file_write:
     // arg0: success, arg1: path, arg2: data, arg3: flags
-    LOAD_ADDR x20, op_arg3
+    LOAD_ADDR x20, emit_tbl_arg3
+    ldr x20, [x20]
     ldr x22, [x20, x19, lsl #3]
 
     // Load path into x0
@@ -1466,14 +1807,16 @@ Lemit_op_file_write:
     LOAD_ADDR x0, asm_load_x0_print_val_prefix
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
     LOAD_ADDR x0, asm_load_x0_print_val_middle
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -1485,7 +1828,8 @@ Lemit_file_write_path_var:
     LOAD_ADDR x0, asm_load_x0_var
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -1499,14 +1843,16 @@ Lemit_file_write_data:
     LOAD_ADDR x0, asm_load_x1_print_val_prefix
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg2
+    LOAD_ADDR x20, emit_tbl_arg2
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
     LOAD_ADDR x0, asm_load_x1_print_val_middle
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg2
+    LOAD_ADDR x20, emit_tbl_arg2
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -1518,7 +1864,8 @@ Lemit_file_write_data_var:
     LOAD_ADDR x0, asm_load_x1_var
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg2
+    LOAD_ADDR x20, emit_tbl_arg2
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -1534,7 +1881,8 @@ Lemit_file_write_call:
     LOAD_ADDR x0, asm_store_x0_var
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -1547,7 +1895,8 @@ Lemit_op_cast_int_to_str:
     LOAD_ADDR x0, asm_load_x0_var
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -1562,7 +1911,8 @@ Lemit_op_cast_int_to_str:
     LOAD_ADDR x0, asm_store_x0_var
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -1582,7 +1932,8 @@ Lemit_op_cast_bool_to_str:
     LOAD_ADDR x0, asm_math_var_x11_ldr
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -1609,14 +1960,16 @@ Lemit_op_cast_bool_to_str:
     LOAD_ADDR x0, asm_load_x0_print_val_prefix
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg2
+    LOAD_ADDR x20, emit_tbl_arg2
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
     LOAD_ADDR x0, asm_load_x0_print_val_middle
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg2
+    LOAD_ADDR x20, emit_tbl_arg2
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -1627,7 +1980,8 @@ Lemit_op_cast_bool_to_str:
     LOAD_ADDR x0, asm_store_x0_var
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -1660,14 +2014,16 @@ Lemit_op_cast_bool_to_str:
     LOAD_ADDR x0, asm_load_x0_print_val_prefix
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg3
+    LOAD_ADDR x20, emit_tbl_arg3
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
     LOAD_ADDR x0, asm_load_x0_print_val_middle
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg3
+    LOAD_ADDR x20, emit_tbl_arg3
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -1678,7 +2034,8 @@ Lemit_op_cast_bool_to_str:
     LOAD_ADDR x0, asm_store_x0_var
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -1702,7 +2059,8 @@ Lemit_op_cast_bool_to_str:
 
 Lemit_op_list_load:
     // arg0: dest, arg1: index_var/imm, arg2: base_idx, arg3: flags
-    LOAD_ADDR x20, op_arg3
+    LOAD_ADDR x20, emit_tbl_arg3
+    ldr x20, [x20]
     ldr x22, [x20, x19, lsl #3]
     tbz x22, #1, Lemit_list_load_var
     
@@ -1710,7 +2068,8 @@ Lemit_op_list_load:
     LOAD_ADDR x0, asm_mov_x10_imm
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -1723,7 +2082,8 @@ Lemit_list_load_var:
     LOAD_ADDR x0, asm_math_var_x10_ldr
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -1735,7 +2095,8 @@ Lemit_list_load_ready:
     LOAD_ADDR x0, asm_add_x10_imm
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg2
+    LOAD_ADDR x20, emit_tbl_arg2
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -1754,7 +2115,8 @@ Lemit_list_load_ready:
     LOAD_ADDR x0, asm_input_store_x10_str
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -1768,7 +2130,8 @@ Lemit_op_cast_str_to_int:
     LOAD_ADDR x0, asm_math_var_x10_ldr
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -1787,7 +2150,8 @@ Lemit_op_cast_str_to_int:
     LOAD_ADDR x0, asm_input_store_x0_str
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -1801,7 +2165,8 @@ Lemit_op_map_load:
     // packed: (key_type << 56) | (val_type << 48) | (is_imm << 47) | count
     
     // Unpack arg3
-    LOAD_ADDR x20, op_arg3
+    LOAD_ADDR x20, emit_tbl_arg3
+    ldr x20, [x20]
     ldr x22, [x20, x19, lsl #3]
     and x23, x22, #0xFFFFFFFF // count
     lsr x24, x22, #56 // key type
@@ -1817,7 +2182,8 @@ Lemit_op_map_load:
     LOAD_ADDR x0, asm_mov_x10_imm
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -1831,14 +2197,16 @@ Lemit_map_load_imm_str:
     LOAD_ADDR x0, asm_load_x0_print_val_prefix
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
     LOAD_ADDR x0, asm_load_x0_print_val_middle
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -1856,7 +2224,8 @@ Lemit_map_load_var:
     LOAD_ADDR x0, asm_math_var_x10_ldr
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -1901,7 +2270,8 @@ Lemit_map_load_ready:
     LOAD_ADDR x0, asm_mov_x0_imm
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg2
+    LOAD_ADDR x20, emit_tbl_arg2
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -1977,7 +2347,8 @@ Lemit_map_load_ready:
     // for non-string values use zero; for strings use fallback id from op_arg4
     cmp x25, #2
     b.ne Lemit_map_load_miss_zero
-    LOAD_ADDR x20, op_arg4
+    LOAD_ADDR x20, emit_tbl_arg4
+    ldr x20, [x20]
     ldr x22, [x20, x19, lsl #3]
     cbz x22, Lemit_map_load_miss_zero
     LOAD_ADDR x0, asm_load_x0_print_val_prefix
@@ -2024,7 +2395,8 @@ Lemit_map_load_miss_done:
     LOAD_ADDR x0, asm_input_store_x0_str
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -2040,7 +2412,8 @@ Lemit_op_map_store:
     // arg2: value operand (slot or immediate)
     // arg3: packed (key_type<<56 | val_type<<48 | key_is_imm<<47 | val_is_imm<<46)
     // arg4: immediate string key length (or 0)
-    LOAD_ADDR x20, op_arg3
+    LOAD_ADDR x20, emit_tbl_arg3
+    ldr x20, [x20]
     ldr x22, [x20, x19, lsl #3]
     lsr x24, x22, #56          // key type
     ubfx x25, x22, #48, #8     // value type
@@ -2049,7 +2422,8 @@ Lemit_op_map_store:
     LOAD_ADDR x0, asm_mov_x0_imm
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -2064,7 +2438,8 @@ Lemit_op_map_store:
     LOAD_ADDR x0, asm_mov_x1_imm
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -2076,14 +2451,16 @@ Lemit_map_store_key_imm_str:
     LOAD_ADDR x0, asm_load_x1_print_val_prefix
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
     LOAD_ADDR x0, asm_load_x1_print_val_middle
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -2095,7 +2472,8 @@ Lemit_map_store_key_var:
     LOAD_ADDR x0, asm_load_x1_var
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -2122,7 +2500,8 @@ Lemit_map_store_key_ready:
     LOAD_ADDR x0, asm_mov_x3_imm
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg4
+    LOAD_ADDR x20, emit_tbl_arg4
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -2160,7 +2539,8 @@ Lemit_map_store_value_prep:
     LOAD_ADDR x0, asm_mov_x4_imm
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg2
+    LOAD_ADDR x20, emit_tbl_arg2
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -2172,14 +2552,16 @@ Lemit_map_store_val_imm_str:
     LOAD_ADDR x0, asm_load_x4_print_val_prefix
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg2
+    LOAD_ADDR x20, emit_tbl_arg2
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
     LOAD_ADDR x0, asm_load_x4_print_val_middle
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg2
+    LOAD_ADDR x20, emit_tbl_arg2
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -2191,7 +2573,8 @@ Lemit_map_store_val_var:
     LOAD_ADDR x0, asm_load_x4_var
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg2
+    LOAD_ADDR x20, emit_tbl_arg2
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -2255,7 +2638,8 @@ Lemit_map_store_call:
     LOAD_ADDR x0, asm_mov_x1_imm
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -2267,14 +2651,16 @@ Lemit_map_store_call_key_imm_str:
     LOAD_ADDR x0, asm_load_x1_print_val_prefix
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
     LOAD_ADDR x0, asm_load_x1_print_val_middle
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -2286,7 +2672,8 @@ Lemit_map_store_call_key_var:
     LOAD_ADDR x0, asm_load_x1_var
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -2298,7 +2685,8 @@ Lemit_map_store_call_ready:
     LOAD_ADDR x0, asm_mov_x0_imm
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -2320,7 +2708,8 @@ Lemit_op_string_slice:
     LOAD_ADDR x0, asm_load_x0_var
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -2329,7 +2718,8 @@ Lemit_op_string_slice:
     bl _write_cstr_fd
 
     // x1 = start
-    LOAD_ADDR x20, op_arg2
+    LOAD_ADDR x20, emit_tbl_arg2
+    ldr x20, [x20]
     ldr x22, [x20, x19, lsl #3]
     tbnz x22, #63, Lslice_emit_start_var
     LOAD_ADDR x0, asm_mov_x1_imm
@@ -2357,7 +2747,8 @@ Lslice_emit_start_var:
 
 Lslice_emit_end:
     // x2 = end
-    LOAD_ADDR x20, op_arg3
+    LOAD_ADDR x20, emit_tbl_arg3
+    ldr x20, [x20]
     ldr x22, [x20, x19, lsl #3]
     tbnz x22, #63, Lslice_emit_end_var
     LOAD_ADDR x0, asm_mov_x2_imm
@@ -2393,7 +2784,8 @@ Lstring_slice_call:
     LOAD_ADDR x0, asm_store_x0_var
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -2449,7 +2841,8 @@ Lemit_op_if_start:
     mov x1, #1
     bl _write_cstr_fd
     
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -2463,7 +2856,8 @@ Lemit_op_if_start:
     mov x1, #1
     bl _write_cstr_fd
     
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -2481,7 +2875,8 @@ Lemit_op_if_else:
     mov x1, #1
     bl _write_cstr_fd
     
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -2496,7 +2891,8 @@ Lemit_op_if_else:
     mov x1, #1
     bl _write_cstr_fd
     
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -2513,7 +2909,8 @@ Lemit_op_if_end:
     mov x1, #1
     bl _write_cstr_fd
     
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -2530,7 +2927,8 @@ Lemit_op_while_start:
     mov x1, #1
     bl _write_cstr_fd
     
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -2547,7 +2945,8 @@ Lemit_op_while_cond:
     mov x1, #1
     bl _write_cstr_fd
     
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -2561,7 +2960,8 @@ Lemit_op_while_cond:
     mov x1, #1
     bl _write_cstr_fd
     
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -2579,7 +2979,8 @@ Lemit_op_while_end:
     mov x1, #1
     bl _write_cstr_fd
     
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -2594,7 +2995,8 @@ Lemit_op_while_end:
     mov x1, #1
     bl _write_cstr_fd
     
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -2611,7 +3013,8 @@ Lemit_op_jump:
     mov x1, #1
     bl _write_cstr_fd
     
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -2628,7 +3031,8 @@ Lemit_op_logic_and:
     LOAD_ADDR x0, asm_math_var_x11_ldr
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -2640,7 +3044,8 @@ Lemit_op_logic_and:
     LOAD_ADDR x0, asm_math_var_x10_ldr
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -2658,7 +3063,8 @@ Lemit_op_logic_or:
     LOAD_ADDR x0, asm_math_var_x11_ldr
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -2670,7 +3076,8 @@ Lemit_op_logic_or:
     LOAD_ADDR x0, asm_math_var_x10_ldr
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -2688,7 +3095,8 @@ Lemit_op_logic_not:
     LOAD_ADDR x0, asm_math_var_x11_ldr
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -2706,7 +3114,8 @@ Lemit_op_update_label:
     mov x1, #1
     bl _write_cstr_fd
     
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -2721,7 +3130,8 @@ Lemit_op_logic_store:
     LOAD_ADDR x0, asm_math_store_x11_str
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg2
+    LOAD_ADDR x20, emit_tbl_arg2
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -2735,7 +3145,8 @@ Lemit_op_cmp_imm:
     LOAD_ADDR x0, asm_math_var_x11_ldr
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -2767,7 +3178,8 @@ Lemit_op_cmp_var:
     LOAD_ADDR x0, asm_math_var_x11_ldr
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg0
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -2779,7 +3191,8 @@ Lemit_op_cmp_var:
     LOAD_ADDR x0, asm_math_var_x10_ldr
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -2794,7 +3207,8 @@ Lemit_cmp_shared:
     bl _write_cstr_fd
     
     // emit cset depending on op_arg2
-    LOAD_ADDR x20, op_arg2
+    LOAD_ADDR x20, emit_tbl_arg2
+    ldr x20, [x20]
     ldr x22, [x20, x19, lsl #3]
     
     cmp x22, #0
@@ -2838,7 +3252,8 @@ Lemit_cmp_write_cset:
     mov x1, #1
     bl _write_cstr_fd
     
-    LOAD_ADDR x20, op_arg3
+    LOAD_ADDR x20, emit_tbl_arg3
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_stack_offset_fd
@@ -3139,7 +3554,8 @@ _emit_store_data:
     stp x21, x22, [sp, #-16]!
 
     mov x19, x0
-    LOAD_ADDR x20, op_kinds
+    LOAD_ADDR x20, emit_tbl_kinds
+    ldr x20, [x20]
     ldr x21, [x20, x19, lsl #3]
     cmp x21, #1
     b.eq Lemit_store_data_emit
@@ -3202,10 +3618,12 @@ Lemit_store_data_cmp_imm:
     cmp x21, #51
     b.gt Lemit_store_data_cmp_imm_arg1
 Lemit_store_data_cmp_imm_arg3:
-    LOAD_ADDR x20, op_arg3
+    LOAD_ADDR x20, emit_tbl_arg3
+    ldr x20, [x20]
     b Lemit_store_data_cmp_imm_load
 Lemit_store_data_cmp_imm_arg1:
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
 Lemit_store_data_cmp_imm_load:
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
@@ -3228,9 +3646,11 @@ Lemit_store_data_input:
     LOAD_ADDR x0, asm_data_value_mid_str
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
     ldr x0, [x20, x19, lsl #3]
-    LOAD_ADDR x20, op_arg2
+    LOAD_ADDR x20, emit_tbl_arg2
+    ldr x20, [x20]
     ldr x1, [x20, x19, lsl #3]
     mov x2, #1
     bl _write_buffer_fd
@@ -3272,10 +3692,12 @@ Lemit_store_data_emit:
     b.lt Lemit_store_data_arg1
     cmp x21, #27
     b.gt Lemit_store_data_arg1
-    LOAD_ADDR x20, op_arg3
+    LOAD_ADDR x20, emit_tbl_arg3
+    ldr x20, [x20]
     b Lemit_store_data_load
 Lemit_store_data_arg1:
-    LOAD_ADDR x20, op_arg1
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
 Lemit_store_data_load:
     ldr x0, [x20, x19, lsl #3]
 Lemit_store_data_write:

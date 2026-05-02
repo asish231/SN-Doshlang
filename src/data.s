@@ -30,6 +30,10 @@
 .global msg_too_many_vars
 .global msg_too_many_prints
 .global msg_too_many_ops
+.global msg_spawn_ops
+.global msg_spawn_nested
+.global msg_spawn_params
+.global msg_spawn_imported
 .global msg_too_many_fns
 .global msg_too_many_params
 .global msg_unknown_fn
@@ -137,6 +141,20 @@
 .global fn_name_override_len
 .global method_name_storage
 .global hidden_var_name_storage
+.global spawn_capture_fn_id
+.global spawn_fn_op_counts
+.global spawn_fn_op_kinds
+.global spawn_fn_op_arg0
+.global spawn_fn_op_arg1
+.global spawn_fn_op_arg2
+.global spawn_fn_op_arg3
+.global spawn_fn_op_arg4
+.global emit_tbl_kinds
+.global emit_tbl_arg0
+.global emit_tbl_arg1
+.global emit_tbl_arg2
+.global emit_tbl_arg3
+.global emit_tbl_arg4
 .global asm_header
 .global asm_runtime_helpers
 .global asm_sub_sp_prefix
@@ -165,7 +183,21 @@
 .global asm_print_call_stack
 .global asm_print_stack_only
 .global asm_print_dec_call_stack
-.global asm_data_intro
+.global asm_main_epilogue
+.global asm_dot_data_intro
+.global asm_spawn_dispatch_head
+.global asm_spawn_thr_glob
+.global asm_spawn_thr_label_mid
+.global asm_spawn_thr_enter
+.global asm_spawn_thr_leave
+.global asm_spawn_dispatch_cmp
+.global asm_spawn_dispatch_beq
+.global asm_spawn_dispatch_ret
+.global asm_call_spawn_go
+#ifdef _WIN32
+#else
+.global asm_spawn_thread_runtime
+#endif
 .global asm_data_value_prefix
 .global asm_data_value_mid
 .global asm_data_value_mid_str
@@ -440,6 +472,10 @@ msg_unsupported_decimal: .asciz "error: unsupported decimal operation on "
 msg_too_many_vars: .asciz "error: too many variables\n"
 msg_too_many_prints: .asciz "error: too many print statements\n"
 msg_too_many_ops:  .asciz "error: too many operations\n"
+msg_spawn_ops:     .asciz "error: spawned function body too large (max 256 ops)\n"
+msg_spawn_nested:  .asciz "error: nested spawn is not supported on "
+msg_spawn_params:  .asciz "error: spawn requires a zero-argument function on "
+msg_spawn_imported: .asciz "error: cannot spawn imported functions on "
 msg_too_many_fns:  .asciz "error: too many functions\n"
 msg_too_many_params: .asciz "error: too many parameters on "
 msg_unknown_fn:    .asciz "error: unknown function on "
@@ -517,7 +553,7 @@ asm_header:
 #ifdef _WIN32
     .asciz ".global main\n.align 4\n.extern printf\n.extern read\n.extern write\n.extern malloc\n.extern free\n.extern open\n.extern close\n.extern lseek\n.extern str_concat\n.extern int_to_cstr\n.extern file_read\n.extern file_write\n\n.text\nmain:\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n"
 #else
-    .asciz ".global _main\n.align 4\n.extern _printf\n.extern _read\n.extern _write\n.extern _malloc\n.extern _free\n.extern _open\n.extern _close\n.extern _lseek\n.extern _str_concat\n.extern _int_to_cstr\n.extern _file_read\n.extern _file_write\n\n.text\n_main:\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n"
+    .asciz ".global _main\n.align 4\n.extern _printf\n.extern _read\n.extern _write\n.extern _malloc\n.extern _free\n.extern _open\n.extern _close\n.extern _lseek\n.extern _str_concat\n.extern _int_to_cstr\n.extern _file_read\n.extern _file_write\n.extern _pthread_create\n.extern _pthread_join\n\n.text\n_main:\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n"
 #endif
 
 // Runtime helpers included in emitted programs.
@@ -790,8 +826,38 @@ asm_logic_or_x11_x10:
     .asciz "    orr x11, x11, x10\n    cmp x11, #0\n    cset x11, ne\n"
 asm_logic_not_x11:
     .asciz "    cmp x11, #0\n    cset x11, eq\n"
-asm_data_intro:
-    .asciz "    mov w0, #0\n    mov sp, x29\n    ldp x29, x30, [sp], #16\n    ret\n\n.data\nprint_fmt_int:\n    .asciz \"%lld\\n\"\nprint_fmt_str:\n    .asciz \"%s\\n\"\nprint_fmt_dec:\n    .asciz \"%s%lld.%0*lld\\n\"\nprint_fmt_int_noline:\n    .asciz \"%lld\"\nprint_fmt_str_noline:\n    .asciz \"%s\"\nprint_fmt_dec_noline:\n    .asciz \"%s%lld.%0*lld\"\ndec_sign_empty:\n    .asciz \"\"\ndec_sign_minus:\n    .asciz \"-\"\n.align 3\n"
+asm_main_epilogue:
+    .asciz "    mov w0, #0\n    mov sp, x29\n    ldp x29, x30, [sp], #16\n    ret\n\n"
+asm_dot_data_intro:
+    .asciz ".data\nprint_fmt_int:\n    .asciz \"%lld\\n\"\nprint_fmt_str:\n    .asciz \"%s\\n\"\nprint_fmt_dec:\n    .asciz \"%s%lld.%0*lld\\n\"\nprint_fmt_int_noline:\n    .asciz \"%lld\"\nprint_fmt_str_noline:\n    .asciz \"%s\"\nprint_fmt_dec_noline:\n    .asciz \"%s%lld.%0*lld\"\ndec_sign_empty:\n    .asciz \"\"\ndec_sign_minus:\n    .asciz \"-\"\n.align 3\n"
+asm_spawn_dispatch_head:
+    .asciz "\n.globl _snc_spawn_dispatch\n.align 4\n_snc_spawn_dispatch:\n"
+asm_spawn_thr_glob:
+    .asciz "\n.globl _snc_thr_"
+asm_spawn_thr_label_mid:
+    .asciz "\n.align 4\n_snc_thr_"
+asm_spawn_thr_enter:
+    .asciz "    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n"
+asm_spawn_thr_leave:
+    .asciz "    mov sp, x29\n    ldp x29, x30, [sp], #16\n    ret\n\n"
+asm_spawn_dispatch_cmp:
+    .asciz "    cmp w0, #"
+asm_spawn_dispatch_beq:
+    .asciz "\n    b.eq _snc_thr_"
+asm_spawn_dispatch_ret:
+    .asciz "    ret\n\n"
+asm_call_spawn_go:
+#ifdef _WIN32
+    .asciz ""
+#else
+    .asciz "    bl _snc_spawn_go\n"
+#endif
+asm_spawn_thread_runtime:
+#ifdef _WIN32
+    .asciz ""
+#else
+    .asciz "\n.bss\n.align 3\nsnc_spawn_fn_arg:\n    .space 4\n\n.text\n.align 4\n.global _snc_pthread_trampoline\n_snc_pthread_trampoline:\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    adrp x0, snc_spawn_fn_arg@PAGE\n    add x0, x0, snc_spawn_fn_arg@PAGEOFF\n    ldr w0, [x0]\n    bl _snc_spawn_dispatch\n    mov x0, xzr\n    ldp x29, x30, [sp], #16\n    ret\n\n.align 4\n.global _snc_spawn_go\n_snc_spawn_go:\n    stp x29, x30, [sp, #-96]!\n    mov x29, sp\n    adrp x8, snc_spawn_fn_arg@PAGE\n    add x8, x8, snc_spawn_fn_arg@PAGEOFF\n    str w0, [x8]\n    add x0, sp, #64\n    mov x1, xzr\n    adrp x2, _snc_pthread_trampoline@PAGE\n    add x2, x2, _snc_pthread_trampoline@PAGEOFF\n    mov x3, xzr\n    bl _pthread_create\n    cbnz w0, L_snc_sg_fail\n    ldr x0, [sp, #64]\n    mov x1, xzr\n    bl _pthread_join\n    mov sp, x29\n    ldp x29, x30, [sp], #96\n    ret\nL_snc_sg_fail:\n    mov sp, x29\n    ldp x29, x30, [sp], #96\n    ret\n"
+#endif
 asm_data_value_prefix:
     .asciz "print_val_"
 asm_data_value_mid:
@@ -1204,3 +1270,17 @@ fn_name_override_ptr: .space 8
 fn_name_override_len: .space 8
 method_name_storage: .space 4096          // 64 synthetic fn names * 64 bytes
 hidden_var_name_storage: .space 16384     // 512 hidden var names * 32 bytes
+spawn_capture_fn_id:   .space 8
+spawn_fn_op_counts:    .space 256         // 32 functions * 8 (op counts for spawn bodies)
+spawn_fn_op_kinds:    .space 65536       // 32 * 256 * 8
+spawn_fn_op_arg0:      .space 65536
+spawn_fn_op_arg1:      .space 65536
+spawn_fn_op_arg2:      .space 65536
+spawn_fn_op_arg3:      .space 65536
+spawn_fn_op_arg4:      .space 65536
+emit_tbl_kinds:        .space 8
+emit_tbl_arg0:         .space 8
+emit_tbl_arg1:         .space 8
+emit_tbl_arg2:         .space 8
+emit_tbl_arg3:         .space 8
+emit_tbl_arg4:         .space 8

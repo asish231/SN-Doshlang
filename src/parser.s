@@ -334,7 +334,74 @@ Lstmt_contract:
     mov x0, #0
     b Lstmt_return
 
-// spawn: compile-time expansion matches a normal call today; OS threads are not scheduled yet.
+#ifndef _WIN32
+// spawn worker(): captures worker body ops in a separate buffer, emits pthread-backed run at codegen.
+Lstmt_spawn:
+    bl _skip_whitespace
+    bl _parse_identifier
+    cbz x0, Lstmt_fail
+    mov x21, x0
+    mov x22, x1
+    LOAD_ADDR x9, spawn_capture_fn_id
+    ldr x10, [x9]
+    cmn x10, #1
+    b.ne Lstmt_spawn_nested_fail
+    mov x0, x21
+    mov x1, x22
+    bl _is_imported_function
+    cbnz x0, Lstmt_spawn_import_fail
+    mov x0, x21
+    mov x1, x22
+    bl _lookup_function
+    cbz x0, Lstmt_fail
+    mov x23, x1
+    LOAD_ADDR x9, fn_param_counts
+    ldr x10, [x9, x23, lsl #3]
+    cbnz x10, Lstmt_spawn_params_fail
+    LOAD_ADDR x9, spawn_fn_op_counts
+    str xzr, [x9, x23, lsl #3]
+    LOAD_ADDR x9, spawn_capture_fn_id
+    str x23, [x9]
+    mov x0, x21
+    mov x1, x22
+    bl _call_function
+    mov x24, x0
+    LOAD_ADDR x9, spawn_capture_fn_id
+    mov x10, #-1
+    str x10, [x9]
+    cbnz x24, Lstmt_fail
+    mov x0, #91
+    mov x1, x23
+    mov x2, #0
+    bl _record_operation
+    cbnz x0, Lstmt_fail
+    bl _consume_optional_semicolon
+    mov x0, #0
+    b Lstmt_return
+
+Lstmt_spawn_nested_fail:
+    LOAD_ADDR x0, msg_spawn_nested
+    bl _report_error_prefix
+    bl _write_newline_stderr
+    mov x0, #5
+    b Lstmt_return
+
+Lstmt_spawn_import_fail:
+    LOAD_ADDR x0, msg_spawn_imported
+    bl _report_error_prefix
+    bl _write_newline_stderr
+    mov x0, #5
+    b Lstmt_return
+
+Lstmt_spawn_params_fail:
+    LOAD_ADDR x0, msg_spawn_params
+    bl _report_error_prefix
+    bl _write_newline_stderr
+    mov x0, #5
+    b Lstmt_return
+
+#else
+// Windows-hosted compiler: spawn still runs the callee at compile time into the main op stream.
 Lstmt_spawn:
     bl _skip_whitespace
     bl _parse_identifier
@@ -349,6 +416,7 @@ Lstmt_spawn:
     bl _consume_optional_semicolon
     mov x0, #0
     b Lstmt_return
+#endif
 
 Lstmt_new:
     bl _parse_new_object
