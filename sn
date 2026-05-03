@@ -1,0 +1,64 @@
+#!/bin/bash
+
+# SNlang CLI wrapper
+# Usage: sn run file.sn  OR  sn build file.sn
+
+set -e
+
+SNC_BIN="snc"
+if ! command -v $SNC_BIN &> /dev/null; then
+    SNC_BIN="./snc"
+fi
+
+case "$1" in
+    "run")
+        if [ -z "$2" ]; then
+            echo "Usage: sn run <file.sn>"
+            exit 1
+        fi
+        FILE="$2"
+        TMP_S="/tmp/sn_$$.s"
+        TMP_BIN="/tmp/sn_$$"
+        
+        echo "Compiling $FILE..."
+        $SNC_BIN "$FILE" > "$TMP_S"
+        
+        echo "Linking..."
+        clang "$TMP_S" -o "$TMP_BIN"
+        
+        echo "Running..."
+        "$TMP_BIN"
+        
+        rm -f "$TMP_S" "$TMP_BIN"
+        ;;
+        
+    "build")
+        if [ -z "$2" ]; then
+            echo "Usage: sn build <file.sn>"
+            exit 1
+        fi
+        FILE="$2"
+        OUTNAME="${FILE%.sn}"
+        
+        echo "Compiling $FILE -> $OUTNAME..."
+        $SNC_BIN "$FILE" > "$OUTNAME.s"
+        clang "$OUTNAME.s" -o "$OUTNAME"
+        echo "Built: ./$OUTNAME"
+        ;;
+        
+    "version"|"--version"|"-v")
+        echo "SNlang CLI v0.1.0"
+        ;;
+        
+    *)
+        echo "SNlang - The programming language built from scratch in ARM64 assembly"
+        echo ""
+        echo "Usage:"
+        echo "  sn run <file.sn>     Compile and run"
+        echo "  sn build <file.sn>   Compile to binary"
+        echo "  sn version           Show version"
+        echo ""
+        echo "Example:"
+        echo "  sn run examples/math.sn"
+        ;;
+esac
