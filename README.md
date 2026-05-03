@@ -85,6 +85,15 @@ All critical infrastructure is complete and functional:
 - Native ARM64 assembly generation
 - No garbage collector - manual memory management
 
+## Installation
+ 
+### macOS (ARM64 / Apple Silicon)
+ 
+```bash
+brew tap asish231/snlang
+brew install snlang 
+```
+
 ## Syntax
 
 ```sn
