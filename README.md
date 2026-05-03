@@ -6,6 +6,8 @@
 
 **SNlang** is a programming language created from scratch by **Asish Kumar Sharma**. I took on the challenge of creating a programming language from scratch in just 7 days, and this is what I finally accomplished - completing it in just 5 days, which was fun to learn!
 
+SNlang holds the distinction of being the first programming language created in India to be built entirely from scratch in ARM64 assembly, natively targeting Apple Silicon (macOS ARM64). It was designed, implemented, and completed solely by Asish Kumar Sharma in 5 days.
+
 ## The Motive and Story
 
 The core motive behind SNlang is to make programming **natively fast** while remaining **incredibly simple** to write. It was born out of a desire to eliminate repetitive boilerplate code and unnecessary syntax, like the semicolon (`;`), when they aren't actually needed.
