@@ -1,0 +1,8 @@
+// Helper module for testing
+fn helper_add(int a, int b) -> int {
+    return a + b
+}
+
+fn helper_greet(str name) -> str {
+    return "Hello, " + name
+}

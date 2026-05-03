@@ -1,0 +1,31 @@
+// Comprehensive test of new features
+// Tests: try/catch and string methods
+
+fn main() {
+    // Test 1: Try/catch with immediate values
+    let x = try 1 catch 0
+    print(x)  // Should print 1
+    
+    // Test 2: Try/catch with variables
+    let safe = try 42 catch 0
+    print(safe)  // Should print 42
+    
+    // Test 3: String length
+    let msg = "hello"
+    let len = msg.length()
+    print(len)  // Should print 5
+    
+    // Test 4: String slice
+    let sub = msg.slice(1, 4)
+    print(sub)  // Should print "ell"
+    
+    // Test 5: String upper
+    let loud = msg.upper()
+    print(loud)  // Should print "HELLO"
+    
+    // Test 6: String lower
+    let quiet = "WORLD".lower()
+    print(quiet)  // Should print "world"
+    
+    return 0
+}

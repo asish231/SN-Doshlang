@@ -10,6 +10,7 @@
 .global _record_store_variable
 .global _record_print_variable
 .global _record_operation
+.global _record_operation2
 .global _record_operation3
 .global _record_operation4
 .global _record_operation5
@@ -509,6 +510,21 @@ _record_operation:
     mov x22, #0
     mov x24, #0
     mov x25, #0
+    b Lrecord_operation_common
+
+_record_operation2:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+    
+    mov x19, x0
+    mov x20, x1
+    mov x21, #-1
+    mov x22, #-1
+    mov x24, #-1
+    mov x25, #-1
     b Lrecord_operation_common
 
 _record_operation4:

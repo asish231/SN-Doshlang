@@ -388,6 +388,52 @@ fn main() {
 
 Explicit error handling inspired by Go. No hidden exceptions. You always deal with errors.
 
+### Try/Catch Expressions
+
+Use `try`/`catch` for expression-level error handling. If the try expression fails, the catch expression provides a fallback value.
+
+```text
+// Simple try/catch with immediate values
+let result = try 1 catch 0
+
+// Try/catch with variables
+let value = try riskyOperation() catch defaultValue
+
+// Nested try/catch
+let final = try (try a catch b) catch c
+```
+
+**Syntax:**
+- `try <expression> catch <fallback>`
+- Both expressions must return the same type
+- Result type matches the try expression type
+
+**Example with assignment:**
+```text
+fn main() {
+    let x = try 1 catch 2
+    print(x)  // prints 1 (try succeeded)
+    return 0
+}
+```
+
+### Throw Statement
+
+Use `throw` to signal an error with a message:
+
+```text
+fn divide(int a, int b) -> int {
+    if (b == 0) {
+        throw "Division by zero"
+    }
+    return a / b
+}
+```
+
+### Multi-Return Error Pattern
+
+Functions can return both a value and an error:
+
 ```text
 fn readFile(str path) -> (str, error) {
     if (not fileExists(path)) {
@@ -699,21 +745,71 @@ print(nickname otherwise "No nickname")
 
 ## 21. String Operations
 
+SNlang provides powerful built-in string manipulation methods.
+
 ```text
 str greeting = "Hello, World!"
 
-int len = greeting.length           // 13
-str sub = greeting.slice(0, 5)      // "Hello"
-bool has = greeting.contains("World")  // true
+int len = greeting.length()           // 13
+str sub = greeting.slice(0, 5)        // "Hello"
+bool has = greeting.contains("World") // true
 str fixed = greeting.replace("World", "SNlang")
 list<str> parts = greeting.split(", ")
-str upper = greeting.upper()        // "HELLO, WORLD!"
-str lower = greeting.lower()        // "hello, world!"
+str upper = greeting.upper()          // "HELLO, WORLD!"
+str lower = greeting.lower()          // "hello, world!"
+```
 
-// String interpolation
+### String Methods Reference
+
+| Method | Returns | Description | Example |
+|--------|---------|-------------|---------|
+| `.length()` | `int` | Returns the number of characters | `"hello".length()` → `5` |
+| `.slice(start, end)` | `str` | Extracts substring from start (inclusive) to end (exclusive) | `"hello".slice(1, 4)` → `"ell"` |
+| `.contains(substr)` | `bool` | Checks if substring exists | `"hello".contains("ell")` → `true` |
+| `.replace(old, new)` | `str` | Replaces all occurrences of old with new | `"hello".replace("l", "x")` → `"hexxo"` |
+| `.split(sep)` | `list<str>` | Splits string by separator | `"a,b,c".split(",")` → `["a", "b", "c"]` |
+| `.upper()` | `str` | Converts to uppercase | `"hello".upper()` → `"HELLO"` |
+| `.lower()` | `str` | Converts to lowercase | `"HELLO".lower()` → `"hello"` |
+
+### Method Details
+
+**`.length()`**
+- Returns the number of characters in the string
+- Returns `0` for empty string
+
+**`.slice(start, end)`**
+- `start`: Starting index (0-based, inclusive)
+- `end`: Ending index (exclusive)
+- Negative indices wrap from end
+- Out-of-bounds indices are clamped
+
+**`.contains(substr)`**
+- Returns `true` if `substr` appears anywhere in the string
+- Case-sensitive comparison
+- Empty substring always returns `true`
+
+**`.replace(old, new)`**
+- Replaces ALL occurrences of `old` with `new`
+- If `old` is empty, returns original string
+
+**`.split(sep)`**
+- Splits string into list at each occurrence of `sep`
+- If `sep` is empty, returns list of individual characters
+- Consecutive separators create empty strings in result
+
+**`.upper()` / `.lower()`**
+- Converts ASCII characters only
+- Non-alphabetic characters unchanged
+
+### String Interpolation
+
+Embed variables directly in strings using `{variable_name}`:
+
+```text
 str name = "Alice"
 int age = 25
 str msg = "My name is {name} and I am {age} years old"
+// Result: "My name is Alice and I am 25 years old"
 ```
 
 ---

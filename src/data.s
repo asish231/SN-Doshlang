@@ -109,6 +109,9 @@
 .global kw_try
 .global kw_catch
 .global kw_error
+.global kw_replace
+.global kw_upper
+.global kw_lower
 .global blueprint_count
 .global blueprint_name_ptrs
 .global blueprint_name_lens
@@ -260,6 +263,11 @@
 .global asm_mov_x4_imm
 .global asm_call_map_lookup
 .global asm_call_string_slice
+.global asm_call_str_contains
+.global asm_call_str_replace
+.global asm_call_str_split
+.global asm_call_str_upper
+.global asm_call_str_lower
 .global asm_string_slice_runtime
 .global asm_map_dynamic_runtime
 .global asm_load_x2_var
@@ -413,6 +421,14 @@
 .global slice_tmp_start_var
 .global slice_tmp_end_val
 .global slice_tmp_end_var
+.global str_contains_tmp_substr_val
+.global str_contains_tmp_substr_var
+.global str_replace_tmp_old_val
+.global str_replace_tmp_old_var
+.global str_replace_tmp_new_val
+.global str_replace_tmp_new_var
+.global str_split_tmp_sep_val
+.global str_split_tmp_sep_var
 .global module_count
 .global module_names
 .global module_paths
@@ -580,6 +596,9 @@ kw_throw:         .asciz "throw"
 kw_try:           .asciz "try"
 kw_catch:         .asciz "catch"
 kw_error:         .asciz "error"
+kw_replace:       .asciz "replace"
+kw_upper:         .asciz "upper"
+kw_lower:         .asciz "lower"
 asm_sub_sp_prefix:
     .asciz "    sub sp, sp, #"
 asm_header:
@@ -1126,6 +1145,21 @@ asm_call_map_lookup:
 asm_call_string_slice:
     .asciz "    bl _string_slice\n"
 
+asm_call_str_contains:
+    .asciz "    bl _str_contains\n"
+
+asm_call_str_replace:
+    .asciz "    bl _str_replace\n"
+
+asm_call_str_split:
+    .asciz "    bl _str_split\n"
+
+asm_call_str_upper:
+    .asciz "    bl _str_upper\n"
+
+asm_call_str_lower:
+    .asciz "    bl _str_lower\n"
+
 asm_string_slice_runtime:
     .asciz "\n.align 4\n.global _string_slice\n_string_slice:\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    stp x19, x20, [sp, #-16]!\n    stp x21, x22, [sp, #-16]!\n    stp x23, x24, [sp, #-16]!\n    mov x19, x0\n    mov x20, x1\n    mov x21, x2\n    cbz x19, Lslice_empty\n    cmp x20, #0\n    b.ge Lslice_start_ok\n    mov x20, #0\nLslice_start_ok:\n    mov x0, x19\n    bl _cstring_length\n    mov x24, x0\n    cmp x20, x24\n    b.ge Lslice_empty\n    cmp x21, x20\n    b.ge Lslice_end_order_ok\n    b Lslice_empty\nLslice_end_order_ok:\n    cmp x21, x24\n    b.le Lslice_end_clamped\n    mov x21, x24\nLslice_end_clamped:\n    sub x22, x21, x20\n    cmp x22, #0\n    b.le Lslice_empty\n    add x0, x22, #1\n    bl _malloc\n    cbz x0, Lslice_ret\n    mov x23, x0\n    mov x24, #0\nLslice_copy:\n    cmp x24, x22\n    b.ge Lslice_done\n    add x9, x19, x20\n    ldrb w10, [x9, x24]\n    strb w10, [x23, x24]\n    add x24, x24, #1\n    b Lslice_copy\nLslice_done:\n    strb wzr, [x23, x22]\n    mov x0, x23\n    b Lslice_ret\nLslice_empty:\n    mov x0, #1\n    bl _malloc\n    cbz x0, Lslice_ret\n    strb wzr, [x0]\nLslice_ret:\n    ldp x23, x24, [sp], #16\n    ldp x21, x22, [sp], #16\n    ldp x19, x20, [sp], #16\n    ldp x29, x30, [sp], #16\n    ret\n"
 asm_map_dynamic_runtime:
@@ -1290,6 +1324,15 @@ slice_tmp_start_val:  .space 8
 slice_tmp_start_var:  .space 8
 slice_tmp_end_val:    .space 8
 slice_tmp_end_var:    .space 8
+// String method temporary storage
+str_contains_tmp_substr_val: .space 8
+str_contains_tmp_substr_var: .space 8
+str_replace_tmp_old_val:   .space 8
+str_replace_tmp_old_var:   .space 8
+str_replace_tmp_new_val:   .space 8
+str_replace_tmp_new_var:   .space 8
+str_split_tmp_sep_val:     .space 8
+str_split_tmp_sep_var:     .space 8
 module_count:    .space 8
 module_names:    .space 2048      // 256 modules * 8 bytes (ptr)
 module_paths:    .space 2048      // 256 modules * 8 bytes (ptr)

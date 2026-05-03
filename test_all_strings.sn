@@ -1,0 +1,21 @@
+// Comprehensive string methods test
+fn main() {
+    let msg = "Hello World"
+    
+    // Test .length() - already working
+    let len = msg.length()
+    print(len)
+    
+    // Test .slice() - already working  
+    let sub = msg.slice(0, 5)
+    print(sub)
+    
+    // These are now parsed but need runtime implementation:
+    // .contains() - op 97
+    // .replace() - op 98
+    // .split() - op 99
+    // .upper() - op 100
+    // .lower() - op 101
+    
+    return 0
+}

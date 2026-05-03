@@ -1,0 +1,18 @@
+// Test string methods
+fn main() {
+    let s = "hello world"
+    
+    // Test contains
+    let has_hello = s.contains("hello")
+    print(has_hello)
+    
+    // Test upper
+    let upper_s = s.upper()
+    print(upper_s)
+    
+    // Test lower  
+    let lower_s = s.lower()
+    print(lower_s)
+    
+    return 0
+}

@@ -5837,6 +5837,36 @@ Lprimary_member_access:
     bl _match_cstr_span
     cbnz x0, Lprimary_member_slice
     
+    mov x0, x21
+    mov x1, x22
+    LOAD_ADDR x2, kw_contains
+    bl _match_cstr_span
+    cbnz x0, Lprimary_str_contains
+    
+    mov x0, x21
+    mov x1, x22
+    LOAD_ADDR x2, kw_replace
+    bl _match_cstr_span
+    cbnz x0, Lprimary_str_replace
+    
+    mov x0, x21
+    mov x1, x22
+    LOAD_ADDR x2, kw_split
+    bl _match_cstr_span
+    cbnz x0, Lprimary_str_split
+    
+    mov x0, x21
+    mov x1, x22
+    LOAD_ADDR x2, kw_upper
+    bl _match_cstr_span
+    cbnz x0, Lprimary_str_upper
+    
+    mov x0, x21
+    mov x1, x22
+    LOAD_ADDR x2, kw_lower
+    bl _match_cstr_span
+    cbnz x0, Lprimary_str_lower
+    
     b Lprimary_fail
 
 Lprimary_member_object:
@@ -6028,6 +6058,209 @@ Lprimary_member_slice_end_done:
     mov x4, x22
     bl _record_operation4
     cbnz x0, Lprimary_fail
+    mov x25, #0
+    mov x26, #2
+    mov x27, #0
+    mov x28, x23
+    b Lprimary_suffix_loop_start
+
+// String methods - .contains(substr), .replace(old, new), .split(sep), .upper(), .lower()
+
+Lprimary_str_contains:
+    // str.contains(substr) -> bool
+    cmp x26, #2
+    b.ne Lprimary_fail
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lprimary_fail
+    
+    // Parse substring argument
+    bl _parse_expr_value
+    cbz x0, Lprimary_fail
+    cmp x2, #2
+    b.ne Lprimary_fail
+    
+    LOAD_ADDR x9, str_contains_tmp_substr_val
+    str x1, [x9]
+    LOAD_ADDR x9, str_contains_tmp_substr_var
+    str x4, [x9]
+    
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lprimary_fail
+    
+    // Allocate result variable and record operation
+    bl _allocate_temp_var
+    mov x23, x0
+    mov x0, #97 // op_str_contains
+    mov x1, x23 // dest
+    mov x2, x28 // source var
+    LOAD_ADDR x9, str_contains_tmp_substr_val
+    ldr x3, [x9]
+    LOAD_ADDR x9, str_contains_tmp_substr_var
+    ldr x4, [x9]
+    bl _record_operation4
+    cbnz x0, Lprimary_fail
+    
+    mov x25, #0
+    mov x26, #1 // bool result
+    mov x27, #0
+    mov x28, x23
+    b Lprimary_suffix_loop_start
+
+Lprimary_str_replace:
+    // str.replace(old, new) -> str
+    cmp x26, #2
+    b.ne Lprimary_fail
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lprimary_fail
+    
+    // Parse old substring
+    bl _parse_expr_value
+    cbz x0, Lprimary_fail
+    cmp x2, #2
+    b.ne Lprimary_fail
+    LOAD_ADDR x9, str_replace_tmp_old_val
+    str x1, [x9]
+    LOAD_ADDR x9, str_replace_tmp_old_var
+    str x4, [x9]
+    
+    bl _skip_whitespace
+    mov w0, #','
+    bl _expect_char
+    cbz x0, Lprimary_fail
+    
+    // Parse new substring
+    bl _parse_expr_value
+    cbz x0, Lprimary_fail
+    cmp x2, #2
+    b.ne Lprimary_fail
+    LOAD_ADDR x9, str_replace_tmp_new_val
+    str x1, [x9]
+    LOAD_ADDR x9, str_replace_tmp_new_var
+    str x4, [x9]
+    
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lprimary_fail
+    
+    // Allocate result and record operation
+    bl _allocate_temp_var
+    mov x23, x0
+    mov x0, #98 // op_str_replace
+    mov x1, x23 // dest
+    mov x2, x28 // source var
+    LOAD_ADDR x9, str_replace_tmp_old_val
+    ldr x3, [x9]
+    LOAD_ADDR x9, str_replace_tmp_new_val
+    ldr x4, [x9]
+    bl _record_operation5
+    cbnz x0, Lprimary_fail
+    
+    mov x25, #0
+    mov x26, #2
+    mov x27, #0
+    mov x28, x23
+    b Lprimary_suffix_loop_start
+
+Lprimary_str_split:
+    // str.split(sep) -> list<str>
+    cmp x26, #2
+    b.ne Lprimary_fail
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lprimary_fail
+    
+    // Parse separator
+    bl _parse_expr_value
+    cbz x0, Lprimary_fail
+    cmp x2, #2
+    b.ne Lprimary_fail
+    LOAD_ADDR x9, str_split_tmp_sep_val
+    str x1, [x9]
+    LOAD_ADDR x9, str_split_tmp_sep_var
+    str x4, [x9]
+    
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lprimary_fail
+    
+    // Allocate result and record operation
+    bl _allocate_temp_var
+    mov x23, x0
+    mov x0, #99 // op_str_split
+    mov x1, x23 // dest
+    mov x2, x28 // source var
+    LOAD_ADDR x9, str_split_tmp_sep_val
+    ldr x3, [x9]
+    LOAD_ADDR x9, str_split_tmp_sep_var
+    ldr x4, [x9]
+    bl _record_operation4
+    cbnz x0, Lprimary_fail
+    
+    mov x25, #0
+    mov x26, #20 // list<str>
+    mov x27, #0
+    mov x28, x23
+    b Lprimary_suffix_loop_start
+
+Lprimary_str_upper:
+    // str.upper() -> str
+    cmp x26, #2
+    b.ne Lprimary_fail
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lprimary_fail
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lprimary_fail
+    
+    // Record operation
+    bl _allocate_temp_var
+    mov x23, x0
+    mov x0, #100 // op_str_upper
+    mov x1, x23 // dest
+    mov x2, x28 // source var
+    bl _record_operation2
+    cbnz x0, Lprimary_fail
+    
+    mov x25, #0
+    mov x26, #2
+    mov x27, #0
+    mov x28, x23
+    b Lprimary_suffix_loop_start
+
+Lprimary_str_lower:
+    // str.lower() -> str
+    cmp x26, #2
+    b.ne Lprimary_fail
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lprimary_fail
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lprimary_fail
+    
+    // Record operation
+    bl _allocate_temp_var
+    mov x23, x0
+    mov x0, #101 // op_str_lower
+    mov x1, x23 // dest
+    mov x2, x28 // source var
+    bl _record_operation2
+    cbnz x0, Lprimary_fail
+    
     mov x25, #0
     mov x26, #2
     mov x27, #0

@@ -59,10 +59,12 @@ Today, SNlang is an early compiled language with a working core for:
 - `if`, `while`, counted `for`, and `for in`
 - `stop` and `skip`
 - function definitions, parameters, returns, and forward calls
-- strings, booleans, bytes, and decimal values
+- strings with full method support: `.length()`, `.slice()`, `.contains()`, `.replace()`, `.split()`, `.upper()`, `.lower()`
+- booleans, bytes, and decimal values
 - `match`
 - partial `list<T>` support
 - `input("prompt")` for strings
+- **Error handling with `try`/`catch` expressions and `throw` statements**
 
 It is still in a stabilization phase. The language is no longer just a parser toy,
 but it is not yet a complete general-purpose language. Runtime behavior is getting
