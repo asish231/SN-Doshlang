@@ -1,7 +1,7 @@
 # snc
 
 <p align="center">
-  <img src="SNicon.png" alt="SNlang Icon">
+  <img src="SNicon.png" alt="SNlang Icon" width="200">
 </p>
 
 **SNlang** (originally named **DOSH lang**, but formally SNlang since it is natively compiled) is a programming language created from scratch in 7 days by its author and creator, **Asish Kumar Sharma**, similar to how the creator of Linux took on a challenge and ended up creating Git.
