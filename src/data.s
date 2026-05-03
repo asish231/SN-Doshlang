@@ -1,6 +1,9 @@
 #include "platform.inc"
 .data
 .global msg_usage
+.global msg_version
+.global version_flag
+.global short_version_flag
 .global msg_open_error
 .global msg_read_error
 .global msg_truncated
@@ -491,6 +494,9 @@
 .global msg_debug_fn
 
 msg_usage:         .asciz "usage: ./snc <source.sn>\n"
+msg_version:       .asciz "SNlang compiler v0.1.1\n"
+version_flag:      .asciz "--version"
+short_version_flag: .asciz "-v"
 msg_open_error:    .asciz "error: could not open "
 msg_read_error:    .asciz "error: failed to read source input\n"
 msg_truncated:     .asciz "warning: source truncated to 65535 bytes\n"

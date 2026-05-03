@@ -32,6 +32,41 @@ _main:
 
 Lmain_have_input:
     ldr x0, [x20, #8]
+    
+    // Check for --version or -v flag
+    mov x21, x0                    // Save filename pointer
+    bl _cstring_length             // Get length of arg
+    cmp x0, #9                     // Length of "--version"
+    b.ne Lcheck_short_version
+    
+    // Check if arg is "--version"
+    mov x0, x21
+    LOAD_ADDR x1, version_flag
+    bl _cstring_equal
+    cbz x0, Lcheck_short_version
+    b Lprint_version
+
+Lcheck_short_version:
+    mov x0, x21
+    bl _cstring_length
+    cmp x0, #2                     // Length of "-v"
+    b.ne Lmain_load_file
+    
+    // Check if arg is "-v"
+    mov x0, x21
+    LOAD_ADDR x1, short_version_flag
+    bl _cstring_equal
+    cbz x0, Lmain_load_file
+
+Lprint_version:
+    LOAD_ADDR x0, msg_version
+    mov x1, #1
+    bl _write_cstr_fd
+    mov w0, #0
+    bl _exit
+
+Lmain_load_file:
+    mov x0, x21
     bl _load_file
     cmp x0, #0
     b.lt Lmain_fail
@@ -227,4 +262,37 @@ _set_source:
     str x0, [x2]
     LOAD_ADDR x2, source_len
     str x1, [x2]
+    ret
+
+// Compare two null-terminated C strings
+// Returns 1 if equal, 0 if not
+// x0 = first string, x1 = second string
+_cstring_equal:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+
+    mov x19, x0        // First string
+    mov x20, x1        // Second string
+
+Lcstring_eq_loop:
+    ldrb w9, [x19]     // Load byte from first
+    ldrb w10, [x20]    // Load byte from second
+    cmp w9, w10
+    b.ne Lcstring_eq_no
+    cbz w9, Lcstring_eq_yes   // If both are null, strings are equal
+    add x19, x19, #1
+    add x20, x20, #1
+    b Lcstring_eq_loop
+
+Lcstring_eq_yes:
+    mov x0, #1
+    b Lcstring_eq_return
+
+Lcstring_eq_no:
+    mov x0, #0
+
+Lcstring_eq_return:
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
     ret
