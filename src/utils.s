@@ -1248,6 +1248,7 @@ _load_and_parse_module_file:
     stp x19, x20, [sp, #-16]!
     stp x21, x22, [sp, #-16]!
     stp x23, x24, [sp, #-16]!
+    stp x25, x26, [sp, #-16]!
 
     mov x19, x0  // file path
 
@@ -1255,6 +1256,15 @@ _load_and_parse_module_file:
     bl _save_parser_state
     mov x20, x0  // saved state
     cbz x20, Lparse_module_fail
+    
+    // Save the current global op_count before loading module
+    // This will be the base offset for module function operations
+    LOAD_ADDR x9, op_count
+    ldr x25, [x9]  // x25 = base op_count before module
+    
+    // Save the current fn_count before loading module
+    LOAD_ADDR x9, fn_count
+    ldr x26, [x9]  // x26 = base fn_count before module
 
     // Read the module into its own heap buffer so we do not clobber the
     // caller's source text stored in the shared global buffer.
@@ -1280,9 +1290,28 @@ _load_and_parse_module_file:
     // Parse the module content
     bl _parse_module_content
     mov x22, x0  // parse result
+    
+    // Get the new fn_count after module parsing
     LOAD_ADDR x9, fn_count
-    ldr x23, [x9]  // preserve functions discovered in the module
+    ldr x23, [x9]  // x23 = new fn_count after module
+    
+    // Adjust fn_op_starts for all module functions to be relative to global op_count
+    // Module functions are at indices x26 to x23-1
+    cmp x26, x23
+    b.ge Lparse_module_adjust_done  // no new functions
+    
+Lparse_module_adjust_loop:
+    // For each module function, add x25 (base op_count) to its fn_op_starts
+    LOAD_ADDR x9, fn_op_starts
+    ldr x24, [x9, x26, lsl #3]  // get current fn_op_starts[fn_idx]
+    add x24, x24, x25          // add base offset
+    str x24, [x9, x26, lsl #3] // store adjusted value
+    
+    add x26, x26, #1           // next function
+    cmp x26, x23
+    b.lt Lparse_module_adjust_loop
 
+Lparse_module_adjust_done:
     // Restore parser state but keep imported function metadata.
     mov x0, x20
     bl _restore_parser_state
@@ -1291,7 +1320,12 @@ _load_and_parse_module_file:
     str x23, [x9]
 
     mov x0, x22  // return parse result
-    b Lparse_module_return
+    ldp x25, x26, [sp], #16
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
 
 Lparse_module_read_error:
     mov x0, x21
