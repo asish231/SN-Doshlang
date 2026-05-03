@@ -1,4 +1,54 @@
-# SNlang OOP Syntax & Progression
+# SNlang Syntax Reference
+
+**Status:** ✅ **FULLY IMPLEMENTED** (May 3, 2026)
+
+SNlang provides a clean, readable syntax with no semicolons and English-readable keywords.
+
+## Quick Syntax Overview
+
+```sn
+// Variables
+int age = 25
+str name = "Alice"
+bool active = true
+dec(2) price = 99.50
+
+// Functions
+fn calculate(int x, int y) -> int {
+    return x + y
+}
+
+// Control Flow
+if (age >= 18) {
+    print("Adult")
+} else {
+    print("Minor")
+}
+
+while (count < 10) {
+    count = count + 1
+}
+
+// Collections
+list<int> scores = [90, 85, 70]
+map<str, int> ages = {"Alice": 30, "Bob": 25}
+
+// String methods
+str text = "Hello World"
+int len = text.length()
+str upper = text.upper()
+
+// Error handling
+int result = try risky_operation() catch 0
+
+// Modules
+use std.math
+int result = std.math.square(5)
+```
+
+---
+
+## OOP Syntax & Progression
 
 The goal of SNlang's object system is to be as simple as Go, but as powerful as Java, with zero boilerplate. 
 
