@@ -1,0 +1,14 @@
+// Main module - tests cross-file module calls
+use test_module_helper
+
+fn main() {
+    // Test calling function from imported module
+    let result = helper_add(3, 4)
+    print(result)
+    
+    // Test another function
+    let msg = helper_greet("SNlang")
+    print(msg)
+    
+    return 0
+}
