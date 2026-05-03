@@ -667,6 +667,8 @@ _emit_operation:
     b.eq Lemit_op_store_var
     cmp x21, #2
     b.eq Lemit_op_print_var
+    cmp x21, #4
+    b.eq Lemit_op_return
     cmp x21, #7
     b.le Lemit_op_store_math_imm
 
@@ -1082,6 +1084,33 @@ Lemit_op_print_var_str:
     mov x1, #1
     bl _write_stack_offset_fd
     LOAD_ADDR x0, asm_print_call_suffix_stack
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_op_done
+
+Lemit_op_return:
+    // Return operation: load return value into x0 and jump to function epilogue
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
+    ldr x0, [x20, x19, lsl #3]
+    // Check if return value is not -1 (void return)
+    cmp x0, #-1
+    b.eq Lemit_op_return_void
+    // Load return value into x0
+    LOAD_ADDR x0, asm_load_x0_var
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_stack_offset_fd
+    LOAD_ADDR x0, asm_close_bracket
+    mov x1, #1
+    bl _write_cstr_fd
+Lemit_op_return_void:
+    // Jump to function epilogue
+    LOAD_ADDR x0, asm_fn_epilogue
     mov x1, #1
     bl _write_cstr_fd
     b Lemit_op_done
@@ -4262,6 +4291,15 @@ _emit_user_function:
 
     mov x19, x0 // fn index
 
+    // Debug: print function index and operation count
+    // LOAD_ADDR x0, debug_emit_fn
+    // mov x1, #1
+    // bl _write_cstr_fd
+    // mov x0, x19
+    // mov x1, #1
+    // bl _write_i64_fd
+    // bl _write_newline_stdout
+
     LOAD_ADDR x0, current_table_id
     add x1, x19, #100
     str x1, [x0]
@@ -4323,6 +4361,7 @@ _emit_user_function:
     LOAD_ADDR x9, fn_op_counts
     ldr x23, [x9, x19, lsl #3] // count
     
+        
     mov x24, #0
 Lemit_fn_ops_loop:
     cmp x24, x23

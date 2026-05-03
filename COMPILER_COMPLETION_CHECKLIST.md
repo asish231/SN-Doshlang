@@ -66,15 +66,15 @@ This document converts the full-system checklist into a concrete status board fo
 - `cast(bool, str)`:                   DONE
 - `cast(dec, str)`:                    DONE
 - String interpolation `{name}`:       DONE
-- String methods (.length .slice etc): MISSING
+- String methods (.length .slice etc): DONE
 - `print()` with newline:              DONE
 - `printn()` without newline:          DONE
 - File I/O (`file_read`, `file_write`): DONE
 - `input("prompt")`:                   DONE
 - `use module.path` (syntax):          DONE
 - `use module.path` (multiple imports): DONE
-- `use module.path` (runtime loading): MISSING
-- Modules / multi-file compilation:    MISSING
+- `use module.path` (runtime loading): DONE
+- Modules / multi-file compilation:    DONE (with known function body emission issue)
 - Object model (`blueprint`, `object`, contracts): MISSING
 - Pointers / allocation / concurrency: DONE (Pointers, alloc, free implemented; concurrency missing)
 
@@ -143,6 +143,6 @@ SNlang v1 is considered complete when all are true:
 - Core language (`int/bool/byte/str/dec/list/map/none/nullable`) is stable
 - Function system supports multi-return and default params
 - Runtime data representations are documented and enforced
-- `use` works across files with symbol resolution
+- ✅ `use` works across files with symbol resolution
 - Diagnostics and tests cover compiler stages and runtime regressions
 - Runs on macOS ARM64 and Linux ARM64

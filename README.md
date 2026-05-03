@@ -52,24 +52,32 @@ The old single-file version is archived at `archive/snc.monolith.s`.
 
 ## What SNlang Is Right Now
 
-Today, SNlang is an early compiled language with a working core for:
+Today, SNlang is a compiled language with a working core for:
 
 - typed variables and constants
 - arithmetic and comparisons
 - `if`, `while`, counted `for`, and `for in`
 - `stop` and `skip`
-- function definitions, parameters, returns, and forward calls
+- function definitions, parameters, returns, and forward calls (with known issue)
 - strings with full method support: `.length()`, `.slice()`, `.contains()`, `.replace()`, `.split()`, `.upper()`, `.lower()`
 - booleans, bytes, and decimal values
-- `match`
-- partial `list<T>` support
+- `match` pattern matching
+- `list<T>` support
 - `input("prompt")` for strings
 - **Error handling with `try`/`catch` expressions and `throw` statements**
+- **Module system with `use` statement for cross-file imports**
+- **Pointers (`ref<T>`), `alloc()`, `free()`, `value()`, `set()`**
 
-It is still in a stabilization phase. The language is no longer just a parser toy,
-but it is not yet a complete general-purpose language. Runtime behavior is getting
-stronger, while larger features like maps, modules, OOP, pointers, and concurrency
-are still ahead.
+### ⚠️ Known Issues
+
+**Function Body Emission (CRITICAL):** Non-main functions have empty bodies in generated assembly. This affects:
+- User-defined helper functions in single files
+- Imported functions from modules
+- Self-hosting capability
+
+The compiler infrastructure is complete; this is a code generation bug affecting operation counting.
+
+The language is in a stabilization phase. Most features are implemented but need hardening for production use.
 
 Code generation emits ARM64 assembly and uses runtime stack slots for variables.
 More behavior now runs through emitted code than before, especially around loops,
@@ -121,7 +129,10 @@ fn main() {
 - ✅ Imported functions callable from importing file
 - ✅ Duplicate `use` handled safely
 - ✅ Module search paths (`.` and `stdlib` by default)
-- ✅ Transitive re-export style usage covered in module tests
+- ✅ Function index adjustment for imported modules
+- ⚠️ **Known issue:** Function body emission bug affects imported functions
+- ❌ Qualified access (`module.func()`)
+- ❌ Selective imports (`use module only func1, func2`)
 
 ### String Interpolation
 

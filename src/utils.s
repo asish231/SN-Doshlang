@@ -24,6 +24,9 @@
  .global _init_default_search_paths
  .global _register_imported_function
  .global _resolve_function_call
+.global _lookup_module_function
+.global _find_module_by_name
+.global _find_function_in_module
  .global _is_imported_function
  .global _cstring_length
  .global _i64_to_cstr
@@ -1719,5 +1722,162 @@ Lresolve_call_imported:
     // x1 already contains module index
 
 Lresolve_call_return:
+    ldp x29, x30, [sp], #16
+    ret
+
+// _lookup_module_function: look up a function in a specific module
+// x0=function_name_ptr, x1=function_name_len, x2=module_name_ptr, x3=module_name_len
+// returns x0=fn_index or 0 if not found
+_lookup_module_function:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    
+    mov x19, x0  // function name ptr
+    mov x20, x1  // function name len
+    mov x21, x2  // module name ptr
+    mov x22, x3  // module name len
+    
+    // Find the module by name
+    mov x0, x21  // module name ptr
+    mov x1, x22  // module name len
+    bl _find_module_by_name
+    cbz x0, Llookup_module_not_found
+    
+    // x0 contains module index, now find function in that module
+    mov x2, x0  // module index
+    mov x0, x19 // function name ptr
+    mov x1, x20 // function name len
+    bl _find_function_in_module
+    // x0 contains function index or 0
+    b Llookup_module_return
+
+Llookup_module_not_found:
+    mov x0, #0  // not found
+    
+Llookup_module_return:
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+// _find_module_by_name: find a module by name
+// x0=module_name_ptr, x1=module_name_len -> x0=module_index or 0 if not found
+_find_module_by_name:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    
+    mov x19, x0  // module name ptr
+    mov x20, x1  // module name len
+    
+    LOAD_ADDR x9, module_count
+    ldr x21, [x9]  // module count
+    mov x22, #0    // index
+    
+Lfind_module_by_name_loop:
+    cmp x22, x21
+    b.ge Lfind_module_by_name_not_found
+    
+    LOAD_ADDR x9, module_names
+    ldr x10, [x9, x22, lsl #3]
+    // For now, assume module names are null-terminated strings
+    // We'll need to get the length
+    mov x11, x10
+    bl _cstring_length
+    mov x11, x0  // length
+    
+    // Compare lengths
+    cmp x11, x20
+    b.ne Lfind_module_by_name_next
+    
+    // Compare names
+    mov x0, x10  // stored name ptr
+    mov x1, x11  // stored name len
+    mov x2, x19  // search name ptr
+    mov x3, x20  // search name len
+    bl _match_span_span
+    cbnz x0, Lfind_module_by_name_found
+    
+Lfind_module_by_name_next:
+    add x22, x22, #1
+    b Lfind_module_by_name_loop
+    
+Lfind_module_by_name_found:
+    mov x0, x22  // return module index
+    b Lfind_module_by_name_return
+    
+Lfind_module_by_name_not_found:
+    mov x0, #0
+    
+Lfind_module_by_name_return:
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+// _find_function_in_module: find a function in a specific module
+// x0=function_name_ptr, x1=function_name_len, x2=module_index -> x0=function_index or 0 if not found
+_find_function_in_module:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    
+    mov x19, x0  // function name ptr
+    mov x20, x1  // function name len
+    mov x21, x2  // module index
+    
+    // Get the function count for this module
+    LOAD_ADDR x9, module_function_counts
+    ldr x22, [x9, x21, lsl #3]  // function count in module
+    mov x23, #0  // index within module
+    
+Lfind_function_in_module_loop:
+    cmp x23, x22
+    b.ge Lfind_function_in_module_not_found
+    
+    // For now, we'll use a simple approach - search all functions
+    // and check if they belong to the specified module
+    LOAD_ADDR x9, fn_count
+    ldr x24, [x9]  // total function count
+    mov x25, #0    // current function index
+    
+Lfind_function_in_module_search_loop:
+    cmp x25, x24
+    b.ge Lfind_function_in_module_not_found
+    
+    // Get function name
+    LOAD_ADDR x9, fn_name_ptrs
+    ldr x10, [x9, x25, lsl #3]
+    LOAD_ADDR x9, fn_name_lens
+    ldr x11, [x9, x25, lsl #3]
+    
+    // Compare lengths
+    cmp x11, x20
+    b.ne Lfind_function_in_module_next
+    
+    // Compare names
+    mov x0, x10  // stored name ptr
+    mov x1, x11  // stored name len
+    mov x2, x19  // search name ptr
+    mov x3, x20  // search name len
+    bl _match_span_span
+    cbnz x0, Lfind_function_in_module_found
+    
+Lfind_function_in_module_next:
+    add x25, x25, #1
+    b Lfind_function_in_module_search_loop
+    
+Lfind_function_in_module_found:
+    mov x0, x25  // return global function index
+    b Lfind_function_in_module_return
+    
+Lfind_function_in_module_not_found:
+    mov x0, #0
+    
+Lfind_function_in_module_return:
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
     ldp x29, x30, [sp], #16
     ret

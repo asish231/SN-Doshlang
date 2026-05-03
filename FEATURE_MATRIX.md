@@ -135,9 +135,13 @@ This file tracks spec vs implementation status.
 | `use module.path` syntax | Yes | DONE | Single and multiple imports work |
 | Dotted module paths | Yes | DONE | `use std.math.advanced` |
 | Module loading tracking | No | DONE | Prevents duplicate loads |
-| Module file loading | Yes | MISSING | Not implemented |
-| Symbol resolution | Yes | MISSING | Imported functions not callable |
+| Module file loading | Yes | DONE | Loads and parses `.sn` files |
+| Symbol resolution | Yes | DONE | Imported functions callable |
+| Module search paths | Yes | DONE | `.` and `stdlib/` default |
+| Function index adjustment | Yes | DONE | utils.s lines 1298-1313 |
 | Standard library | Yes | MISSING | No std.io, std.math etc |
+| Qualified access (`module.func`) | Yes | MISSING | Not implemented |
+| Selective imports | Yes | MISSING | Not implemented |
 
 ---
 

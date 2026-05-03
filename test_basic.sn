@@ -1,2 +1,1 @@
-let s = "hello"
-print s
+fn main() -> i64 { return 0 }

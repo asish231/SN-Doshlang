@@ -2022,6 +2022,15 @@ Lstmt_return_single:
     LOAD_ADDR x9, fn_return_flag
     mov x10, #1
     str x10, [x9]
+    
+    // Record return operation
+    mov x0, #4  // operation code for return
+    mov x1, x1  // return value slot
+    mov x2, #0
+    mov x3, #0
+    mov x4, #0
+    bl _record_operation4
+    
     bl _consume_optional_semicolon
     mov x0, #4 // special return code: return
     b Lstmt_return
@@ -2056,6 +2065,15 @@ Lstmt_return_void:
     str xzr, [x9]
     LOAD_ADDR x9, fn_return_length
     str xzr, [x9]
+    
+    // Record void return operation
+    mov x0, #4  // operation code for return
+    mov x1, #-1 // -1 indicates void return
+    mov x2, #0
+    mov x3, #0
+    mov x4, #0
+    bl _record_operation4
+    
     mov x0, #4 // special return code: return
     b Lstmt_return
 
@@ -6755,6 +6773,66 @@ Lprimary_identifier:
     mov x19, x0
     mov x20, x1
 
+    // Check for module qualified access (module.func)
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, #'.'
+    b.ne Lprimary_check_keywords
+    
+    // Handle module qualified access
+    bl _advance_char  // consume '.'
+    bl _parse_identifier
+    cbz x0, Lprimary_missing
+    mov x21, x19  // save module name
+    mov x22, x20  // save module name length
+    mov x19, x0   // function name
+    mov x20, x1   // function name length
+    
+    // Store module info for later use
+    LOAD_ADDR x9, primary_module_name
+    str x21, [x9]
+    LOAD_ADDR x9, primary_module_name_len
+    str x22, [x9]
+    
+    // Try to resolve as module function
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, #'('
+    b.ne Lprimary_missing  // Must be a function call
+    
+    // Look up the function in the specified module
+    mov x0, x19  // function name
+    mov x1, x20  // function name length
+    mov x2, x21  // module name
+    mov x3, x22  // module name length
+    bl _lookup_module_function
+    cbz x0, Lprimary_missing
+    
+    // Call the module function
+    mov x19, x0  // function index
+    bl _call_function
+    cbnz x0, Lprimary_fail
+    mov x20, x1
+    mov x21, x2
+    LOAD_ADDR x9, fn_return_value
+    ldr x1, [x9]
+    mov x0, #1
+    mov x2, x20
+    cmp x20, #2
+    b.eq Lprimary_fn_call_load_len
+    cmp x20, #18
+    b.eq Lprimary_fn_call_load_len
+    cmp x20, #6
+    b.eq Lprimary_fn_call_load_len
+    cmp x20, #22
+    b.eq Lprimary_fn_call_load_len
+    cmp x20, #4
+    b.eq Lprimary_fn_call_load_len
+    cmp x20, #20
+    b.eq Lprimary_fn_call_load_len
+    b Lprimary_suffix_loop
+
+Lprimary_check_keywords:
     mov x0, x19
     mov x1, x20
     LOAD_ADDR x2, kw_none
@@ -6896,6 +6974,31 @@ Lprimary_none:
 Lprimary_number:
     bl _parse_numeric_literal
     cbz x0, Lprimary_fail
+    // Store literal in a variable slot
+    // x1=value, x2=type, x3=metadata, x4=-1 (no slot yet)
+    cmp x4, #-1
+    b.ne Lprimary_suffix_loop  // Already has a slot
+    // Save registers
+    stp x1, x2, [sp, #-16]!  // save value and type
+    stp x3, x4, [sp, #-16]!  // save metadata and slot
+    // Allocate a new variable slot for the literal
+    mov x0, x1  // value
+    mov x1, x2  // type
+    mov x2, x3  // metadata
+    mov x3, #0  // not const
+    mov x4, #1  // is temp
+    bl _define_variable
+    // Record operation to store the literal
+    mov x21, x0  // save new slot
+    ldp x3, x4, [sp], #16  // restore metadata and slot
+    ldp x1, x2, [sp], #16  // restore value and type
+    mov x0, #1  // store_var operation
+    mov x1, x21  // dest slot
+    mov x2, x1  // value
+    mov x3, #0
+    mov x4, #0
+    bl _record_operation4
+    mov x4, x21  // set slot index
     b Lprimary_suffix_loop
 
 Lprimary_string:
@@ -11227,6 +11330,23 @@ Lparse_fn_body_start:
     ldr x10, [x9, x19, lsl #3]
     LOAD_ADDR x9, current_line
     str x10, [x9]
+    
+    // Debug: print cursor position
+    // stp x10, x19, [sp, #-16]!
+    // LOAD_ADDR x0, msg_debug_fn
+    // mov x1, #2
+    // bl _write_cstr_fd
+    // mov x0, x19
+    // mov x1, #2
+    // bl _write_i64_fd
+    // LOAD_ADDR x0, msg_colon_space
+    // mov x1, #2
+    // bl _write_cstr_fd
+    // mov x0, x10
+    // mov x1, #2
+    // bl _write_i64_fd
+    // bl _write_newline_stdout
+    // ldp x10, x19, [sp], #16
 
     // Parse body loop
 Lparse_fn_body_loop:
@@ -11250,7 +11370,8 @@ Lparse_fn_body_done:
     sub x11, x11, x10
     LOAD_ADDR x9, fn_op_counts
     str x11, [x9, x19, lsl #3]
-
+    
+    
     // Restore scope
     LOAD_ADDR x9, var_count
     str x21, [x9]

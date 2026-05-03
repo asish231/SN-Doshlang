@@ -149,6 +149,8 @@
 .global method_name_storage
 .global hidden_var_name_storage
 .global spawn_capture_fn_id
+.global primary_module_name
+.global primary_module_name_len
 .global spawn_fn_op_counts
 .global spawn_fn_op_kinds
 .global spawn_fn_op_arg0
@@ -484,6 +486,7 @@
 .global var_scope_base
 .global max_var_count
 .global saved_var_count
+.global msg_debug_fn
 
 msg_usage:         .asciz "usage: ./snc <source.sn>\n"
 msg_open_error:    .asciz "error: could not open "
@@ -924,6 +927,8 @@ asm_comment_prefix:
     .asciz "    // "
 msg_fn_body_stub:
     .asciz "function body emission pending fix"
+msg_debug_fn:
+    .asciz "[DEBUG] Function "
 
 asm_bl_prefix:
     .asciz "    bl "
@@ -1434,6 +1439,8 @@ spawn_fn_op_arg1:      .space 65536
 spawn_fn_op_arg2:      .space 65536
 spawn_fn_op_arg3:      .space 65536
 spawn_fn_op_arg4:      .space 65536
+primary_module_name:   .space 8           // Store module name ptr during qualified access
+primary_module_name_len: .space 8         // Store module name length during qualified access
 emit_tbl_kinds:        .space 8
 emit_tbl_arg0:         .space 8
 emit_tbl_arg1:         .space 8

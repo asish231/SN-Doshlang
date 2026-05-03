@@ -1,0 +1,4 @@
+fn getFive() -> int {
+    let x = 5
+    return x
+}

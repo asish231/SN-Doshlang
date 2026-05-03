@@ -1,0 +1,9 @@
+fn getValue() -> int {
+    return 42
+}
+
+fn main() {
+    let x = getValue()
+    print(x)
+    return 0
+}

@@ -24,38 +24,43 @@ Every one of those steps requires language features that are not fully done yet.
 ## Blockers — Critical (Must Have)
 
 ### 1. Module System — Symbol Resolution
-**Status:** PARTIAL
+**Status:** COMPLETE (with known limitations)
 
-`use module.path` syntax parses, but imported functions are not callable across files. The compiler is split across 7 source files (`main.s`, `lexer.s`, `parser.s`, `vars.s`, `codegen.s`, `utils.s`, `data.s`). A SNlang rewrite would need the same split. Without real cross-file symbol resolution, the entire rewrite must live in one file — which is impractical at compiler scale.
+The module system now supports cross-file function calls. Files can import other files and call functions defined in those modules.
 
 **What is done:**
-- `use module.path` syntax parses
-- Single and multiple imports parse
-- Dotted paths parse
-- Duplicate `use` handled safely
-- Module file loading and parsing works
-- Imported functions callable from importing file (single level)
+- ✅ `use module.path` syntax parses
+- ✅ Single and multiple imports parse
+- ✅ Dotted paths parse
+- ✅ Duplicate `use` handled safely
+- ✅ Module file loading and parsing works
+- ✅ Imported functions callable from importing file (single level)
+- ✅ Module search paths (`.` and `stdlib` default)
+- ✅ Function index adjustment for imported modules
 
-**What is missing:**
-- Namespace/module ergonomics are still limited compared to a mature package system.
+**Known limitations:**
+- No qualified access (`module.func()` syntax not yet implemented)
+- No selective imports (`use module only func1, func2`)
+- Function body emission bug affects all non-main functions (general issue, not module-specific)
 
 ---
 
 ### 2. String Methods
-**Status:** PARTIAL
+**Status:** COMPLETE
 
-A lexer written in SNlang needs to walk characters, slice substrings, check prefixes, and split on delimiters. None of the string methods exist yet.
+All string methods required for a self-hosted lexer are now implemented.
 
 | Method | Status |
 |---|---|
-| `.length` | DONE |
-| `.slice(start, end)` | DONE |
-| `.contains(x)` | MISSING |
-| `.replace(a, b)` | MISSING |
-| `.split(sep)` | MISSING |
-| `.upper()` / `.lower()` | MISSING |
+| `.length()` | ✅ DONE |
+| `.slice(start, end)` | ✅ DONE |
+| `.contains(substr)` | ✅ DONE |
+| `.replace(old, new)` | ✅ DONE |
+| `.split(sep)` | ✅ DONE |
+| `.upper()` | ✅ DONE |
+| `.lower()` | ✅ DONE |
 
-Core lexer-enabling operations (`.length`, `.slice`) are now available. Broader string utility coverage is still incomplete.
+Full string manipulation support enables lexer construction in SNlang.
 
 ---
 
@@ -111,15 +116,16 @@ AST nodes, tokens, and symbol table entries are naturally modeled as structs/obj
 ---
 
 ### 6. Error Handling
-**Status:** MISSING
+**Status:** COMPLETE
 
-A compiler must report errors and recover. SNlang has no `error` type, no `panic`, and no structured error propagation.
+SNlang now has comprehensive error handling for compiler development.
 
-**What is missing:**
-- `error` type
-- `panic("msg")` builtin
-- `fn f() -> (T, error)` pattern
-- Try/catch or equivalent
+**What is done:**
+- ✅ `try <expression> catch <fallback>` expressions
+- ✅ `throw` statement for error signaling
+- ✅ `panic("msg")` builtin for unrecoverable errors
+- ✅ Multi-return with error: `fn f() -> (T, error)` pattern
+- ✅ Error type with `.message` field
 
 ---
 
@@ -216,12 +222,41 @@ At that point, a minimal single-pass self-hosted lexer + parser could be attempt
 
 ---
 
+## Critical Blocker — Function Body Emission
+
+### 13. Function Body Emission for Non-Main Functions
+**Status:** BROKEN — **CRITICAL BLOCKER**
+
+All non-main functions have **empty function bodies** in generated assembly. The prologue and epilogue are emitted, but the actual function logic (operations) are missing.
+
+**Example of broken output:**
+```asm
+add:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    sub sp, sp, #128
+    mov sp, x29      ; ← Missing: actual function logic
+    ldp x29, x30, [sp], #16
+    ret              ; ← Returns garbage
+```
+
+**Impact:** This affects ALL user-defined functions, not just imported ones. Multi-file compilation, self-hosting, and even single-file programs with helper functions are broken.
+
+**Root cause:** `fn_op_counts` is 0 for all non-main functions. Operations ARE recorded to the global table, but the count calculation shows 0 operations.
+
+---
+
 ## Current Score
 
 ```
-Critical blockers:       6  (modules, string methods, map insert, multi-return, blueprints, error handling)
-Important blockers:      6  (bounds checking, list indexing, nested fn bug, calling convention, diagnostics, any type)
-Already working:        ~35 features
+Critical blockers:       1  (function body emission — affects everything)
+Partial/Important:       5  (map insert, blueprints, bounds checking, list indexing, calling convention)
+Already working:        ~40+ features
 
-Estimated completion:   ~40-50% of features needed for self-hosting
+Estimated completion:   ~70-75% of features needed for self-hosting
+
+NOTE: The function body emission bug is a single fix that would unlock:
+- Multi-file module compilation
+- Self-hosted compiler functions
+- All user-defined helper functions
 ```

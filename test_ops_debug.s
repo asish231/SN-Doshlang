@@ -1,5 +1,3 @@
-error: unknown statement on line 7: lper
-error: unknown statement on line 9: orted
 .global _main
 .align 4
 .extern _printf
@@ -21,53 +19,17 @@ error: unknown statement on line 9: orted
 _main:
     stp x29, x30, [sp, #-16]!
     mov x29, sp
-    sub sp, sp, #48
-    sub sp, sp, #48
+    sub sp, sp, #16
+    sub sp, sp, #16
+
+.global getFive
+getFive:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    sub sp, sp, #128
     adrp x9, store_val_0@PAGE
     ldr x10, [x9, store_val_0@PAGEOFF]
     stur x10, [x29, #-8]
-    adrp x9, store_val_1@PAGE
-    ldr x10, [x9, store_val_1@PAGEOFF]
-    stur x10, [x29, #-16]
-     bl helper_add
-    adrp x9, store_val_3@PAGE
-    ldr x10, [x9, store_val_3@PAGEOFF]
-    stur x10, [x29, #-24]
-    adrp x0, print_fmt_int@PAGE
-    add x0, x0, print_fmt_int@PAGEOFF
-    ldur x1, [x29, #-24]
-    sub sp, sp, #16
-    str x1, [sp]
-    bl _printf
-    add sp, sp, #16
-    adrp x9, store_val_5@PAGE
-    ldr x10, [x9, store_val_5@PAGEOFF]
-    stur x10, [x29, #-32]
-     bl helper_greet
-    ldur x10, [x29, #-0]
-    stur x10, [x29, #-40]
-    adrp x0, print_fmt_str@PAGE
-    add x0, x0, print_fmt_str@PAGEOFF
-    ldur x1, [x29, #-40]
-    sub sp, sp, #16
-    str x1, [sp]
-    bl _printf
-    add sp, sp, #16
-
-.global helper_add
-helper_add:
-    stp x29, x30, [sp, #-16]!
-    mov x29, sp
-    sub sp, sp, #128
-    mov sp, x29
-    ldp x29, x30, [sp], #16
-    ret
-
-.global helper_greet
-helper_greet:
-    stp x29, x30, [sp, #-16]!
-    mov x29, sp
-    sub sp, sp, #128
     mov sp, x29
     ldp x29, x30, [sp], #16
     ret
@@ -724,16 +686,7 @@ dec_sign_minus:
 .align 3
 .align 3
 store_val_0:
-    .quad 3
-.align 3
-store_val_1:
-    .quad 4
-.align 3
-store_val_3:
-    .quad 0
-.align 3
-store_val_5:
-    .quad 4375271607
+    .quad 5
 .align 3
 list_pool_values:
 list_pool_lengths:

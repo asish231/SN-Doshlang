@@ -574,12 +574,23 @@ Lrecord_operation_common:
     LOAD_ADDR x26, spawn_capture_fn_id
     ldr x26, [x26]
     cmn x26, #1
-    b.ne Lrecord_spawn_op
+    b.eq Lrecord_spawn_op
 #endif
     LOAD_ADDR x23, op_count
     ldr x9, [x23]
     cmp x9, #4096
     b.ge Lrecord_op_full
+
+    // Debug: print operation being recorded
+    // stp x19, x20, [sp, #-16]!
+    // LOAD_ADDR x0, msg_debug_fn
+    // mov x1, #2
+    // bl _write_cstr_fd
+    // mov x0, x9
+    // mov x1, #2
+    // bl _write_i64_fd
+    // bl _write_newline_stdout
+    // ldp x19, x20, [sp], #16
 
     LOAD_ADDR x10, op_kinds
     str x19, [x10, x9, lsl #3]

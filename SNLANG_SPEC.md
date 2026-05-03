@@ -634,9 +634,13 @@ use company.database.postgres
 - ✅ `use module.path` syntax parsing
 - ✅ Single and multiple module imports
 - ✅ Dotted module paths (`use std.math.advanced`)
-- ❌ Actual file loading and parsing (planned)
-- ❌ Symbol resolution (imported functions not yet callable)
-- ❌ Module search paths
+- ✅ Actual file loading and parsing
+- ✅ Symbol resolution (imported functions callable from importing file)
+- ✅ Module search paths (`.` and `stdlib` default)
+- ✅ Function index adjustment for imported module operations
+- ⚠️ **Known issue:** Function body emission bug affects all non-main functions
+- ❌ Qualified access (`module.func()` syntax)
+- ❌ Selective imports (`use module only func1, func2`)
 
 ### Standard Library Imports
 
