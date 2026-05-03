@@ -1,6 +1,8 @@
 # snc
 
-<img src="SNicon.png" alt="SNlang Icon" width="64" height="64">
+<p align="center">
+  <img src="SNicon.png" alt="SNlang Icon">
+</p>
 
 **SNlang** (originally named **DOSH lang**, but formally SNlang since it is natively compiled) is a programming language created from scratch in 7 days by its author and creator, **Asish Kumar Sharma**, similar to how the creator of Linux took on a challenge and ended up creating Git.
 
@@ -54,7 +56,7 @@ Today, SNlang is a compiled language with a working core for:
 - arithmetic and comparisons
 - `if`, `while`, counted `for`, and `for in`
 - `stop` and `skip`
-- function definitions, parameters, returns, and forward calls (with known issue)
+- function definitions, parameters, returns, and forward calls
 - strings with full method support: `.length()`, `.slice()`, `.contains()`, `.replace()`, `.split()`, `.upper()`, `.lower()`
 - booleans, bytes, and decimal values
 - `match` pattern matching
@@ -68,7 +70,7 @@ Today, SNlang is a compiled language with a working core for:
 
 All critical issues have been resolved:
 
-- ✅ Function body emission bug FIXED
+- ✅ Function body emission
 - ✅ Module system fully operational
 - ✅ Map key insertion working (symbol tables)
 - ✅ Variable definitions working
@@ -107,7 +109,7 @@ All critical infrastructure is complete and functional:
 - ✅ Module search paths
 
 **Critical Fixes Completed:**
-- ✅ Function body emission bug FIXED
+- ✅ Function body emission
 - ✅ Map key insertion working (symbol tables)
 - ✅ Variable definitions working
 - ✅ Error handling system implemented
@@ -166,9 +168,9 @@ fn main() {
 - ✅ Duplicate `use` handled safely
 - ✅ Module search paths (`.` and `stdlib` by default)
 - ✅ Function index adjustment for imported modules
-- ⚠️ **Known issue:** Function body emission bug affects imported functions
-- ❌ Qualified access (`module.func()`)
-- ❌ Selective imports (`use module only func1, func2`)
+- ✅ Function body emission
+- ✅ Qualified access (`module.func()`)
+- ✅ Selective imports (`use module only func1, func2`)
 
 ### String Interpolation
 
