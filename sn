@@ -47,7 +47,7 @@ case "$1" in
         ;;
         
     "version"|"--version"|"-v")
-        echo "SNlang CLI v0.1.0"
+        echo "SNlang CLI v0.1.1"
         ;;
         
     *)

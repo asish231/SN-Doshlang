@@ -2,7 +2,7 @@
 
 set -e
 
-VERSION="v0.1.0"
+VERSION="v0.1.1"
 REPO="asish231/SN-Doshlang"
 INSTALL_DIR="/usr/local/bin"
 
