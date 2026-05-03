@@ -1,4 +1,0 @@
-use std.math
-fn main() {
-    print(abs(-5))
-}

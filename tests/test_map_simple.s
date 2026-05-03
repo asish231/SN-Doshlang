@@ -18,9 +18,7 @@ _main:
     stp x29, x30, [sp, #-16]!
     mov x29, sp
     sub sp, sp, #48
-    adrp x0, print_val_4310365799@PAGE
-    add x0, x0, print_val_4310365799@PAGEOFF
-    mov x10, x0
+    ldur x10, [x29, #-0]
     stur x10, [x29, #-16]
     ldur x10, [x29, #-16]
     mov x2, x10
@@ -39,9 +37,7 @@ _main:
     str x1, [sp]
     bl _printf
     add sp, sp, #16
-    adrp x0, print_val_4310365847@PAGE
-    add x0, x0, print_val_4310365847@PAGEOFF
-    mov x10, x0
+    ldur x10, [x29, #-0]
     stur x10, [x29, #-32]
     ldur x10, [x29, #-32]
     mov x2, x10
@@ -87,7 +83,7 @@ dec_sign_minus:
 list_pool_values:
 list_pool_lengths:
 map_pool_keys:
-    .quad 4310365764
+    .quad 4338136676
 map_pool_key_lengths:
     .quad 1
 map_pool_values:

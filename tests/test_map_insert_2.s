@@ -26,6 +26,14 @@ _main:
     str x1, [sp]
     bl _printf
     add sp, sp, #16
+    adrp x0, print_fmt_int@PAGE
+    add x0, x0, print_fmt_int@PAGEOFF
+    adrp x9, print_val_1@PAGE
+    ldr x1, [x9, print_val_1@PAGEOFF]
+    sub sp, sp, #16
+    str x1, [sp]
+    bl _printf
+    add sp, sp, #16
     mov w0, #0
     mov sp, x29
     ldp x29, x30, [sp], #16
@@ -51,7 +59,25 @@ dec_sign_minus:
 .align 3
 .align 3
 print_val_0:
-    .quad 25
+    .quad 100
+.align 3
+print_val_1:
+    .quad 200
+.align 3
+list_pool_values:
+list_pool_lengths:
+map_pool_keys:
+    .quad 4311431836
+    .quad 4311431857
+map_pool_key_lengths:
+    .quad 5
+    .quad 6
+map_pool_values:
+    .quad 100
+    .quad 200
+map_pool_lengths:
+    .quad 0
+    .quad 0
 
 
 .text
@@ -307,6 +333,118 @@ _file_write:
 L_snl_file_write_fail:
     mov x0, #0
 L_snl_file_write_return:
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+.align 4
+.global _cstr_to_int
+_cstr_to_int:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    mov x1, x0
+    mov x0, #0
+    mov x2, #0
+    ldrb w3, [x1]
+    cmp w3, #'-'
+    b.ne L_snl_cstr_to_int_loop
+    mov x2, #1
+    add x1, x1, #1
+L_snl_cstr_to_int_loop:
+    ldrb w3, [x1], #1
+    cbz w3, L_snl_cstr_to_int_done
+    sub w3, w3, #'0'
+    cmp w3, #9
+    b.hi L_snl_cstr_to_int_done
+    mov x4, #10
+    mul x0, x0, x4
+    add x0, x0, x3
+    b L_snl_cstr_to_int_loop
+L_snl_cstr_to_int_done:
+    cbz x2, L_snl_cstr_to_int_ret
+    neg x0, x0
+L_snl_cstr_to_int_ret:
+    ldp x29, x30, [sp], #16
+    ret
+
+.align 4
+.global _runtime_match_span_span
+_runtime_match_span_span:
+    cbz x1, L_rmss_match
+L_rmss_loop:
+    ldrb w9, [x0], #1
+    ldrb w10, [x2], #1
+    cmp w9, w10
+    b.ne L_rmss_fail
+    sub x1, x1, #1
+    cbnz x1, L_rmss_loop
+L_rmss_match:
+    mov x0, #1
+    ret
+L_rmss_fail:
+    mov x0, #0
+    ret
+
+.align 4
+.global _map_lookup
+_map_lookup:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+    stp x25, x26, [sp, #-16]!
+    mov x19, x0
+    mov x20, x1
+    mov x21, x2
+    mov x22, x3
+    mov x23, x4
+    mov x24, #0
+L_map_lookup_loop:
+    cmp x24, x20
+    b.ge L_map_lookup_fail
+    add x25, x19, x24
+    adrp x26, map_pool_keys@PAGE
+    add x26, x26, map_pool_keys@PAGEOFF
+    ldr x9, [x26, x25, lsl #3]
+    cmp x22, #2
+    b.eq L_map_lookup_str
+    cmp x9, x21
+    b.eq L_map_lookup_found
+    b L_map_lookup_next
+L_map_lookup_str:
+    adrp x26, map_pool_key_lengths@PAGE
+    add x26, x26, map_pool_key_lengths@PAGEOFF
+    ldr x10, [x26, x25, lsl #3]
+    cmp x10, x23
+    b.ne L_map_lookup_next
+    mov x0, x9
+    mov x1, x10
+    mov x2, x21
+    bl _runtime_match_span_span
+    cbnz x0, L_map_lookup_found
+L_map_lookup_next:
+    add x24, x24, #1
+    b L_map_lookup_loop
+L_map_lookup_found:
+    adrp x26, map_pool_values@PAGE
+    add x26, x26, map_pool_values@PAGEOFF
+    ldr x19, [x26, x25, lsl #3]
+    adrp x26, map_pool_lengths@PAGE
+    add x26, x26, map_pool_lengths@PAGEOFF
+    ldr x20, [x26, x25, lsl #3]
+    mov x0, x19
+    mov x1, x20
+    mov x2, #1
+    b L_map_lookup_ret
+L_map_lookup_fail:
+    mov x0, #0
+    mov x1, #0
+    mov x2, #0
+L_map_lookup_ret:
+    ldp x25, x26, [sp], #16
+    ldp x23, x24, [sp], #16
     ldp x21, x22, [sp], #16
     ldp x19, x20, [sp], #16
     ldp x29, x30, [sp], #16

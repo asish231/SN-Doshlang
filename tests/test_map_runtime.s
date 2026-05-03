@@ -28,7 +28,7 @@ _main:
     bl _cstring_length
     mov x4, x0
     mov x0, #0
-    mov x1, #1
+    mov x1, #2
     mov x3, #2
     bl _map_lookup
     stur x0, [x29, #-24]
@@ -64,17 +64,21 @@ dec_sign_minus:
 .align 3
 .align 3
 print_val_0:
-    .asciz "hello"
+    .asciz "Bob"
 .align 3
 list_pool_values:
 list_pool_lengths:
 map_pool_keys:
-    .quad 4373870148
+    .quad 4362597988
+    .quad 4362598001
 map_pool_key_lengths:
     .quad 5
+    .quad 3
 map_pool_values:
-    .quad 42
+    .quad 25
+    .quad 30
 map_pool_lengths:
+    .quad 0
     .quad 0
 
 

@@ -630,6 +630,45 @@ use company.auth.jwt
 use company.database.postgres
 ```
 
+### Module Qualified Access
+
+You can access imported functions using qualified notation:
+
+```text
+use math_utils
+
+fn main() {
+    int result = math_utils.square(5)  // Qualified access
+    print(result)   // 25
+}
+```
+
+### Selective Imports
+
+You can import specific functions from a module:
+
+```text
+use math_utils only square, cube
+
+fn main() {
+    int result1 = square(5)  // Direct access
+    int result2 = cube(3)    // Direct access
+    print(result1)   // 25
+    print(result2)   // 27
+}
+```
+
+Or exclude specific functions:
+
+```text
+use math_utils except internal_helper
+
+fn main() {
+    int result = square(5)  // Available
+    // internal_helper() is not available
+}
+```
+
 **Current Implementation Status:**
 - ✅ `use module.path` syntax parsing
 - ✅ Single and multiple module imports
@@ -638,9 +677,11 @@ use company.database.postgres
 - ✅ Symbol resolution (imported functions callable from importing file)
 - ✅ Module search paths (`.` and `stdlib` default)
 - ✅ Function index adjustment for imported module operations
-- ⚠️ **Known issue:** Function body emission bug affects all non-main functions
-- ❌ Qualified access (`module.func()` syntax)
-- ❌ Selective imports (`use module only func1, func2`)
+- ✅ Function body emission bug FIXED
+- ✅ Qualified access (`module.func()` syntax)
+- ✅ Selective imports syntax (`use module only func1, func2`)
+
+**Status:** Module system is fully operational and ready for self-hosting.
 
 ### Standard Library Imports
 

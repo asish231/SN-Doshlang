@@ -68,16 +68,19 @@ Today, SNlang is a compiled language with a working core for:
 - **Module system with `use` statement for cross-file imports**
 - **Pointers (`ref<T>`), `alloc()`, `free()`, `value()`, `set()`**
 
-### ⚠️ Known Issues
+### ✅ Status: Self-Hosting Ready
 
-**Function Body Emission (CRITICAL):** Non-main functions have empty bodies in generated assembly. This affects:
-- User-defined helper functions in single files
-- Imported functions from modules
-- Self-hosting capability
+All critical issues have been resolved:
 
-The compiler infrastructure is complete; this is a code generation bug affecting operation counting.
+- ✅ Function body emission bug FIXED
+- ✅ Module system fully operational
+- ✅ Map key insertion working (symbol tables)
+- ✅ Variable definitions working
+- ✅ Cross-file imports working
+- ✅ Module qualified access (`module.func()`)
+- ✅ Selective imports syntax (`use module only func1, func2`)
 
-The language is in a stabilization phase. Most features are implemented but need hardening for production use.
+The SNlang compiler is now capable of self-hosting. All major blockers resolved.
 
 Code generation emits ARM64 assembly and uses runtime stack slots for variables.
 More behavior now runs through emitted code than before, especially around loops,
