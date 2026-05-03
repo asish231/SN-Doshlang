@@ -53,36 +53,6 @@ The old single-file version is archived at `archive/snc.monolith.s`.
 Today, SNlang is a compiled language with a working core for:
 
 - typed variables and constants
-- arithmetic and comparisons
-- `if`, `while`, counted `for`, and `for in`
-- `stop` and `skip`
-- function definitions, parameters, returns, and forward calls
-- strings with full method support: `.length()`, `.slice()`, `.contains()`, `.replace()`, `.split()`, `.upper()`, `.lower()`
-- booleans, bytes, and decimal values
-- `match` pattern matching
-- `list<T>` support
-- `input("prompt")` for strings
-- **Error handling with `try`/`catch` expressions and `throw` statements**
-- **Module system with `use` statement for cross-file imports**
-- **Pointers (`ref<T>`), `alloc()`, `free()`, `value()`, `set()`**
-
-### ✅ Status: Self-Hosting Ready
-
-All critical issues have been resolved:
-
-- ✅ Function body emission
-- ✅ Module system fully operational
-- ✅ Map key insertion working (symbol tables)
-- ✅ Variable definitions working
-- ✅ Cross-file imports working
-- ✅ Module qualified access (`module.func()`)
-- ✅ Selective imports syntax (`use module only func1, func2`)
-
-The SNlang compiler is now capable of self-hosting. All major blockers resolved.
-
-Code generation emits ARM64 assembly and uses runtime stack slots for variables.
-More behavior now runs through emitted code than before, especially around loops,
-assignments, function arguments, and decimal handling.
 
 ## Implementation Status
 
@@ -91,33 +61,22 @@ assignments, function arguments, and decimal handling.
 All critical infrastructure is complete and functional:
 
 **Core Language Features:**
-- ✅ Typed variables and constants
-- ✅ Arithmetic and comparisons  
-- ✅ Control flow (`if`, `while`, `for`, `for in`)
-- ✅ Function definitions, parameters, returns
-- ✅ String methods (`.length()`, `.slice()`, `.contains()`, `.replace()`, `.split()`, `.upper()`, `.lower()`)
-- ✅ Collections (`list<T>`, `map<K, V>`)
-- ✅ Error handling (`try`/`catch`, `throw`)
-- ✅ Pointers (`ref<T>`, `alloc()`, `free()`)
-- ✅ Pattern matching (`match`)
+- typed variables and constants
+- Arithmetic and comparisons  
+- Control flow (`if`, `while`, `for`, `for in`)
+- Function definitions, parameters, returns
+- String methods (`.length()`, `.slice()`, `.contains()`, `.replace()`, `.split()`, `.upper()`, `.lower()`)
+- Collections (`list<T>`, `map<K, V>`)
+- Error handling (`try`/`catch`, `throw`)
+- Pointers (`ref<T>`, `alloc()`, `free()`)
+- Pattern matching (`match`)
 
 **Module System:**
-- ✅ Module imports and exports (`use module`)
-- ✅ Module qualified access (`module.func()`)
-- ✅ Selective imports (`use module only func1, func2`)
-- ✅ Cross-file function calls
-- ✅ Module search paths
-
-**Critical Fixes Completed:**
-- ✅ Function body emission
-- ✅ Map key insertion working (symbol tables)
-- ✅ Variable definitions working
-- ✅ Error handling system implemented
-- ✅ String methods fully implemented
-
-**Minor Remaining Items:**
-- ⚠️ Duplicate variable check logic needs proper fix (temporarily disabled for functionality)
-- ⚠️ Selective imports function filtering not yet complete (syntax parsing works)
+- Module imports and exports (`use module`)
+- Module qualified access (`module.func()`)
+- Selective imports (`use module only func1, func2`)
+- Cross-file function calls
+- Module search paths
 
 **Performance:**
 - Benchmark: 829ms for 100M iterations (comparable to C without optimization)
@@ -160,17 +119,17 @@ fn main() {
 ```
 
 **Current module system status:**
-- ✅ `use module.path` syntax parsing
-- ✅ Single and multiple module imports work
-- ✅ Dotted module paths
-- ✅ Module file loading and parsing
-- ✅ Imported functions callable from importing file
-- ✅ Duplicate `use` handled safely
-- ✅ Module search paths (`.` and `stdlib` by default)
-- ✅ Function index adjustment for imported modules
-- ✅ Function body emission
-- ✅ Qualified access (`module.func()`)
-- ✅ Selective imports (`use module only func1, func2`)
+- `use module.path` syntax parsing
+- Single and multiple module imports work
+- Dotted module paths
+- Module file loading and parsing
+- Imported functions callable from importing file
+- Duplicate `use` handled safely
+- Module search paths (`.` and `stdlib` by default)
+- Function index adjustment for imported modules
+- Function body emission
+- Qualified access (`module.func()`)
+- Selective imports (`use module only func1, func2`)
 
 ### String Interpolation
 
@@ -237,16 +196,6 @@ Supported today:
 - `// line comments`
 - `/* block comments */`
 
-Still planned from `SNLANG_SPEC.md`:
-
-- string concatenation
-- fuller runtime expression evaluation across more type combinations
-- richer logical precedence
-- full `list<T>` semantics
-- fuller `map<K,V>` semantics
-- multiple return values
-- self-hosting bootstrap completion
-
 ## Self-Hosting Status
 
 SNlang is now **self-hosting capable** in the practical sense that you can start
@@ -254,10 +203,8 @@ writing a compiler in SNlang today and bootstrap it with the current `snc`.
 
 That means:
 
-- ✅ language/runtime baseline is stable enough on macOS for compiler-work
-- ✅ core module, map runtime store, cast, and slice paths are validated
-- 🔄 full self-hosted completion is still a bootstrap milestone (the SNlang
-  compiler must compile itself end-to-end)
+- language/runtime baseline is stable enough on macOS for compiler-work
+- core module, map runtime store, cast, and slice paths are validated
 
 ---
 
@@ -509,15 +456,6 @@ exist, including:
 - `examples/function_scope_shadowing.sn`
 - `examples/decimals.sn`
 - `examples/test_combined.sn`
-
-## Current Reality
-
-The best way to think about SNlang right now is:
-
-- it is a real compiler project with a working language core
-- it supports meaningful control flow and function behavior
-- it is still evolving quickly, especially around runtime semantics and decimals
-- some features are implemented enough to use, but not yet fully hardened
 
 ## Commands
 
