@@ -1340,6 +1340,7 @@ Lparse_module_fail:
     b Lparse_module_return
 
 Lparse_module_return:
+    ldp x25, x26, [sp], #16
     ldp x23, x24, [sp], #16
     ldp x21, x22, [sp], #16
     ldp x19, x20, [sp], #16
