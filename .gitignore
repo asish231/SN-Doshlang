@@ -1,9 +1,12 @@
+# Build outputs
 .build/
-snc
 *.o
-.DS_Store
-.amazonq/rules
-# SSH credentials for scripts/mac_ssh_common.py loaders
-scripts/snc_ssh.env
 
+# System files
+.DS_Store
+
+# Python cache
 scripts/__pycache__/
+
+# SSH credentials (sensitive)
+scripts/snc_ssh.env
