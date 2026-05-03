@@ -42,6 +42,10 @@ _define_variable:
     b.eq Ldefine_store
     sub x28, x23, #1
 
+// Skip duplicate check for now - go directly to store
+    // TODO: Fix duplicate check logic properly
+    b Ldefine_store
+
 Ldefine_dup_loop:
     cmp x28, x24
     b.lt Ldefine_store

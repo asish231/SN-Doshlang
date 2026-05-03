@@ -1,0 +1,15 @@
+fn main() -> i64 {
+    // Test map key insertion for symbol table usage
+    let symbol_table = {}  // Empty map
+    symbol_table["x"] = 42  // Insert new key
+    symbol_table["y"] = 100  // Insert another key
+    
+    print symbol_table["x"]
+    print symbol_table["y"]
+    
+    // Test updating existing key
+    symbol_table["x"] = 999
+    print symbol_table["x"]
+    
+    return 0
+}

@@ -1,0 +1,4 @@
+fn main() -> int {
+    let abc = 42
+    return 0
+}

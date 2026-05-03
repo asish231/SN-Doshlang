@@ -3352,10 +3352,36 @@ Lstmt_decimal_scale_error:
     b Lstmt_return
 
 Lstmt_need_keyword:
+    // Check if this is a map literal starting with {
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, #'{'
+    b.eq Lstmt_map_literal
+    
+    // Check if this is a list literal starting with [
+    cmp w0, #'['
+    b.eq Lstmt_list_literal
+    
     LOAD_ADDR x0, msg_expected_stmt
     bl _report_error_prefix
     bl _write_newline_stderr
     mov x0, #5
+    b Lstmt_return
+
+Lstmt_map_literal:
+    // Parse map literal as an expression statement
+    mov x0, #-1
+    bl _parse_map_literal_value
+    cbz x0, Lstmt_fail
+    mov x0, #0
+    b Lstmt_return
+
+Lstmt_list_literal:
+    // Parse list literal as an expression statement
+    mov x0, #-1
+    bl _parse_list_literal_value
+    cbz x0, Lstmt_fail
+    mov x0, #0
     b Lstmt_return
 
 Lstmt_need_name:
@@ -4717,9 +4743,58 @@ Luse_loop:
     b Luse_loop
 
 Luse_done:
-    bl _consume_optional_semicolon
+    bl _skip_whitespace
+    bl _peek_char
     
-    // Actually load the module
+    // Check for selective imports
+    LOAD_ADDR x2, kw_only
+    mov x0, x19
+    mov x1, x20
+    bl _match_cstr_span
+    cbnz x0, Luse_selective_only
+    
+    LOAD_ADDR x2, kw_except
+    mov x0, x19
+    mov x1, x20
+    bl _match_cstr_span
+    cbnz x0, Luse_selective_except
+    
+    // Regular import - load all
+    bl _consume_optional_semicolon
+    mov x0, x19  // module name ptr
+    mov x1, x20  // module name len
+    bl _load_module
+    cbnz x0, Luse_load_error
+    
+    mov x0, #0
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+Luse_selective_only:
+    // Import only specific functions
+    bl _skip_whitespace
+    // TODO: Parse function list and selectively import
+    // For now, just load the entire module
+    bl _consume_optional_semicolon
+    mov x0, x19  // module name ptr
+    mov x1, x20  // module name len
+    bl _load_module
+    cbnz x0, Luse_load_error
+    
+    mov x0, #0
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+Luse_selective_except:
+    // Import all except specific functions
+    bl _skip_whitespace
+    // TODO: Parse function list and exclude from import
+    // For now, just load the entire module
+    bl _consume_optional_semicolon
     mov x0, x19  // module name ptr
     mov x1, x20  // module name len
     bl _load_module
@@ -11267,9 +11342,13 @@ _parse_function_body:
 
     mov x19, x0 // fn index
 
-    // Save scope base
+    // Save scope base and set new scope base
     LOAD_ADDR x9, var_count
     ldr x21, [x9] // x21 = saved var_count
+    
+    // Set variable scope base to current count (new scope starts here)
+    LOAD_ADDR x9, var_scope_base
+    str x21, [x9]
     
     // Check if it is a method
     LOAD_ADDR x9, fn_blueprint_ids
@@ -11374,6 +11453,10 @@ Lparse_fn_body_done:
     
     // Restore scope
     LOAD_ADDR x9, var_count
+    str x21, [x9]
+    
+    // Restore variable scope base
+    LOAD_ADDR x9, var_scope_base
     str x21, [x9]
 
     ldp x23, x24, [sp], #16

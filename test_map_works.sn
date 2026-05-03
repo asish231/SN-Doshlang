@@ -1,0 +1,5 @@
+fn main() -> int {
+    let m = {"hello": 123}
+    print m["hello"]
+    return 0
+}

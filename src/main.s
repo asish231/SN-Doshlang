@@ -85,6 +85,14 @@ Linit_fn_bp_ids_done:
     LOAD_ADDR x2, var_scope_base
     str x1, [x2]
 
+    // Initialize variable system
+    LOAD_ADDR x9, var_count
+    str xzr, [x9]
+    LOAD_ADDR x9, var_scope_base
+    str xzr, [x9]
+    LOAD_ADDR x9, max_var_count
+    str xzr, [x9]
+    
     // Initialize module system
     bl _init_default_search_paths
 

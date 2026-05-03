@@ -1,0 +1,7 @@
+fn main() -> int {
+    let m = {"x": 42}
+    m["y"] = 100
+    print m["x"]
+    print m["y"]
+    return 0
+}

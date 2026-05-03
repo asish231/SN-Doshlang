@@ -66,6 +66,8 @@
 .global kw_match
 .global kw_default
 .global kw_use
+.global kw_only
+.global kw_except
 .global kw_list
 .global kw_map
 .global kw_length
@@ -556,6 +558,8 @@ kw_cast:           .asciz "cast"
 kw_match:          .asciz "match"
 kw_default:        .asciz "default"
 kw_use:            .asciz "use"
+kw_only:           .asciz "only"
+kw_except:         .asciz "except"
 kw_list:           .asciz "list"
 kw_map:            .asciz "map"
 kw_length:         .asciz "length"
