@@ -1,0 +1,98 @@
+SNlang Custom License (Based on Apache License 2.0)
+
+Copyright 2026 Asish Kumar Sharma
+
+Licensed under the SNlang Custom License (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+---
+
+SNLANG CUSTOM LICENSE ADDENDUM
+
+This license addendum modifies the Apache License 2.0 for the SNlang programming language
+created by Asish Kumar Sharma (the "Creator").
+
+1. CREATOR ATTRIBUTION
+   The SNlang programming language is the sole creation of Asish Kumar Sharma.
+   All credits, ownership, and attribution for the language design, implementation,
+   and concept belong exclusively to Asish Kumar Sharma.
+
+2. REVENUE SHARE PROVISION
+   a) Free Use: SNlang may be used freely for both commercial and non-commercial purposes
+      without any fee for annual revenue up to $100,000 USD.
+   
+   b) Revenue Share: If any individual, company, or entity generates annual revenue
+      exceeding $100,000 USD directly from products or services that substantially
+      incorporate SNlang (including but not limited to: compilers, IDEs, development tools,
+      or commercial applications built primarily using SNlang), a revenue share of 2%
+      shall be paid to Asish Kumar Sharma.
+   
+   c) Revenue Calculation: Revenue share is calculated on gross revenue directly
+      attributable to SNlang-based products or services.
+   
+   d) Payment Terms: Revenue share payments shall be made quarterly within 30 days
+      of quarter end. Detailed accounting records shall be provided upon request.
+
+3. MODIFICATION AND CONTRIBUTION
+   a) Modifications to SNlang source code are permitted and encouraged.
+   
+   b) All modified versions must continue to credit Asish Kumar Sharma as the
+      original creator of SNlang.
+   
+   c) Significant improvements or modifications may be considered for inclusion
+      in the official SNlang project at the Creator's discretion.
+   
+   d) No entity may claim ownership or creation rights to the SNlang language itself,
+   regardless of modifications made.
+
+4. TRADEMARK AND BRANDING
+   a) "SNlang" and associated logos are trademarks of Asish Kumar Sharma.
+   
+   b) Use of SNlang name and branding is permitted for:
+      - Describing compatibility with SNlang
+      - Educational and documentation purposes
+      - Attribution in software using SNlang
+   
+   c) Explicit permission required for:
+      - Using SNlang name in company or product names
+      - Creating derivative language names based on SNlang
+
+5. PATENT RIGHTS
+   a) Subject to the terms and conditions of this License, each Contributor hereby
+      grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free,
+      irrevocable patent license to make, have made, use, offer to sell, sell, import,
+      and otherwise transfer the Work.
+   
+   b) If you institute patent litigation against any entity over a patent that
+      you claim is infringed by the Work, your patent license from such Contributor
+      to the Work ends automatically.
+
+6. NO WARRANTY
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+
+7. LIMITATION OF LIABILITY
+   IN NO EVENT SHALL THE CREATOR OR CONTRIBUTORS BE LIABLE FOR ANY CLAIM,
+   DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+   ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+   DEALINGS IN THE SOFTWARE.
+
+8. CONTACT FOR LICENSE MATTERS
+   For questions about this license, revenue sharing, or commercial use,
+   please contact: [Your contact email]
+
+---
+
+This license balances open source freedom with fair compensation for the Creator's
+intellectual property while ensuring SNlang remains accessible for education,
+research, and small-scale commercial use.
