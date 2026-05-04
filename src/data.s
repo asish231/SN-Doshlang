@@ -494,7 +494,7 @@
 .global msg_debug_fn
 
 msg_usage:         .asciz "usage: ./snc <source.sn>\n"
-msg_version:       .asciz "SNlang compiler v0.1.1\n"
+msg_version:       .asciz "SNlang compiler v0.2.0\n"
 version_flag:      .asciz "--version"
 short_version_flag: .asciz "-v"
 msg_open_error:    .asciz "error: could not open "
