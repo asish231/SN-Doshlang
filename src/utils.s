@@ -1013,7 +1013,7 @@ _load_module:
     b Lload_module_after_parse
 
 Lload_module_no_file:
-    mov x23, #1  // treat missing file as success (module tracked, no symbols)
+    mov x23, #0  // fail - module file not found
 
 Lload_module_after_parse:
     // Free the file path if it was allocated
@@ -1124,6 +1124,7 @@ _free_module_path:
 // 32: op_count
 // 40: print_count
 // 48: fn_count
+// 56: current_line
 
 // _save_parser_state: save current parser state
 // -> x0=state_buffer_ptr
@@ -1132,7 +1133,7 @@ _save_parser_state:
     mov x29, sp
     
     // Allocate state buffer
-    mov x0, #56  // 7 * 8 bytes
+    mov x0, #64  // 8 * 8 bytes
 #ifdef _WIN32
     bl malloc
 #else
@@ -1176,6 +1177,11 @@ _save_parser_state:
     LOAD_ADDR x10, fn_count
     ldr x11, [x10]
     str x11, [x9, #48]
+    
+    // Save current_line
+    LOAD_ADDR x10, current_line
+    ldr x11, [x10]
+    str x11, [x9, #56]
     
     mov x0, x9  // return state buffer
     b Lsave_state_return
@@ -1229,6 +1235,11 @@ _restore_parser_state:
     // Restore fn_count
     ldr x20, [x19, #48]
     LOAD_ADDR x10, fn_count
+    str x20, [x10]
+    
+    // Restore current_line
+    ldr x20, [x19, #56]
+    LOAD_ADDR x10, current_line
     str x20, [x10]
     
     // Free state buffer
@@ -1289,6 +1300,11 @@ _load_and_parse_module_file:
     // Reset cursor to start
     LOAD_ADDR x9, cursor_pos
     str xzr, [x9]
+
+    // Reset current_line to 1 for module parsing
+    LOAD_ADDR x9, current_line
+    mov x10, #1
+    str x10, [x9]
 
     // Parse the module content
     bl _parse_module_content

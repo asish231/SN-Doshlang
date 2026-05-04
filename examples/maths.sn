@@ -1,19 +1,19 @@
 // maths.sn - a custom math package
 // This module defines sin, cos, tan functions
 
-fn sin(x: float64) -> float64 {
+fn sin(dec(2) x) -> dec(2) {
     // In real implementation, this would call the math library
     // For now, we just return a placeholder value
     return 0.0
 }
 
-fn cos(x: float64) -> float64 {
+fn cos(dec(2) x) -> dec(2) {
     // In real implementation, this would call the math library
     // For now, we just return a placeholder value
     return 1.0
 }
 
-fn tan(x: float64) -> float64 {
+fn tan(dec(2) x) -> dec(2) {
     // In real implementation, this would call the math library
     // For now, we just return a placeholder value
     return 0.0

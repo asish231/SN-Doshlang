@@ -1,0 +1,8 @@
+// Main entry point
+use models.task
+use utils.logger
+
+fn main() {
+    log_info("Start")
+    create_task("Test Task")
+}

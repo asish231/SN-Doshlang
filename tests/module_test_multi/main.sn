@@ -1,0 +1,8 @@
+// Main file using logger module
+use logger
+
+fn main() {
+    log_info("Starting app")
+    log_error("Test error")
+    log_info("Done")
+}

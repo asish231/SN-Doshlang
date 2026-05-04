@@ -1,0 +1,5 @@
+use nonexistent
+
+fn main() {
+    print("test")
+}

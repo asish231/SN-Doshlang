@@ -1,0 +1,3 @@
+fn log_info(str msg) {
+    print("test")
+}

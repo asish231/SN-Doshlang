@@ -1,0 +1,5 @@
+use logger
+
+fn main() {
+    log_info("Hello from module")
+}

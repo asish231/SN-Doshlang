@@ -11410,6 +11410,16 @@ Lparse_fn_body_start:
     LOAD_ADDR x9, current_line
     str x10, [x9]
     
+    // Set source (needed for module functions which have different source buffer)
+    LOAD_ADDR x9, fn_source_ptrs
+    ldr x10, [x9, x19, lsl #3]
+    LOAD_ADDR x9, source_ptr
+    str x10, [x9]
+    LOAD_ADDR x9, fn_source_lens
+    ldr x10, [x9, x19, lsl #3]
+    LOAD_ADDR x9, source_len
+    str x10, [x9]
+    
     // Debug: print cursor position
     // stp x10, x19, [sp, #-16]!
     // LOAD_ADDR x0, msg_debug_fn

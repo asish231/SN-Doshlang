@@ -1,0 +1,8 @@
+// Logger module
+fn log_info(str msg) {
+    print(msg)
+}
+
+fn log_error(str msg) {
+    print(msg)
+}

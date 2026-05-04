@@ -3,15 +3,5 @@
 use maths
 
 fn main() {
-    dec(2) angle = 3.14  // example angle in radians
-
-    // Using functions directly from maths package
-    dec(2) sine = maths.sin(angle)
-    dec(2) cosine = maths.cos(angle)
-    dec(2) tangent = maths.tan(angle)
-
-    // This works because we directly imported maths
-    printn(sine)
-    printn(cosine)
-    printn(tangent)
+    sin(3.14)
 }

@@ -1,0 +1,11 @@
+// Task model module
+use utils.logger
+
+fn create_task(str title) -> int {
+    log_info(title)
+    return 1
+}
+
+fn complete_task(int id) {
+    log_info("Done")
+}
