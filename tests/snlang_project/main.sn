@@ -1,0 +1,6 @@
+use utils.math_utils
+
+fn main() {
+    print("Welcome to SNlang!")
+    square(5)
+}
