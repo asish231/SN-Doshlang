@@ -1331,7 +1331,7 @@ _load_and_parse_module_file:
     
 Lparse_module_adjust_loop:
     // For each module function, add x25 (base op_count) to its fn_op_starts
-    LOAD_ADDR x9, fn_op_starts
+    LOAD_TBL x9, fn_op_starts
     ldr x24, [x9, x26, lsl #3]  // get current fn_op_starts[fn_idx]
     add x24, x24, x25          // add base offset
     str x24, [x9, x26, lsl #3] // store adjusted value
@@ -1417,9 +1417,9 @@ Lparse_module_loop:
     cmp x9, x22
     b.le Lparse_module_loop
     sub x9, x9, #1
-    LOAD_ADDR x10, fn_name_ptrs
+    LOAD_TBL x10, fn_name_ptrs
     ldr x0, [x10, x9, lsl #3]
-    LOAD_ADDR x10, fn_name_lens
+    LOAD_TBL x10, fn_name_lens
     ldr x1, [x10, x9, lsl #3]
     mov x2, x9
     bl _register_imported_function
@@ -1924,9 +1924,9 @@ Lfind_function_in_module_search_loop:
     b.ge Lfind_function_in_module_not_found
     
     // Get function name
-    LOAD_ADDR x9, fn_name_ptrs
+    LOAD_TBL x9, fn_name_ptrs
     ldr x10, [x9, x25, lsl #3]
-    LOAD_ADDR x9, fn_name_lens
+    LOAD_TBL x9, fn_name_lens
     ldr x11, [x9, x25, lsl #3]
     
     // Compare lengths

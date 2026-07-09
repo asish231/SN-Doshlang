@@ -428,7 +428,7 @@ Lstmt_spawn_simple:
     bl _lookup_function
     cbz x0, Lstmt_fail
     mov x23, x1
-    LOAD_ADDR x9, fn_param_counts
+    LOAD_TBL x9, fn_param_counts
     ldr x10, [x9, x23, lsl #3]
     cbnz x10, Lstmt_spawn_params_fail
     
@@ -1061,7 +1061,7 @@ Lstmt_let_runtime_expr:
     bl _consume_optional_semicolon
 
     // Compute compile-time value for define_variable
-    LOAD_ADDR x9, var_values
+    LOAD_TBL x9, var_values
     ldr x25, [x9, x21, lsl #3]  // lhs compile-time value
     mov x26, x23
     cbz x24, Lstmt_let_rt_rhs_ready
@@ -2482,11 +2482,11 @@ Lstmt_object_field_store:
     add x16, x16, x13
     LOAD_ADDR x17, object_field_var_idxs
     ldr x16, [x17, x16, lsl #3]
-    LOAD_ADDR x17, var_values
+    LOAD_TBL x17, var_values
     str x9, [x17, x16, lsl #3]
-    LOAD_ADDR x17, var_types
+    LOAD_TBL x17, var_types
     str x10, [x17, x16, lsl #3]
-    LOAD_ADDR x17, var_lengths
+    LOAD_TBL x17, var_lengths
     str x11, [x17, x16, lsl #3]
     cmn x12, #1
     b.eq Lstmt_object_field_record_imm
@@ -2596,11 +2596,11 @@ Lstmt_object_field_compound_common:
     // If rhs came from a slot, load its compile-time value into x9.
     cmn x12, #1
     b.eq Lstmt_object_field_compound_rhs_ready
-    LOAD_ADDR x17, var_values
+    LOAD_TBL x17, var_values
     ldr x9, [x17, x12, lsl #3]
 Lstmt_object_field_compound_rhs_ready:
     // current field compile-time value -> x10
-    LOAD_ADDR x17, var_values
+    LOAD_TBL x17, var_values
     ldr x10, [x17, x16, lsl #3]
     cmp x26, #1
     b.eq Lstmt_ofc_add
@@ -2632,7 +2632,7 @@ Lstmt_ofc_mod:
     msub x11, x17, x9, x10
 Lstmt_ofc_store:
     // store new compile-time value into the field slot
-    LOAD_ADDR x17, var_values
+    LOAD_TBL x17, var_values
     str x11, [x17, x16, lsl #3]
     // record the runtime compound op on var slot x16 (target = target OP rhs)
     cmn x12, #1
@@ -2710,9 +2710,9 @@ Lstmt_index_assign:
     // If rhs comes from var/temp, load concrete value+len now.
     cmn x28, #1
     b.eq Lstmt_index_rhs_ready
-    LOAD_ADDR x12, var_values
+    LOAD_TBL x12, var_values
     ldr x25, [x12, x28, lsl #3]
-    LOAD_ADDR x12, var_lengths
+    LOAD_TBL x12, var_lengths
     ldr x27, [x12, x28, lsl #3]
 Lstmt_index_rhs_ready:
 
@@ -2740,11 +2740,11 @@ Lstmt_index_assign_list:
     ldr x12, [x12]
     cmn x12, #1
     b.eq Lstmt_ial_param_done
-    LOAD_ADDR x13, fn_scope_bases
+    LOAD_TBL x13, fn_scope_bases
     ldr x13, [x13, x12, lsl #3]
     cmp x18, x13
     b.lt Lstmt_ial_param_done
-    LOAD_ADDR x14, fn_param_counts
+    LOAD_TBL x14, fn_param_counts
     ldr x14, [x14, x12, lsl #3]
     add x14, x13, x14
     cmp x18, x14
@@ -2755,7 +2755,7 @@ Lstmt_ial_param_done:
     // Was this local list already runtime-mutated (params are always runtime)?
     mov x17, #0
     cbnz x16, Lstmt_ial_decide
-    LOAD_ADDR x12, list_base_is_runtime
+    LOAD_TBL x12, list_base_is_runtime
     ldrb w17, [x12, x9]
 
 Lstmt_ial_decide:
@@ -2776,9 +2776,9 @@ Lstmt_ial_decide:
     cmp x26, x13
     b.ne Lstmt_type_mismatch
     add x14, x9, x21
-    LOAD_ADDR x15, list_pool_values
+    LOAD_TBL x15, list_pool_values
     str x25, [x15, x14, lsl #3]
-    LOAD_ADDR x15, list_pool_lengths
+    LOAD_TBL x15, list_pool_lengths
     str x27, [x15, x14, lsl #3]
     bl _consume_optional_semicolon
     mov x0, #0
@@ -2789,7 +2789,7 @@ Lstmt_ial_runtime:
     // constant index) resolve against runtime memory instead of the folded
     // literal. (Its element count is already recorded in list_base_counts.)
     cbnz x16, Lstmt_ial_rt_flags
-    LOAD_ADDR x12, list_base_is_runtime
+    LOAD_TBL x12, list_base_is_runtime
     mov w13, #1
     strb w13, [x12, x9]
 
@@ -2861,9 +2861,9 @@ Lstmt_index_assign_map:
     // If key came from a variable, read actual key value+len.
     cmn x24, #1
     b.eq Lstmt_index_map_key_ready
-    LOAD_ADDR x15, var_values
+    LOAD_TBL x15, var_values
     ldr x21, [x15, x24, lsl #3]
-    LOAD_ADDR x15, var_lengths
+    LOAD_TBL x15, var_lengths
     ldr x23, [x15, x24, lsl #3]
 Lstmt_index_map_key_ready:
 
@@ -2873,7 +2873,7 @@ Lstmt_index_map_loop:
     cmp x15, x14
     b.ge Lstmt_index_map_insert_new
     add x16, x9, x15
-    LOAD_ADDR x17, map_pool_keys
+    LOAD_TBL x17, map_pool_keys
     ldr x18, [x17, x16, lsl #3]
 
     cmp x12, #2 // string key?
@@ -2883,27 +2883,39 @@ Lstmt_index_map_loop:
     b Lstmt_index_map_next
 
 Lstmt_index_map_insert_new:
-    // Key not found - insert new key
+    // Key not found - insert new key. Grow the map pool on demand instead of
+    // failing at a fixed cap. x12 (key type) is caller-saved yet used AFTER this
+    // point (the string-key check below), so stash it across the grow call;
+    // _snc_grow_map_pool preserves x19-x28 (so the key/val data in x21/x23/x25/x27
+    // and var name/len in x19/x20 survive) but NOT x9-x18.
     LOAD_ADDR x17, map_pool_count
     ldr x18, [x17]
-    cmp x18, #4096
-    b.ge Lstmt_fail
+    LOAD_ADDR x16, map_pool_capacity
+    ldr x16, [x16]
+    cmp x18, x16
+    b.lt Lstmt_index_map_have_space
+    str x12, [sp, #-16]!
+    bl _snc_grow_map_pool
+    ldr x12, [sp], #16
+    LOAD_ADDR x17, map_pool_count
+    ldr x18, [x17]
+Lstmt_index_map_have_space:
     mov x16, x18 // Use current global count for the new entry
 
-    LOAD_ADDR x17, map_pool_keys
+    LOAD_TBL x17, map_pool_keys
     str x21, [x17, x16, lsl #3]
-    LOAD_ADDR x17, map_pool_key_lengths
+    LOAD_TBL x17, map_pool_key_lengths
     str x23, [x17, x16, lsl #3]
 
     // Store key pointer for string keys
     cmp x12, #2
     b.ne Lstmt_index_map_insert_skip_ptr
-    LOAD_ADDR x17, map_pool_key_ptrs
+    LOAD_TBL x17, map_pool_key_ptrs
     str x21, [x17, x16, lsl #3]
 Lstmt_index_map_insert_skip_ptr:
-    LOAD_ADDR x17, map_pool_values
+    LOAD_TBL x17, map_pool_values
     str x25, [x17, x16, lsl #3]
-    LOAD_ADDR x17, map_pool_lengths
+    LOAD_TBL x17, map_pool_lengths
     str x27, [x17, x16, lsl #3]
 
     LOAD_ADDR x17, map_pool_count
@@ -2926,7 +2938,7 @@ Lstmt_index_map_insert_skip_ptr:
     b Lstmt_index_map_store_done
 
 Lstmt_index_map_cmp_str:
-    LOAD_ADDR x17, map_pool_key_lengths
+    LOAD_TBL x17, map_pool_key_lengths
     ldr x0, [x17, x16, lsl #3]
     cmp x0, x23
     b.ne Lstmt_index_map_next
@@ -2941,9 +2953,9 @@ Lstmt_index_map_next:
     b Lstmt_index_map_loop
 
 Lstmt_index_map_store:
-    LOAD_ADDR x17, map_pool_values
+    LOAD_TBL x17, map_pool_values
     str x25, [x17, x16, lsl #3]
-    LOAD_ADDR x17, map_pool_lengths
+    LOAD_TBL x17, map_pool_lengths
     str x27, [x17, x16, lsl #3]
 Lstmt_index_map_store_done:
     bl _consume_optional_semicolon
@@ -3137,8 +3149,8 @@ Lstmt_method_push:
     bl _expect_char
     cbz x0, Lstmt_fail
     and x12, x11, #0xFFFFFFFF
-    LOAD_ADDR x13, list_pool_values
-    LOAD_ADDR x14, list_pool_lengths
+    LOAD_TBL x13, list_pool_values
+    LOAD_TBL x14, list_pool_lengths
     add x27, x12, #1
     and x11, x11, #0xFFFFFFFF00000000
     orr x11, x11, x27
@@ -3173,9 +3185,9 @@ Lstmt_method_pop:
     and x12, x11, #0xFFFFFFFF
     cmp x12, #0
     b.eq Lstmt_fail
-    LOAD_ADDR x13, list_pool_values
+    LOAD_TBL x13, list_pool_values
     ldr x23, [x13, x12, lsl #3]
-    LOAD_ADDR x14, list_pool_lengths
+    LOAD_TBL x14, list_pool_lengths
     lsr x24, x11, #32
     ldr x25, [x14, x12, lsl #3]
     sub x12, x12, #1
@@ -3327,7 +3339,7 @@ Lstmt_assign_runtime_expr_lookup:
     cbz x0, Lstmt_fail
     mov x27, x4
 
-    LOAD_ADDR x9, var_values
+    LOAD_TBL x9, var_values
     ldr x25, [x9, x21, lsl #3]
     mov x26, x23
     cbz x24, Lstmt_assign_runtime_rhs_ready
@@ -3407,7 +3419,7 @@ Lstmt_assign_runtime_fallback:
     mov x25, x1
     mov x26, x23
     cbz x24, Lstmt_assign_runtime_fallback_rhs_ready
-    LOAD_ADDR x9, var_values
+    LOAD_TBL x9, var_values
     ldr x26, [x9, x23, lsl #3]
 Lstmt_assign_runtime_fallback_rhs_ready:
     cmp x22, #1
@@ -3531,7 +3543,7 @@ Lstmt_assign_compound_after_op:
     mov x24, x1 // rhs immediate value, or placeholder until rhs var load
     cmn x27, #1
     b.eq Lstmt_assign_compound_rhs_ready
-    LOAD_ADDR x9, var_values
+    LOAD_TBL x9, var_values
     ldr x24, [x9, x27, lsl #3]
 Lstmt_assign_compound_rhs_ready:
     cmp x21, #1
@@ -4154,7 +4166,7 @@ Lif_cond_no_close:
     LOAD_ADDR x9, fn_exec_depth
     ldr x23, [x9]
     cbz x23, Lif_body_loop
-    LOAD_ADDR x9, var_values
+    LOAD_TBL x9, var_values
     ldr x23, [x9, x19, lsl #3] // compile-time condition value
     cbz x23, Lif_skip_then_body
 
@@ -4944,7 +4956,7 @@ Lfor_in_no_close:
     // Integer/scalar lists always use the runtime loop below.
     cmp x21, #2
     b.ne Lfor_in_use_runtime_loop
-    LOAD_ADDR x9, list_base_is_runtime
+    LOAD_TBL x9, list_base_is_runtime
     ldrb w9, [x9, x19]
     cbz w9, Lfor_in_iteration
 
@@ -4980,9 +4992,9 @@ Lfor_in_str_iter:
     str x0, [x9]
 
     add x9, x19, x26
-    LOAD_ADDR x10, list_pool_values
+    LOAD_TBL x10, list_pool_values
     ldr x27, [x10, x9, lsl #3]
-    LOAD_ADDR x10, list_pool_lengths
+    LOAD_TBL x10, list_pool_lengths
     ldr x28, [x10, x9, lsl #3]
 
     mov x0, x24
@@ -5201,11 +5213,11 @@ _emit_for_in_runtime_loop:
     ldr x9, [x9]
     cmn x9, #1
     b.eq Lforr_param_stored     // not inside a function
-    LOAD_ADDR x10, fn_scope_bases
+    LOAD_TBL x10, fn_scope_bases
     ldr x10, [x10, x9, lsl #3]
     cmp x28, x10
     b.lt Lforr_param_stored     // slot < scope base -> not a param
-    LOAD_ADDR x11, fn_param_counts
+    LOAD_TBL x11, fn_param_counts
     ldr x11, [x11, x9, lsl #3]
     add x11, x10, x11
     cmp x28, x11
@@ -5247,7 +5259,7 @@ Lforr_loopvar_found:
     cbnz x9, Lforr_cnt_param
     // Runtime-count local list (e.g. a str.split result held in a local)?
     ldr x0, [sp, #16]           // base_ct
-    LOAD_ADDR x9, list_base_is_runtime
+    LOAD_TBL x9, list_base_is_runtime
     ldrb w9, [x9, x0]
     cbnz w9, Lforr_cnt_rtlocal
     ldr x0, [sp, #24]           // compile-time count
@@ -5490,11 +5502,25 @@ Llist_check_type:
     b.ne Llist_fail
 
 Llist_store:
+    // Grow the list pool on demand if it is full before pushing this element.
+    // x20 (base) and x21 (local elem counter) are callee-saved and survive
+    // _snc_grow_list_pool (which saves x19-x24 and leaves x25-x28 untouched), as
+    // do x22 (elem type), x23 (value) and x25 (length). After the check the code
+    // below RE-LOADS list_pool_count and the pool base via LOAD_TBL so it always
+    // sees the current (possibly moved) buffer -- do NOT cache a base across grow.
     LOAD_ADDR x9, list_pool_count
     ldr x10, [x9]
-    LOAD_ADDR x11, list_pool_values
+    LOAD_ADDR x11, list_pool_capacity
+    ldr x11, [x11]
+    cmp x10, x11
+    b.lt Llist_store_have_space
+    bl _snc_grow_list_pool
+Llist_store_have_space:
+    LOAD_ADDR x9, list_pool_count
+    ldr x10, [x9]
+    LOAD_TBL x11, list_pool_values
     str x23, [x11, x10, lsl #3]
-    LOAD_ADDR x11, list_pool_lengths
+    LOAD_TBL x11, list_pool_lengths
     str x25, [x11, x10, lsl #3]
     add x10, x10, #1
     str x10, [x9]
@@ -5518,7 +5544,7 @@ Llist_done:
     // runtime .length() on a list PARAMETER can read list_base_counts[base]
     // (the param carries the pool base as its runtime value). x20=base,
     // x21=count.
-    LOAD_ADDR x9, list_base_counts
+    LOAD_TBL x9, list_base_counts
     str x21, [x9, x20, lsl #3]
     mov x0, #1
     mov x1, x20 // list start index
@@ -5605,15 +5631,27 @@ Lmap_set_types:
     orr x22, x22, x27
 
 Lmap_store:
+    // Grow the map pool on demand if it is full before storing this entry. The
+    // grow routine saves x19-x24 and never touches x25-x28, so the live base/
+    // count/metadata (x20-x22) and key/val data (x23-x28) all survive. The code
+    // below RE-LOADS map_pool_count and the pool base via LOAD_TBL.
     LOAD_ADDR x9, map_pool_count
     ldr x10, [x9]
-    LOAD_ADDR x11, map_pool_keys
+    LOAD_ADDR x11, map_pool_capacity
+    ldr x11, [x11]
+    cmp x10, x11
+    b.lt Lmap_store_have_space
+    bl _snc_grow_map_pool
+Lmap_store_have_space:
+    LOAD_ADDR x9, map_pool_count
+    ldr x10, [x9]
+    LOAD_TBL x11, map_pool_keys
     str x23, [x11, x10, lsl #3]
-    LOAD_ADDR x11, map_pool_key_lengths
+    LOAD_TBL x11, map_pool_key_lengths
     str x25, [x11, x10, lsl #3]
-    LOAD_ADDR x11, map_pool_values
+    LOAD_TBL x11, map_pool_values
     str x26, [x11, x10, lsl #3]
-    LOAD_ADDR x11, map_pool_lengths
+    LOAD_TBL x11, map_pool_lengths
     str x28, [x11, x10, lsl #3] 
     
     add x10, x10, #1
@@ -6100,13 +6138,13 @@ Lcmpv_parse_right:
     mov x25, x20                // left value
     cmn x19, #1
     b.eq Lcmpv_left_ready
-    LOAD_ADDR x9, var_values
+    LOAD_TBL x9, var_values
     ldr x25, [x9, x19, lsl #3]
 Lcmpv_left_ready:
     mov x26, x23                // right value
     cmn x22, #1
     b.eq Lcmpv_right_ready
-    LOAD_ADDR x9, var_values
+    LOAD_TBL x9, var_values
     ldr x26, [x9, x22, lsl #3]
 Lcmpv_right_ready:
     cmp x21, #0
@@ -6147,7 +6185,7 @@ Lcmpv_eval_le:
     cmp x25, x26
     cset x26, le
 Lcmpv_store_eval:
-    LOAD_ADDR x9, var_values
+    LOAD_TBL x9, var_values
     str x26, [x9, x24, lsl #3]
 
     cmn x22, #1                 // right immediate?
@@ -6170,7 +6208,7 @@ Lcmpv_emit_imm:
     cbnz x0, Lcmpv_fail
 
 Lcmpv_result:
-    LOAD_ADDR x9, var_values
+    LOAD_TBL x9, var_values
     ldr x1, [x9, x24, lsl #3]   // x1 = compile-time truth value (0/1)
     mov x0, #1
     mov x2, #1                  // type = bool
@@ -6653,7 +6691,7 @@ _parse_condition_value:
     mov x19, x1
     bl _allocate_temp_var
     mov x22, x0
-    LOAD_ADDR x9, var_values
+    LOAD_TBL x9, var_values
     ldr x10, [x9, x19, lsl #3]
     cmp x10, #0
     cset x10, eq
@@ -6732,7 +6770,7 @@ Lcond_logic_and:
     mov x20, x1
     bl _allocate_temp_var
     mov x22, x0
-    LOAD_ADDR x9, var_values
+    LOAD_TBL x9, var_values
     ldr x10, [x9, x19, lsl #3]
     ldr x11, [x9, x20, lsl #3]
     cmp x10, #0
@@ -6758,7 +6796,7 @@ Lcond_logic_or:
     mov x20, x1
     bl _allocate_temp_var
     mov x22, x0
-    LOAD_ADDR x9, var_values
+    LOAD_TBL x9, var_values
     ldr x10, [x9, x19, lsl #3]
     ldr x11, [x9, x20, lsl #3]
     orr x10, x10, x11
@@ -7035,13 +7073,13 @@ Lcond_emit_op:
     mov x25, x20
     cmn x19, #1
     b.eq Lcond_left_ready
-    LOAD_ADDR x9, var_values
+    LOAD_TBL x9, var_values
     ldr x25, [x9, x19, lsl #3]
 Lcond_left_ready:
     mov x26, x23
     cmn x22, #1
     b.eq Lcond_right_ready
-    LOAD_ADDR x9, var_values
+    LOAD_TBL x9, var_values
     ldr x26, [x9, x22, lsl #3]
 Lcond_right_ready:
     cmp x21, #0
@@ -7082,7 +7120,7 @@ Lcond_eval_le:
     cmp x25, x26
     cset x26, le
 Lcond_store_eval:
-    LOAD_ADDR x9, var_values
+    LOAD_TBL x9, var_values
     str x26, [x9, x24, lsl #3]
 
     cmn x22, #1 // right var slot == -1 means immediate
@@ -7563,7 +7601,7 @@ Lprimary_unary_minus_rt:
     bl _allocate_temp_var
     mov x22, x0                   // destination slot
     neg x19, x19
-    LOAD_ADDR x9, var_values
+    LOAD_TBL x9, var_values
     str x19, [x9, x22, lsl #3]
     mov x0, #29                   // op 29: target = var - var
     mov x1, x22
@@ -7789,7 +7827,7 @@ Lprimary_list_length_val:
     // Runtime-count list (e.g. a str.split result): its element count is only
     // known at run time in list_base_counts[base]. The base is a compile-time
     // immediate held in x25; materialize it into a slot and emit op 81.
-    LOAD_ADDR x9, list_base_is_runtime
+    LOAD_TBL x9, list_base_is_runtime
     ldrb w9, [x9, x25]
     cbz w9, Lprimary_list_length_check_param
     mov x0, x25
@@ -7821,11 +7859,11 @@ Lprimary_list_length_check_param:
     ldr x9, [x9]
     cmn x9, #1
     b.eq Lprimary_list_length_fold
-    LOAD_ADDR x10, fn_scope_bases
+    LOAD_TBL x10, fn_scope_bases
     ldr x10, [x10, x9, lsl #3]
     cmp x28, x10
     b.lt Lprimary_list_length_fold
-    LOAD_ADDR x11, fn_param_counts
+    LOAD_TBL x11, fn_param_counts
     ldr x11, [x11, x9, lsl #3]
     add x11, x10, x11
     cmp x28, x11
@@ -8177,18 +8215,28 @@ Lprimary_str_split:
     cbz x0, Lprimary_fail
 
     // Reserve a 64-element block in the list pool; base = current pool count.
+    // GROW the pool (realloc-double) until it can hold base+64 elements instead
+    // of hard-failing at a fixed cap. x23 (base) is callee-saved and preserved
+    // across _snc_grow_list_pool (which saves x19-x24). The list_base_is_runtime/
+    // list_base_counts writes below use LOAD_TBL so they see the current buffer.
     LOAD_ADDR x9, list_pool_count
     ldr x23, [x9]              // base
-    add x10, x23, #64          // reserve capacity 64
-    mov x11, #4096             // pool holds 4096 elements
+Lsplit_reserve_grow:
+    add x10, x23, #64          // need capacity for base+64 elements
+    LOAD_ADDR x9, list_pool_capacity
+    ldr x11, [x9]
     cmp x10, x11
-    b.gt Lprimary_fail         // out of pool space
+    b.le Lsplit_reserve_ok
+    bl _snc_grow_list_pool
+    b Lsplit_reserve_grow
+Lsplit_reserve_ok:
+    LOAD_ADDR x9, list_pool_count
     str x10, [x9]
     // Flag this base as a runtime-count list and zero its runtime count.
-    LOAD_ADDR x9, list_base_is_runtime
+    LOAD_TBL x9, list_base_is_runtime
     mov w11, #1
     strb w11, [x9, x23]
-    LOAD_ADDR x9, list_base_counts
+    LOAD_TBL x9, list_base_counts
     str xzr, [x9, x23, lsl #3]
 
     // Record op 99: arg0=base, arg1=source var, arg2=sep var (bit63), arg3=0.
@@ -8521,8 +8569,8 @@ Lprimary_member_push:
     bl _expect_char
     cbz x0, Lprimary_fail
     and x9, x27, #0xFFFFFFFF
-    LOAD_ADDR x10, list_pool_values
-    LOAD_ADDR x11, list_pool_lengths
+    LOAD_TBL x10, list_pool_values
+    LOAD_TBL x11, list_pool_lengths
     add x12, x9, #1
     and x27, x27, #0xFFFFFFFF00000000
     orr x27, x27, x12
@@ -8553,9 +8601,9 @@ Lprimary_member_pop:
     cmp x9, #0
     b.eq Lprimary_fail
     sub x9, x9, #1
-    LOAD_ADDR x10, list_pool_values
+    LOAD_TBL x10, list_pool_values
     ldr x25, [x10, x9, lsl #3]
-    LOAD_ADDR x11, list_pool_lengths
+    LOAD_TBL x11, list_pool_lengths
     lsr x26, x27, #32
     ldr x27, [x11, x9, lsl #3]
     add x12, x9, #1
@@ -8592,8 +8640,8 @@ Lprimary_member_contains:
 
 Lprimary_list_contains:
     and x9, x27, #0xFFFFFFFF
-    LOAD_ADDR x10, list_pool_values
-    LOAD_ADDR x11, list_pool_lengths
+    LOAD_TBL x10, list_pool_values
+    LOAD_TBL x11, list_pool_lengths
     lsr x23, x27, #32
     mov x24, #0
 Llist_contains_loop:
@@ -8630,16 +8678,16 @@ Lprimary_map_contains:
 Lmap_contains_loop:
     cmp x24, x9
     b.ge Lmap_contains_not_found
-    LOAD_ADDR x10, map_pool_keys
+    LOAD_TBL x10, map_pool_keys
     ldr x28, [x10, x24, lsl #3]
-    LOAD_ADDR x11, map_pool_key_lengths
+    LOAD_TBL x11, map_pool_key_lengths
     ldr x25, [x11, x24, lsl #3]
     cmp x23, x20
     b.ne Lmap_contains_next
     cbz x20, Lmap_contains_int_cmp
     cmp x25, x21
     b.ne Lmap_contains_next
-    LOAD_ADDR x10, map_pool_key_ptrs
+    LOAD_TBL x10, map_pool_key_ptrs
     ldr x28, [x10, x24, lsl #3]
     mov x0, x28
     mov x1, x25
@@ -8696,16 +8744,16 @@ Lprimary_member_has:
 Lmap_has_loop:
     cmp x24, x9
     b.ge Lmap_has_not_found
-    LOAD_ADDR x10, map_pool_keys
+    LOAD_TBL x10, map_pool_keys
     ldr x28, [x10, x24, lsl #3]
-    LOAD_ADDR x11, map_pool_key_lengths
+    LOAD_TBL x11, map_pool_key_lengths
     ldr x25, [x11, x24, lsl #3]
     cmp x23, x20
     b.ne Lmap_has_next
     cbz x20, Lmap_has_int_cmp
     cmp x25, x21
     b.ne Lmap_has_next
-    LOAD_ADDR x10, map_pool_key_ptrs
+    LOAD_TBL x10, map_pool_key_ptrs
     ldr x28, [x10, x24, lsl #3]
     mov x0, x28
     mov x1, x25
@@ -8820,11 +8868,11 @@ Lprimary_indexing:
     ldr x9, [x9]
     cmn x9, #1
     b.eq Lprimary_list_index_source_ready
-    LOAD_ADDR x10, fn_scope_bases
+    LOAD_TBL x10, fn_scope_bases
     ldr x10, [x10, x9, lsl #3]
     cmp x28, x10
     b.lt Lprimary_list_index_source_ready
-    LOAD_ADDR x11, fn_param_counts
+    LOAD_TBL x11, fn_param_counts
     ldr x11, [x11, x9, lsl #3]
     add x11, x10, x11
     cmp x28, x11
@@ -8837,7 +8885,7 @@ Lprimary_list_index_source_ready:
     // If the local list was runtime-mutated (op 109 store), resolve reads against
     // runtime memory even for a constant index, so prior element writes are seen.
     cbnz x20, Lprimary_list_index_rtflag_done
-    LOAD_ADDR x9, list_base_is_runtime
+    LOAD_TBL x9, list_base_is_runtime
     ldrb w9, [x9, x25]
     cbnz w9, Lprimary_list_index_runtime
 Lprimary_list_index_rtflag_done:
@@ -8963,9 +9011,9 @@ Lprimary_str_index_arg_ready:
     b Lprimary_suffix_loop_start
 
     Lprimary_list_index_load_pool:
-    LOAD_ADDR x11, list_pool_values
+    LOAD_TBL x11, list_pool_values
     ldr x25, [x11, x10, lsl #3]
-    LOAD_ADDR x11, list_pool_lengths
+    LOAD_TBL x11, list_pool_lengths
     ldr x9, [x11, x10, lsl #3]
     lsr x26, x27, #32 // element type from metadata
     mov x27, x9 // element length
@@ -8986,7 +9034,7 @@ Lprimary_map_lookup_val:
     mov x22, #0 // loop counter
 Lmap_lookup_loop_val:
     add x10, x25, x22
-    LOAD_ADDR x11, map_pool_keys
+    LOAD_TBL x11, map_pool_keys
     ldr x12, [x11, x10, lsl #3]
 
     // If it's a string, we need to compare using _match_span_span
@@ -8999,7 +9047,7 @@ Lmap_lookup_loop_val:
     b Lmap_lookup_next_val
 
 Lmap_lookup_str_val:
-    LOAD_ADDR x11, map_pool_key_lengths
+    LOAD_TBL x11, map_pool_key_lengths
     ldr x13, [x11, x10, lsl #3]
     // x12=pool ptr, x13=pool len, x23=lookup ptr, x21=lookup len
     cmp x13, x21
@@ -9081,9 +9129,9 @@ Lprimary_map_lookup_runtime_emit:
 Lmap_lookup_found_val:
 
     add x10, x25, x22 // restore x10 just in case
-    LOAD_ADDR x11, map_pool_values
+    LOAD_TBL x11, map_pool_values
     ldr x25, [x11, x10, lsl #3]
-    LOAD_ADDR x11, map_pool_lengths
+    LOAD_TBL x11, map_pool_lengths
     ldr x9, [x11, x10, lsl #3]
     ubfx x26, x27, #32, #8 // val_type
     mov x27, x9 // val length
@@ -9447,7 +9495,7 @@ Lprimary_interp_prefix_concat:
 Lprimary_interp_expr_start:
     // Update cursor to just after '{'
     add x23, x23, #1
-    LOAD_ADDR x9, buffer
+    LOAD_TBL x9, buffer
     mov x10, x9
     sub x11, x19, x10
     add x11, x11, x23
@@ -9517,7 +9565,7 @@ Lprimary_interp_update_offset:
     // x21 must be the new offset relative to x19 (the string content start).
     LOAD_ADDR x9, cursor_pos
     ldr x11, [x9]              // x11 = current cursor offset from buffer base
-    LOAD_ADDR x9, buffer
+    LOAD_TBL x9, buffer
     sub x10, x19, x9           // x10 = offset of string content start from buffer base
     sub x21, x11, x10          // x21 = cursor offset relative to string content start
     b Lprimary_interp_loop
@@ -9558,7 +9606,7 @@ Lprimary_interp_last_concat:
 
 Lprimary_interp_done:
     // Restore cursor past the entire literal (content + closing quote)
-    LOAD_ADDR x9, buffer
+    LOAD_TBL x9, buffer
     mov x10, x9
     sub x11, x19, x10
     add x11, x11, x20
@@ -10952,17 +11000,21 @@ Lfn_def_name_ready:
     b Lfn_def_after_name
 
 Lfn_def_new:
-    // Check fn table not full
+    // Grow the malloc-backed fn tables on demand.
     LOAD_ADDR x9, fn_count
     ldr x21, [x9]
-    cmp x21, #SNC_MAX_FUNCS
-    b.ge Lfn_def_full
+    LOAD_ADDR x10, fn_capacity
+    ldr x10, [x10]
+    cmp x21, x10
+    b.lt Lfn_def_have_space
+    bl _snc_grow_fns
+Lfn_def_have_space:
     mov x26, #0
 
     // Store name
-    LOAD_ADDR x9, fn_name_ptrs
+    LOAD_TBL x9, fn_name_ptrs
     str x19, [x9, x21, lsl #3]
-    LOAD_ADDR x9, fn_name_lens
+    LOAD_TBL x9, fn_name_lens
     str x20, [x9, x21, lsl #3]
 
 Lfn_def_after_name:
@@ -11018,9 +11070,9 @@ Lfn_def_parse_param:
     mov x9, x21
     lsl x9, x9, #2
     add x9, x9, x22
-    LOAD_ADDR x10, fn_param_name_ptrs
+    LOAD_TBL x10, fn_param_name_ptrs
     str x23, [x10, x9, lsl #3]
-    LOAD_ADDR x10, fn_param_name_lens
+    LOAD_TBL x10, fn_param_name_lens
     str x24, [x10, x9, lsl #3]
     bl _advance_char            // consume ':'
     bl _skip_whitespace
@@ -11031,9 +11083,9 @@ Lfn_def_parse_param:
     mov x9, x21
     lsl x9, x9, #2
     add x9, x9, x22
-    LOAD_ADDR x10, fn_param_types
+    LOAD_TBL x10, fn_param_types
     str x25, [x10, x9, lsl #3]
-    LOAD_ADDR x10, fn_param_lengths
+    LOAD_TBL x10, fn_param_lengths
     str x24, [x10, x9, lsl #3]
     b Lfn_def_param_done
 
@@ -11055,9 +11107,9 @@ Lfn_def_param_store_type:
     mov x9, x21
     lsl x9, x9, #2         // fn_idx * 4
     add x9, x9, x22        // + param_idx
-    LOAD_ADDR x10, fn_param_types
+    LOAD_TBL x10, fn_param_types
     str x25, [x10, x9, lsl #3]
-    LOAD_ADDR x10, fn_param_lengths
+    LOAD_TBL x10, fn_param_lengths
     str x24, [x10, x9, lsl #3]
 
     // Parse param name
@@ -11071,9 +11123,9 @@ Lfn_def_param_store_type:
     mov x9, x21
     lsl x9, x9, #2
     add x9, x9, x22
-    LOAD_ADDR x10, fn_param_name_ptrs
+    LOAD_TBL x10, fn_param_name_ptrs
     str x23, [x10, x9, lsl #3]
-    LOAD_ADDR x10, fn_param_name_lens
+    LOAD_TBL x10, fn_param_name_lens
     str x24, [x10, x9, lsl #3]
 Lfn_def_param_done:
     // Optional default value: type name = expr
@@ -11090,7 +11142,7 @@ Lfn_def_param_done:
     mov x9, x21
     lsl x9, x9, #2
     add x9, x9, x22
-    LOAD_ADDR x10, fn_param_lengths
+    LOAD_TBL x10, fn_param_lengths
     ldr x14, [x10, x9, lsl #3]
     cmp x25, #16
     b.ge Lfn_def_param_default_nullable
@@ -11125,14 +11177,14 @@ Lfn_def_param_default_check_scale:
     cmp x13, x14
     b.ne Lfn_def_fail
 Lfn_def_param_default_store:
-    LOAD_ADDR x10, fn_param_default_flags
+    LOAD_TBL x10, fn_param_default_flags
     mov x14, #1
     str x14, [x10, x9, lsl #3]
-    LOAD_ADDR x10, fn_param_default_values
+    LOAD_TBL x10, fn_param_default_values
     str x11, [x10, x9, lsl #3]
-    LOAD_ADDR x10, fn_param_default_types
+    LOAD_TBL x10, fn_param_default_types
     str x12, [x10, x9, lsl #3]
-    LOAD_ADDR x10, fn_param_default_lengths
+    LOAD_TBL x10, fn_param_default_lengths
     str x13, [x10, x9, lsl #3]
 
 Lfn_def_param_next:
@@ -11144,7 +11196,7 @@ Lfn_def_params_done:
     bl _advance_char // consume ')'
 
     // Store param count
-    LOAD_ADDR x9, fn_param_counts
+    LOAD_TBL x9, fn_param_counts
     str x22, [x9, x21, lsl #3]
 Lfn_def_count_done:
 
@@ -11198,26 +11250,26 @@ Lfn_def_tuple_return:
     mov x11, x13
     mov x12, x14
 Lfn_def_store_ret:
-    LOAD_ADDR x9, fn_return_types
+    LOAD_TBL x9, fn_return_types
     str x25, [x9, x21, lsl #3]
-    LOAD_ADDR x9, fn_return_decl_lengths
+    LOAD_TBL x9, fn_return_decl_lengths
     str x24, [x9, x21, lsl #3]
-    LOAD_ADDR x9, fn_return_extra_types
+    LOAD_TBL x9, fn_return_extra_types
     str x11, [x9, x21, lsl #3]
-    LOAD_ADDR x9, fn_return_extra_decl_lengths
+    LOAD_TBL x9, fn_return_extra_decl_lengths
     str x12, [x9, x21, lsl #3]
     b Lfn_def_expect_body
 
 Lfn_def_no_return_type:
     // No return type, store -1
     mov x25, #-1
-    LOAD_ADDR x9, fn_return_types
+    LOAD_TBL x9, fn_return_types
     str x25, [x9, x21, lsl #3]
-    LOAD_ADDR x9, fn_return_decl_lengths
+    LOAD_TBL x9, fn_return_decl_lengths
     str xzr, [x9, x21, lsl #3]
-    LOAD_ADDR x9, fn_return_extra_types
+    LOAD_TBL x9, fn_return_extra_types
     str x25, [x9, x21, lsl #3]
-    LOAD_ADDR x9, fn_return_extra_decl_lengths
+    LOAD_TBL x9, fn_return_extra_decl_lengths
     str xzr, [x9, x21, lsl #3]
 
 Lfn_def_expect_body:
@@ -11231,17 +11283,17 @@ Lfn_def_expect_body:
     ldr x23, [x9]
     LOAD_ADDR x9, current_line
     ldr x24, [x9]
-    LOAD_ADDR x9, fn_body_cursors
+    LOAD_TBL x9, fn_body_cursors
     str x23, [x9, x21, lsl #3]
-    LOAD_ADDR x9, fn_body_lines
+    LOAD_TBL x9, fn_body_lines
     str x24, [x9, x21, lsl #3]
     LOAD_ADDR x9, source_ptr
     ldr x10, [x9]
-    LOAD_ADDR x9, fn_source_ptrs
+    LOAD_TBL x9, fn_source_ptrs
     str x10, [x9, x21, lsl #3]
     LOAD_ADDR x9, source_len
     ldr x10, [x9]
-    LOAD_ADDR x9, fn_source_lens
+    LOAD_TBL x9, fn_source_lens
     str x10, [x9, x21, lsl #3]
 
     // Record the actual fn table index of the fn just defined (x21 is the
@@ -11314,11 +11366,11 @@ _lookup_function:
 Lfn_lookup_loop:
     cmp x21, x22
     b.ge Lfn_lookup_fail
-    LOAD_ADDR x9, fn_name_lens
+    LOAD_TBL x9, fn_name_lens
     ldr x10, [x9, x21, lsl #3]
     cmp x10, x20
     b.ne Lfn_lookup_next
-    LOAD_ADDR x9, fn_name_ptrs
+    LOAD_TBL x9, fn_name_ptrs
     ldr x11, [x9, x21, lsl #3]
     mov x0, x19
     mov x1, x20
@@ -11475,7 +11527,7 @@ _call_function:
     str x22, [x9]
 
     // Get param count
-    LOAD_ADDR x9, fn_param_counts
+    LOAD_TBL x9, fn_param_counts
     ldr x23, [x9, x21, lsl #3]  // expected param count
 
     // Parse '(' and arguments
@@ -11510,13 +11562,13 @@ Lfn_call_parse_arg:
     add x9, x9, x24        // + param_idx
 
     // Save param name info for defining variable
-    LOAD_ADDR x10, fn_param_name_ptrs
+    LOAD_TBL x10, fn_param_name_ptrs
     ldr x25, [x10, x9, lsl #3]
-    LOAD_ADDR x10, fn_param_name_lens
+    LOAD_TBL x10, fn_param_name_lens
     ldr x26, [x10, x9, lsl #3]
-    LOAD_ADDR x10, fn_param_types
+    LOAD_TBL x10, fn_param_types
     ldr x27, [x10, x9, lsl #3]
-    LOAD_ADDR x10, fn_param_lengths
+    LOAD_TBL x10, fn_param_lengths
     ldr x5, [x10, x9, lsl #3]
 
     bl _parse_expr_value
@@ -11601,9 +11653,9 @@ Lfn_call_define_arg_len_ok:
     LOAD_ADDR x9, var_count
     ldr x10, [x9]
     sub x10, x10, #1
-    LOAD_ADDR x11, var_name_lens
+    LOAD_TBL x11, var_name_lens
     str xzr, [x11, x10, lsl #3]
-    LOAD_ADDR x11, var_name_ptrs
+    LOAD_TBL x11, var_name_ptrs
     str xzr, [x11, x10, lsl #3]
 Lfn_call_param_name_kept:
 
@@ -11676,22 +11728,22 @@ Lfn_call_fill_defaults:
     mov x9, x21
     lsl x9, x9, #2
     add x9, x9, x24
-    LOAD_ADDR x10, fn_param_default_flags
+    LOAD_TBL x10, fn_param_default_flags
     ldr x11, [x10, x9, lsl #3]
     cbz x11, Lfn_call_wrong_args
-    LOAD_ADDR x10, fn_param_name_ptrs
+    LOAD_TBL x10, fn_param_name_ptrs
     ldr x25, [x10, x9, lsl #3]
-    LOAD_ADDR x10, fn_param_name_lens
+    LOAD_TBL x10, fn_param_name_lens
     ldr x26, [x10, x9, lsl #3]
-    LOAD_ADDR x10, fn_param_types
+    LOAD_TBL x10, fn_param_types
     ldr x27, [x10, x9, lsl #3]
-    LOAD_ADDR x10, fn_param_lengths
+    LOAD_TBL x10, fn_param_lengths
     ldr x6, [x10, x9, lsl #3]
-    LOAD_ADDR x10, fn_param_default_values
+    LOAD_TBL x10, fn_param_default_values
     ldr x28, [x10, x9, lsl #3]
-    LOAD_ADDR x10, fn_param_default_types
+    LOAD_TBL x10, fn_param_default_types
     ldr x7, [x10, x9, lsl #3]
-    LOAD_ADDR x10, fn_param_default_lengths
+    LOAD_TBL x10, fn_param_default_lengths
     ldr x5, [x10, x9, lsl #3]
     cmp x27, #6
     b.eq Lfn_call_default_use_decl_len
@@ -11745,7 +11797,7 @@ Lfn_call_default_emit_done:
 
 Lfn_call_args_ready:
     // Save declared return type for missing-return validation.
-    LOAD_ADDR x9, fn_return_types
+    LOAD_TBL x9, fn_return_types
     ldr x11, [x9, x21, lsl #3]
     str x11, [sp, #8]
 
@@ -11813,7 +11865,7 @@ Lfn_call_comp_stage_done:
     mov x0, #0
     mov x1, #0                // value placeholder; actual value is in result slot
     ldr x2, [sp, #8]          // declared return type
-    LOAD_ADDR x9, fn_return_decl_lengths
+    LOAD_TBL x9, fn_return_decl_lengths
     ldr x3, [x9, x21, lsl #3] // declared return length/subtype
     mov x4, x27
     b Lfn_call_return
@@ -11827,15 +11879,15 @@ Lfn_call_interpret:
     str xzr, [x9]
 
     // Jump cursor to function body
-    LOAD_ADDR x9, fn_body_cursors
+    LOAD_TBL x9, fn_body_cursors
     ldr x27, [x9, x21, lsl #3]
-    LOAD_ADDR x9, fn_body_lines
+    LOAD_TBL x9, fn_body_lines
     ldr x28, [x9, x21, lsl #3]
-    LOAD_ADDR x9, fn_source_ptrs
+    LOAD_TBL x9, fn_source_ptrs
     ldr x10, [x9, x21, lsl #3]
     LOAD_ADDR x9, source_ptr
     str x10, [x9]
-    LOAD_ADDR x9, fn_source_lens
+    LOAD_TBL x9, fn_source_lens
     ldr x10, [x9, x21, lsl #3]
     LOAD_ADDR x9, source_len
     str x10, [x9]
@@ -11929,9 +11981,9 @@ Lfn_call_body_done_ok:
     str xzr, [x9]
 
     mov x0, #0
-    LOAD_ADDR x9, fn_return_types
+    LOAD_TBL x9, fn_return_types
     ldr x1, [x9, x21, lsl #3]
-    LOAD_ADDR x9, fn_return_decl_lengths
+    LOAD_TBL x9, fn_return_decl_lengths
     ldr x2, [x9, x21, lsl #3]
     b Lfn_call_return
 
@@ -12281,7 +12333,7 @@ _str_list_to_data:
     b.gt Lsltd_overflow
 
     mov x22, #0                     // write offset within dest
-    LOAD_ADDR x23, list_pool_values
+    LOAD_TBL x23, list_pool_values
 
     mov w9, #'['
     strb w9, [x21, x22]
@@ -12416,10 +12468,10 @@ Lfn_call_str_from_list:
     // authoritative element count is list_base_counts[base].
     lsr x9, x21, #32            // element type (from the list's metadata)
     cbnz x9, Lstmt_type_mismatch // only int-element lists supported
-    LOAD_ADDR x9, list_base_is_runtime
+    LOAD_TBL x9, list_base_is_runtime
     ldrb w10, [x9, x19]
     cbnz w10, Lstmt_type_mismatch // runtime-mutated -> not constant-foldable
-    LOAD_ADDR x9, list_base_counts
+    LOAD_TBL x9, list_base_counts
     ldr x1, [x9, x19, lsl #3]   // count
     mov x0, x19                 // base
     bl _str_list_to_data
@@ -12665,7 +12717,7 @@ Lfn_call_len_list:
     // lives in a slot. Check that first, exactly like the `.length` member does,
     // otherwise a split result assigned to a local var reports its reserved
     // capacity instead of its real element count.
-    LOAD_ADDR x9, list_base_is_runtime
+    LOAD_TBL x9, list_base_is_runtime
     ldrb w9, [x9, x19]          // x19 = compile-time base index
     cbnz w9, Lfn_call_len_list_runtime_base
     cmn x22, #1
@@ -12700,11 +12752,11 @@ Lfn_call_len_list_slot:
     ldr x9, [x9]
     cmn x9, #1
     b.eq Lfn_call_len_list_fold
-    LOAD_ADDR x10, fn_scope_bases
+    LOAD_TBL x10, fn_scope_bases
     ldr x10, [x10, x9, lsl #3]
     cmp x22, x10
     b.lt Lfn_call_len_list_fold
-    LOAD_ADDR x11, fn_param_counts
+    LOAD_TBL x11, fn_param_counts
     ldr x11, [x11, x9, lsl #3]
     add x11, x10, x11
     cmp x22, x11
@@ -12913,14 +12965,22 @@ Lpreparse_bp_check_fn_kw:
     // so _call_function can resolve it during main parse
     LOAD_ADDR x9, fn_count
     ldr x11, [x9]
-    cmp x11, #SNC_MAX_FUNCS
-    b.ge Lpreparse_bp_scan_loop
-    LOAD_ADDR x12, fn_name_ptrs
+    LOAD_ADDR x12, fn_capacity
+    ldr x12, [x12]
+    cmp x11, x12
+    b.lt Lpreparse_bp_have_space
+    stp x0, x1, [sp, #-16]!
+    bl _snc_grow_fns
+    ldp x0, x1, [sp], #16
+    LOAD_ADDR x9, fn_count
+    ldr x11, [x9]
+Lpreparse_bp_have_space:
+    LOAD_TBL x12, fn_name_ptrs
     str x0, [x12, x11, lsl #3]
-    LOAD_ADDR x12, fn_name_lens
+    LOAD_TBL x12, fn_name_lens
     str x1, [x12, x11, lsl #3]
     // Zero out param count for stub
-    LOAD_ADDR x12, fn_param_counts
+    LOAD_TBL x12, fn_param_counts
     str xzr, [x12, x11, lsl #3]
     add x11, x11, #1
     str x11, [x9]
@@ -13387,11 +13447,11 @@ Lnew_object_field_store:
     add x16, x16, x13
     LOAD_ADDR x17, object_field_var_idxs
     ldr x16, [x17, x16, lsl #3]
-    LOAD_ADDR x17, var_values
+    LOAD_TBL x17, var_values
     str x9, [x17, x16, lsl #3]
-    LOAD_ADDR x17, var_types
+    LOAD_TBL x17, var_types
     str x10, [x17, x16, lsl #3]
-    LOAD_ADDR x17, var_lengths
+    LOAD_TBL x17, var_lengths
     str x11, [x17, x16, lsl #3]
     cmn x12, #1
     b.eq Lnew_object_field_record_imm
@@ -13557,11 +13617,11 @@ Lstack_object_field_store:
     add x16, x16, x13
     LOAD_ADDR x17, object_field_var_idxs
     ldr x16, [x17, x16, lsl #3]
-    LOAD_ADDR x17, var_values
+    LOAD_TBL x17, var_values
     str x9, [x17, x16, lsl #3]
-    LOAD_ADDR x17, var_types
+    LOAD_TBL x17, var_types
     str x10, [x17, x16, lsl #3]
-    LOAD_ADDR x17, var_lengths
+    LOAD_TBL x17, var_lengths
     str x11, [x17, x16, lsl #3]
     mov x0, x16
     mov x1, x9
@@ -14012,7 +14072,7 @@ Lblueprint_member_method:
     ldr x23, [x9]
     
     // Save blueprint ID for this function
-    LOAD_ADDR x9, fn_blueprint_ids
+    LOAD_TBL x9, fn_blueprint_ids
     str x21, [x9, x23, lsl #3]
 
     // The general fn preparse also registers a PLAIN-named stub for this
@@ -14026,7 +14086,7 @@ Lblueprint_member_method:
     mov x1, x26   // plain method name len
     bl _lookup_function
     cbz x0, Lblueprint_member_stub_done
-    LOAD_ADDR x9, fn_blueprint_ids
+    LOAD_TBL x9, fn_blueprint_ids
     str x21, [x9, x1, lsl #3]
 Lblueprint_member_stub_done:
 
@@ -14140,24 +14200,31 @@ _define_hidden_var:
 
     LOAD_ADDR x23, var_count
     ldr x24, [x23]
-    cmp x24, #SNC_MAX_VARS
-    b.ge Lhidden_var_fail
+    // Grow the malloc-backed variable tables (incl. hidden_var_name_storage) on
+    // demand instead of failing at a fixed cap. x23 (&var_count), x24 (index)
+    // and x19/x21/x22 (the values) are callee-saved and survive the grow.
+    LOAD_ADDR x9, var_capacity
+    ldr x9, [x9]
+    cmp x24, x9
+    b.lt Lhidden_var_have_space
+    bl _snc_grow_vars
+Lhidden_var_have_space:
 
-    LOAD_ADDR x9, hidden_var_name_storage
+    LOAD_TBL x9, hidden_var_name_storage
     add x9, x9, x24, lsl #5
     str x24, [x9]
-    LOAD_ADDR x10, var_name_ptrs
+    LOAD_TBL x10, var_name_ptrs
     str x9, [x10, x24, lsl #3]
-    LOAD_ADDR x10, var_name_lens
+    LOAD_TBL x10, var_name_lens
     mov x11, #8
     str x11, [x10, x24, lsl #3]
-    LOAD_ADDR x10, var_values
+    LOAD_TBL x10, var_values
     str x19, [x10, x24, lsl #3]
-    LOAD_ADDR x10, var_const_flags
+    LOAD_TBL x10, var_const_flags
     str xzr, [x10, x24, lsl #3]
-    LOAD_ADDR x10, var_types
+    LOAD_TBL x10, var_types
     str x21, [x10, x24, lsl #3]
-    LOAD_ADDR x10, var_lengths
+    LOAD_TBL x10, var_lengths
     str x22, [x10, x24, lsl #3]
     add x24, x24, #1
     str x24, [x23]
@@ -14342,7 +14409,7 @@ _build_method_synth_name:
     mov x20, x1
     mov x21, x2
     mov x22, x3
-    LOAD_ADDR x23, method_name_storage
+    LOAD_TBL x23, method_name_storage
     add x23, x23, x22, lsl #6
     mov x24, x23
     LOAD_ADDR x9, blueprint_name_ptrs
@@ -14403,11 +14470,11 @@ _resolve_object_field_value:
     ldr x24, [x9, x24, lsl #3]
     cmp x24, #-1
     b.eq Lresolve_object_field_fail
-    LOAD_ADDR x9, var_values
+    LOAD_TBL x9, var_values
     ldr x1, [x9, x24, lsl #3]
-    LOAD_ADDR x9, var_types
+    LOAD_TBL x9, var_types
     ldr x2, [x9, x24, lsl #3]
-    LOAD_ADDR x9, var_lengths
+    LOAD_TBL x9, var_lengths
     ldr x3, [x9, x24, lsl #3]
     mov x4, x24
     mov x0, #1
@@ -14595,7 +14662,7 @@ Linst_object_field_store_idx:
     cmp x10, #6
     b.eq Linst_object_field_next
     mov x0, x15
-    LOAD_ADDR x9, var_values
+    LOAD_TBL x9, var_values
     ldr x1, [x9, x15, lsl #3]
     bl _record_store_variable
     cbnz x0, Linst_object_field_fail
@@ -14636,11 +14703,11 @@ _parse_function_body:
     str x21, [x9]
 
     // Record this function's slot base for scope-relative codegen
-    LOAD_ADDR x9, fn_scope_bases
+    LOAD_TBL x9, fn_scope_bases
     str x21, [x9, x19, lsl #3]
     
     // Check if it is a method
-    LOAD_ADDR x9, fn_blueprint_ids
+    LOAD_TBL x9, fn_blueprint_ids
     ldr x20, [x9, x19, lsl #3]
     cmn x20, #1
     b.eq Lparse_fn_body_not_method
@@ -14679,7 +14746,7 @@ Lparse_fn_body_not_method:
 
 Lparse_fn_body_params:
     // Define parameters
-    LOAD_ADDR x9, fn_param_counts
+    LOAD_TBL x9, fn_param_counts
     ldr x22, [x9, x19, lsl #3]
     mov x23, #0
 Lparse_fn_body_param_loop:
@@ -14690,13 +14757,13 @@ Lparse_fn_body_param_loop:
     lsl x9, x9, #2
     add x9, x9, x23
     
-    LOAD_ADDR x10, fn_param_name_ptrs
+    LOAD_TBL x10, fn_param_name_ptrs
     ldr x0, [x10, x9, lsl #3]
-    LOAD_ADDR x10, fn_param_name_lens
+    LOAD_TBL x10, fn_param_name_lens
     ldr x1, [x10, x9, lsl #3]
-    LOAD_ADDR x10, fn_param_types
+    LOAD_TBL x10, fn_param_types
     ldr x2, [x10, x9, lsl #3]
-    LOAD_ADDR x10, fn_param_lengths
+    LOAD_TBL x10, fn_param_lengths
     ldr x3, [x10, x9, lsl #3]
     mov x5, x3  // metadata/length
     mov x4, x2  // declared type
@@ -14712,25 +14779,25 @@ Lparse_fn_body_start:
     // Record start op
     LOAD_ADDR x9, op_count
     ldr x10, [x9]
-    LOAD_ADDR x9, fn_op_starts
+    LOAD_TBL x9, fn_op_starts
     str x10, [x9, x19, lsl #3]
 
     // Set cursor
-    LOAD_ADDR x9, fn_body_cursors
+    LOAD_TBL x9, fn_body_cursors
     ldr x10, [x9, x19, lsl #3]
     LOAD_ADDR x9, cursor_pos
     str x10, [x9]
-    LOAD_ADDR x9, fn_body_lines
+    LOAD_TBL x9, fn_body_lines
     ldr x10, [x9, x19, lsl #3]
     LOAD_ADDR x9, current_line
     str x10, [x9]
     
     // Set source (needed for module functions which have different source buffer)
-    LOAD_ADDR x9, fn_source_ptrs
+    LOAD_TBL x9, fn_source_ptrs
     ldr x10, [x9, x19, lsl #3]
     LOAD_ADDR x9, source_ptr
     str x10, [x9]
-    LOAD_ADDR x9, fn_source_lens
+    LOAD_TBL x9, fn_source_lens
     ldr x10, [x9, x19, lsl #3]
     LOAD_ADDR x9, source_len
     str x10, [x9]
@@ -14775,10 +14842,10 @@ Lparse_fn_body_done:
     // Record count
     LOAD_ADDR x9, op_count
     ldr x11, [x9]
-    LOAD_ADDR x9, fn_op_starts
+    LOAD_TBL x9, fn_op_starts
     ldr x10, [x9, x19, lsl #3]
     sub x11, x11, x10
-    LOAD_ADDR x9, fn_op_counts
+    LOAD_TBL x9, fn_op_counts
     str x11, [x9, x19, lsl #3]
 
     // Record runtime frame size: locals+params+TEMPS used by this body.
@@ -14801,7 +14868,7 @@ Lparse_fn_body_done:
     mov x11, #128
     cmp x10, x11
     csel x10, x11, x10, lt    // min 128
-    LOAD_ADDR x9, fn_frame_sizes
+    LOAD_TBL x9, fn_frame_sizes
     str x10, [x9, x19, lsl #3]
 
     // Restore scope
@@ -14982,7 +15049,7 @@ Linline_guard_ok:
     LOAD_ADDR x0, kw_self
     mov x1, #4
     mov x2, #10
-    LOAD_ADDR x9, fn_blueprint_ids
+    LOAD_TBL x9, fn_blueprint_ids
     ldr x3, [x9, x19, lsl #3]      // blueprint id of this method
     mov x4, #0
     mov x5, #1
@@ -14994,7 +15061,7 @@ Linline_guard_ok:
     mov w0, #'('
     bl _expect_char
     cbz x0, Linline_fail
-    LOAD_ADDR x9, fn_param_counts
+    LOAD_TBL x9, fn_param_counts
     ldr x22, [x9, x19, lsl #3]     // paramCount
     mov x23, #0                    // arg index
 Linline_arg_loop:
@@ -15013,13 +15080,13 @@ Linline_arg_parse:
     mov x9, x19
     lsl x9, x9, #2
     add x9, x9, x23
-    LOAD_ADDR x10, fn_param_name_ptrs
+    LOAD_TBL x10, fn_param_name_ptrs
     ldr x11, [x10, x9, lsl #3]
     str x11, [sp, #48]
-    LOAD_ADDR x10, fn_param_name_lens
+    LOAD_TBL x10, fn_param_name_lens
     ldr x11, [x10, x9, lsl #3]
     str x11, [sp, #56]
-    LOAD_ADDR x10, fn_param_types
+    LOAD_TBL x10, fn_param_types
     ldr x11, [x10, x9, lsl #3]
     str x11, [sp, #80]
     bl _parse_expr_value
@@ -15094,19 +15161,19 @@ Linline_args_done:
     str x27, [x9]                 // depth++
 
     // ---- seek to the method body ----
-    LOAD_ADDR x9, fn_body_cursors
+    LOAD_TBL x9, fn_body_cursors
     ldr x10, [x9, x19, lsl #3]
     LOAD_ADDR x9, cursor_pos
     str x10, [x9]
-    LOAD_ADDR x9, fn_body_lines
+    LOAD_TBL x9, fn_body_lines
     ldr x10, [x9, x19, lsl #3]
     LOAD_ADDR x9, current_line
     str x10, [x9]
-    LOAD_ADDR x9, fn_source_ptrs
+    LOAD_TBL x9, fn_source_ptrs
     ldr x10, [x9, x19, lsl #3]
     LOAD_ADDR x9, source_ptr
     str x10, [x9]
-    LOAD_ADDR x9, fn_source_lens
+    LOAD_TBL x9, fn_source_lens
     ldr x10, [x9, x19, lsl #3]
     LOAD_ADDR x9, source_len
     str x10, [x9]
@@ -15167,9 +15234,9 @@ Linline_body_done:
     // ---- publish result (same convention as _call_function) ----
     LOAD_ADDR x9, last_call_result_slot
     str x20, [x9]
-    LOAD_ADDR x9, fn_return_types
+    LOAD_TBL x9, fn_return_types
     ldr x2, [x9, x19, lsl #3]
-    LOAD_ADDR x9, fn_return_decl_lengths
+    LOAD_TBL x9, fn_return_decl_lengths
     ldr x3, [x9, x19, lsl #3]
     mov x4, x20
     mov x1, #0

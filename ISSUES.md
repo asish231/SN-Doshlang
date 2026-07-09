@@ -42,9 +42,16 @@ binaries, and comparing their printed output to the expected values.
 > - **First self-hosted component** — `selfhost/lexer.sn`, a tokenizer written IN SNlang,
 >   compiled by `snc` and run via `make selfhost` (roadmap milestone M3 kicked off).
 >
-> Still open (see `SELF_HOSTING_ROADMAP.md`): the *remaining* static tables (variables,
-> functions) and the runtime `list`/`map` pools becoming `malloc`-grown too, a real standard
-> library, syscalls/FFI, and the compiler-in-SNlang + bootstrap proof.
+> **Update (2026-07-09, later) — the growable-memory work is now COMPLETE.** The
+> *remaining* compiler tables (variables, functions) and the runtime `list`/`map` element
+> pools are now `malloc`-backed and `realloc`-grow on demand too (section 2.25), so **every**
+> compiler table and runtime pool is dynamic — no fixed cap remains. A related file-read bug
+> (a stale-condition-flag branch that made the compiler reject any source) was fixed in the
+> same pass. Verified by a 200000-element list in a **1.42 MB** source and a 5000-entry map,
+> both compiling and running correctly, with `make assert` still **211/211**.
+>
+> Still open (see `SELF_HOSTING_ROADMAP.md`): a real standard library, syscalls/FFI, and the
+> compiler-in-SNlang + bootstrap proof.
 
 > **One-line status:** the core back-end is **fixed** and now computes correct results for
 > a broad set of programs — integers, variables, arithmetic with correct precedence,
@@ -815,8 +822,46 @@ stage1≡stage2 bootstrap proof remain; see `SELF_HOSTING_ROADMAP.md`.)
 
 Locked in with 6 new MUST-PASS assertions (5 `ord` + a growable-op-table smoke test).
 **`make assert` is now 211/211 must-pass, 0 known-broken**; the `examples/` sweep is
-**156/163 OK** (the same 7 deliberate negative tests). Still static (future work): the
-variable/function tables and the emitted runtime `list`/`map` pools.
+**156/163 OK** (the same 7 deliberate negative tests).
+
+### 2.25 DONE — every compiler table & runtime pool is now `malloc`-grown (variables, functions, `list`/`map` pools, source buffer) + a file-read flags bug fixed
+
+This pass finished the "growable memory" work started in 2.24, so **no fixed-size cap
+remains anywhere in the compiler or its emitted runtime data**:
+
+**1. Variable and function tables.** The `var_*` (6 arrays) and `fn_*` (25 arrays) tables —
+previously large-but-static `.space` blocks (`SNC_MAX_VARS` 4096, `SNC_MAX_FUNCS` 256) — are
+now pointers to `malloc`-backed buffers that `realloc`-double on demand (`_snc_grow_vars` /
+`_snc_grow_fns` in `src/vars.s`; access sites use the `LOAD_TBL` macro). `_snc_grow_fns`
+also re-fills newly grown `fn_blueprint_ids` with `-1`. Verified: a generated **300-function**
+program (past the old 256 cap) links and prints the correct `44850`, and a **5000-variable**
+function prints the correct `12497500`.
+
+**2. Runtime `list`/`map` element pools.** `list_pool_values` / `list_pool_lengths` /
+`list_base_counts` / `list_base_is_runtime` and the five `map_pool_*` arrays — previously
+fixed `.space` pools capped at **4096 elements** — are now `malloc`-backed and grown by
+`_snc_grow_list_pool` / `_snc_grow_map_pool`, which **zero** each newly grown slot (codegen
+relies on unfilled reserved slots being `0`). The three count-increasing sites (list-literal
+store, map-literal store, and the `.split()` 64-slot reservation) grow on demand instead of
+failing. `SNC_MAX_LIST_ELEMS` / `SNC_MAX_MAP_ELEMS` (4096) are now only the *initial*
+capacity. Verified: **154/156** examples emit output identical to before, and the 2 that
+differ (`for_loop`, `spawn_with_blueprint`) produce **identical runtime output** (the
+difference is a pre-existing non-deterministic value in *unused* reserved slots, not a
+regression). Growth proven: a **5000-element** list sums to `12497500`, a **5000-entry** map
+looks up correctly, and a combined **200000-element** list in a **1.42 MB** source compiles
+and prints `19999900000`.
+
+**3. File-read flags bug (found while making the source buffer growable).** The source-read
+loop in `src/main.s` did `bl _read` then `cbz x0, …` immediately followed by `b.lt
+Lread_failed`. `cbz` does **not** set the condition flags, so `b.lt` tested whatever `NZCV`
+libc's `read()` happened to leave — and `read()` returns with `N=1` set even on success — so
+the compiler spuriously took the "read failed" path and **rejected every source file**
+(`failed to read source input`). Fixed by comparing the return value first (`cmp x0, #0` →
+`b.lt` for error, `b.eq` for EOF). This is what let the source buffer safely grow past the
+old 1 MB cap (the 1.42 MB program above exercises a multi-read + grow).
+
+`make assert` remains **211/211 must-pass, 0 known-broken**; the `examples/` sweep is
+**156/163 OK** (the same 7 deliberate negative tests).
 
 ---
 
@@ -1025,8 +1070,9 @@ program compiles, links, and runs correctly.
 **Update (2026-07-09, cont.):** the **operation and print/data tables are now truly
 `malloc`-backed and grow on demand** (realloc-doubling from the initial cap; see section
 2.24) — a generated 60k-op program and a 20k-print program compile, link, and run.
-**Still needed:** the *remaining* static tables (variables, functions) and the emitted
-runtime `list`/`map` pools becoming `malloc`-grown too. The examples sweep
+**Update (2026-07-09, later) — DONE:** the *remaining* tables (variables, functions) and the
+runtime `list`/`map` element pools are now `malloc`-grown as well (section 2.25), so no fixed
+table/pool cap remains. The examples sweep
 also shows unverified paths that still pass invalid non-slot values into stack emission
 (notably string returns), and those need feature-specific fixes rather than more
 stack-offset widening.
@@ -1122,8 +1168,8 @@ then syscalls/FFI.
     **DONE (2026-07-09)** — caps centralized as `src/platform.inc` macros: variables
     `512`→`4096`, operations `4096`→`32768`, print statements `2048`→`16384`, functions
     `32`/`64`→`256`, and the source buffer `64KB`→`1MB`; large frames and >4095-byte slot
-    offsets now emit a register form. (Truly *dynamic* `malloc`-growth and the emitted
-    runtime `list`/`map` pools remain future work.)
+    offsets now emit a register form. (Truly *dynamic* `malloc`-growth — for these tables and
+    the runtime `list`/`map` pools — has since landed too; see item 14 and section 2.25.)
 11. ~~Add a `system`/`exec` builtin and `argc`/`argv`~~ **DONE (2026-07-09)** — the two
     self-hosting *driver* prerequisites: invoke an external assembler/linker, and receive
     `snc file.sn` on the command line.
@@ -1136,8 +1182,13 @@ then syscalls/FFI.
     `realloc`-grow on demand (no more `too many operations` / `too many print statements`); a
     new `ord(s)` builtin exposes character codes; and `selfhost/lexer.sn` is the first
     self-hosting component — a tokenizer written in SNlang, run via `make selfhost` (roadmap
-    M3). See section 2.24. (Remaining static: the variable/function tables and the runtime
-    `list`/`map` pools.)
-14. Only then: build out `stdlib`, add syscalls/FFI, then `net` → `http`, and continue the
+    M3). See section 2.24.
+14. ~~Make the *remaining* tables (`var_*`, `fn_*`) and the runtime `list`/`map` element pools
+    `malloc`-grown too~~ **DONE (2026-07-09)** — every compiler table and runtime pool now
+    `realloc`-grows on demand, so **no fixed cap remains**; a file-read stale-flags bug found
+    in the same pass (which made the compiler reject all input) was fixed. Verified with a
+    300-function program, a 5000-variable function, a 5000-element list, a 5000-entry map, and
+    a 200000-element list in a 1.42 MB source. See section 2.25.
+15. Only then: build out `stdlib`, add syscalls/FFI, then `net` → `http`, and continue the
     self-hosting components (parser → codegen in SNlang) toward the stage1≡stage2 bootstrap
     proof. See `SELF_HOSTING_ROADMAP.md` for the staged plan.

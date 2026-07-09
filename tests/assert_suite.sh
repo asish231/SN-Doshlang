@@ -490,6 +490,16 @@ expect "ord classify digit"  'fn main(){ str s="7" int c=ord(s[0]) if c>=48 and 
 # verified separately (a generated 60k-op program compiles+runs). See ISSUES 2.24.
 expect "many ops grow path"  'fn main(){ int x=0 for (int i=0,i<500,i+=1){ x=x+1 } print(x) }' "500"
 
+# Growable runtime list/map element pools (ISSUES 2.25): the compile-time
+# list_pool_*/map_pool_* arrays are now malloc-backed and realloc-grow past the
+# old fixed 4096-element cap. Each program below declares >4096 elements, so it
+# exercises the _snc_grow_list_pool / _snc_grow_map_pool realloc paths (they used
+# to hard-fail once the static pool filled). 0+1+...+4999 = 12497500; m[4999]=9998.
+list_pool_grow_src=$(printf 'fn main(){ list<int> n=[0'; for i in $(seq 1 4999); do printf ',%d' "$i"; done; printf '] int s=0 for (v in n){ s=s+v } print(s) }')
+expect "list pool grow >4096"  "$list_pool_grow_src" "12497500"
+map_pool_grow_src=$(printf 'fn main(){ map<int,int> m={0:0'; for i in $(seq 1 4999); do printf ',%d:%d' "$i" "$((i*2))"; done; printf '} print(m[4999]) }')
+expect "map pool grow >4096"   "$map_pool_grow_src" "9998"
+
 echo
 echo "== KNOWN BROKEN (documented; not fatal) =="
 # for-in over lists is now a REAL runtime loop (see _emit_for_in_runtime_loop),

@@ -72,7 +72,7 @@ Lmain_load_file:
     b.lt Lmain_fail
     mov x19, x0
 
-    LOAD_ADDR x0, buffer
+    LOAD_TBL x0, buffer
     mov x1, x19
     bl _set_source
 
@@ -89,18 +89,6 @@ Lmain_load_file:
     str x1, [x2]
     LOAD_ADDR x2, fn_count
     str x1, [x2]
-    
-    // Initialize fn_blueprint_ids to -1
-    mov x3, #-1
-    mov x4, #0
-Linit_fn_bp_ids:
-    cmp x4, #SNC_MAX_FUNCS
-    b.ge Linit_fn_bp_ids_done
-    LOAD_ADDR x5, fn_blueprint_ids
-    str x3, [x5, x4, lsl #3]
-    add x4, x4, #1
-    b Linit_fn_bp_ids
-Linit_fn_bp_ids_done:
 
     LOAD_ADDR x2, label_counter
     str x1, [x2]
@@ -136,12 +124,20 @@ Linit_fn_bp_ids_done:
     mov x0, x21
     bl _add_source_dir_search_path
 
-    // Allocate the initial (growable, malloc-backed) op and print/data tables
-    // before anything is recorded. Capacity starts at 0, so these first grows
-    // allocate SNC_MAX_OPS / SNC_MAX_PRINTS entries; the record paths grow
+    // Allocate the initial (growable, malloc-backed) op, print/data, variable
+    // and function tables before anything is recorded/defined. Capacity starts
+    // at 0, so these first grows allocate SNC_MAX_OPS / SNC_MAX_PRINTS /
+    // SNC_MAX_VARS / SNC_MAX_FUNCS entries; the record/define paths grow
     // (realloc-double) further on demand.
     bl _snc_grow_ops
     bl _snc_grow_prints
+    bl _snc_grow_vars
+    bl _snc_grow_fns
+    // Allocate the initial (SNC_MAX_LIST_ELEMS / SNC_MAX_MAP_ELEMS) list and map
+    // element pools. The grow routines also ZERO the freshly-allocated buffers,
+    // which the codegen relies on (the old .space pools were zero-initialized).
+    bl _snc_grow_list_pool
+    bl _snc_grow_map_pool
 
     bl _parse_program
     cbnz x0, Lmain_fail
@@ -226,36 +222,46 @@ _read_into_buffer:
     stp x19, x20, [sp, #-16]!
     stp x21, x22, [sp, #-16]!
 
-    mov x19, x0
-    mov x20, #0
-    LOAD_ADDR x21, buffer
+    mov x19, x0                // fd
+    mov x20, #0                // bytes read so far
+    // Ensure the growable source buffer is allocated (grow from 0 => initial cap).
+    LOAD_TBL x21, buffer
+    cbnz x21, Lread_have_buf
+    bl _snc_grow_src
+    LOAD_TBL x21, buffer
+Lread_have_buf:
 
 Lread_loop:
-     // Remaining space = (buffer capacity - 1, for the NUL) - bytes read so far.
+     // Remaining space = current capacity (content bytes) - bytes read so far.
      LOAD_ADDR x22, src_buffer_cap
      ldr x22, [x22]
      sub x22, x22, x20
-     cbz x22, Lbuffer_full
-
+     cbnz x22, Lread_space_ok
+     // Buffer full: grow it (realloc-double) instead of truncating, then reload
+     // the (possibly moved) base and recompute the remaining space.
+     bl _snc_grow_src
+     LOAD_TBL x21, buffer
+     LOAD_ADDR x22, src_buffer_cap
+     ldr x22, [x22]
+     sub x22, x22, x20
+Lread_space_ok:
      mov x0, x19
      add x1, x21, x20
      mov x2, x22
      bl _read
-     cbz x0, Lread_done
+     // read() returns bytes read (>0), 0 at EOF, or <0 on error. CBZ/B.cond
+     // must be driven by an explicit CMP: a bare `cbz x0` does NOT set the
+     // condition flags, so a following `b.lt` would test whatever NZCV libc's
+     // read() happened to leave (it sets N=1 even on success), spuriously
+     // taking the failure path. Compare x0 to 0 first, then branch.
+     cmp x0, #0
      b.lt Lread_failed
-     // Cap read at buffer limit (src_buffer_cap content bytes + 1 NUL terminator)
-     cmp x0, x22
-     b.gt Lbuffer_full
-
+     b.eq Lread_done
      add x20, x20, x0
      b Lread_loop
 
-Lbuffer_full:
-    LOAD_ADDR x0, msg_truncated
-    mov x1, #2
-    bl _write_cstr_fd
-
 Lread_done:
+    LOAD_TBL x21, buffer       // reload base (buffer may have grown during read)
     add x1, x21, x20
     strb wzr, [x1]
     mov x0, x20

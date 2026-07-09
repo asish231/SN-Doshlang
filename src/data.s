@@ -514,6 +514,10 @@
 .global op_arg3
 .global op_arg4
 .global op_capacity
+.global var_capacity
+.global fn_capacity
+.global list_pool_capacity
+.global map_pool_capacity
 .global asm_mov_x2_imm
 .global fn_count
 .global fn_name_ptrs
@@ -704,6 +708,26 @@ asm_x28_offset_prefix:
 .global asm_x28_sub_suffix
 asm_x28_sub_suffix:
     .asciz "\n    sub x28, x29, x28\n"
+// movz/movk materialization for frame sizes / slot offsets that exceed 65535.
+// `mov xN, #imm` (and the movz it becomes) only encodes a 16-bit immediate, so
+// a frame or slot offset >= 65536 -- now reachable because the variable table
+// grows past the old 4096-var cap -- emitted an unassemblable `mov x16, #80032`.
+// A movz(low16) + movk(high16, lsl #16) pair materializes any value up to 2^32.
+.global asm_movz_x16
+asm_movz_x16:
+    .asciz "    movz x16, #"
+.global asm_movk_x16
+asm_movk_x16:
+    .asciz "\n    movk x16, #"
+.global asm_movz_x28
+asm_movz_x28:
+    .asciz "    movz x28, #"
+.global asm_movk_x28
+asm_movk_x28:
+    .asciz "\n    movk x28, #"
+.global asm_lsl16
+asm_lsl16:
+    .asciz ", lsl #16"
 asm_header:
 #ifdef _WIN32
     .asciz ".global main\n.align 4\n.extern printf\n.extern read\n.extern write\n.extern malloc\n.extern free\n.extern open\n.extern close\n.extern lseek\n.extern str_concat\n.extern int_to_cstr\n.extern file_read\n.extern file_write\n\n.data\n.align 3\nsnc_argc: .quad 0\nsnc_argv: .quad 0\n\n.text\nmain:\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    adrp x9, snc_argc\n    add x9, x9, :lo12:snc_argc\n    str x0, [x9]\n    adrp x9, snc_argv\n    add x9, x9, :lo12:snc_argv\n    str x1, [x9]\n"
@@ -1514,11 +1538,11 @@ label_counter:     .quad 1
 current_label_id:  .quad 1
 compilation_mode:  .quad 1
 .global src_buffer_cap
-src_buffer_cap: .quad SNC_SRC_BYTES - 1
+src_buffer_cap: .quad 0   // source buffer content-byte capacity (0 until first alloc); SNC_SRC_BYTES is the initial size (see _snc_grow_src)
 
 .bss
 .align 4
-buffer:         .space SNC_SRC_BYTES       // source input (SNC_SRC_BYTES bytes)
+buffer:         .space 8       // POINTER to the malloc-backed, growable source input buffer (see _snc_grow_src); reads no longer truncate at a fixed size
 number_buffer:  .space 32
 // Persistent bump-arena for compile-time-generated string literals (currently
 // str(list) formatting). _record_data_value stores the byte pointer without
@@ -1551,27 +1575,52 @@ loop_context_depth: .space 8
 // Innermost active block try's catch-label id (0 = not inside a try body).
 // Used by `throw` to branch to the enclosing catch instead of exiting.
 current_catch_label: .space 8
-var_name_ptrs:  .space SNC_MAX_VARS*8   // SNC_MAX_VARS variables * 8 bytes
-var_name_lens:  .space SNC_MAX_VARS*8
-var_values:     .space SNC_MAX_VARS*8
-var_lengths:    .space SNC_MAX_VARS*8
-var_const_flags: .space SNC_MAX_VARS*8
-var_types:       .space SNC_MAX_VARS*8
+// Variable tables: now malloc-backed and GROWABLE (see _snc_grow_vars in
+// vars.s). Each symbol holds a POINTER to a heap buffer (0 until the first
+// allocation), NOT the storage itself, so the compiler's variable table can
+// grow past the old fixed SNC_MAX_VARS cap by realloc instead of hard-failing
+// with "too many variables". SNC_MAX_VARS is now merely the INITIAL capacity.
+// All six arrays grow together and are 8 bytes/entry. Access sites use the
+// LOAD_TBL macro (LOAD_ADDR + deref) so they always see the current buffer.
+var_name_ptrs:  .quad 0
+var_name_lens:  .quad 0
+var_values:     .quad 0
+var_lengths:    .quad 0
+var_const_flags: .quad 0
+var_types:       .quad 0
+var_capacity:   .quad 0   // current allocated capacity (in entries) of the var tables
 list_pool_count: .space 8
-list_pool_values: .space 32768     // 4096 list elements
-list_pool_lengths: .space 32768
-list_base_counts: .space 32768     // per-base element count (runtime .length())
+// List element pools: now malloc-backed and GROWABLE (see _snc_grow_list_pool
+// in vars.s). Each symbol below holds a POINTER to a heap buffer (0 until the
+// first allocation), NOT the storage itself, so the compile-time runtime-data
+// pool can grow past the old fixed SNC_MAX_LIST_ELEMS cap via realloc instead of
+// hard-failing. The grow routine ZEROES newly-added entries because codegen
+// relies on these pools being zero-initialized (reserved-but-unfilled split
+// slots, non-base count slots, and the default "not runtime" flag). SNC_MAX_LIST_ELEMS
+// is now merely the INITIAL capacity. Access sites use the LOAD_TBL macro
+// (LOAD_ADDR + deref) so they always see the current (possibly moved) buffer.
+// list_pool_values/list_pool_lengths/list_base_counts are 8 bytes/entry.
+list_pool_values: .quad 0
+list_pool_lengths: .quad 0
+list_base_counts: .quad 0     // per-base element count (runtime .length())
 // 1 byte per pool base: 1 => the list at this base has a RUNTIME element count
 // (its contents are filled at run time, e.g. by str.split), so .length()/for-in
 // must read list_base_counts[base] at run time instead of folding a compile-time
 // count. 0 => an ordinary compile-time list literal.
-list_base_is_runtime: .space 4096
+list_base_is_runtime: .quad 0
+list_pool_capacity: .quad 0   // current allocated capacity (in entries) of the list pools
+// Map element pools: malloc-backed and GROWABLE (see _snc_grow_map_pool in
+// vars.s). Each symbol holds a POINTER to a heap buffer (0 until first alloc),
+// NOT the storage. All five arrays are 8 bytes/entry and grow together; the grow
+// routine ZEROES newly-added entries. SNC_MAX_MAP_ELEMS is the INITIAL capacity.
+// Access sites use the LOAD_TBL macro.
 map_pool_count:  .space 8
-map_pool_keys:   .space 32768
-map_pool_key_lengths: .space 32768
-map_pool_key_ptrs: .space 32768
-map_pool_values: .space 32768
-map_pool_lengths: .space 32768
+map_pool_keys:   .quad 0
+map_pool_key_lengths: .quad 0
+map_pool_key_ptrs: .quad 0
+map_pool_values: .quad 0
+map_pool_lengths: .quad 0
+map_pool_capacity: .quad 0   // current allocated capacity (in entries) of the map pools
 slice_tmp_source_val: .space 8
 slice_tmp_source_len: .space 8
 slice_tmp_source_var: .space 8
@@ -1629,35 +1678,41 @@ fn_count:       .space 8
 current_table_id: .space 8
 .global current_parse_fn_id
 current_parse_fn_id: .space 8
-fn_name_ptrs:   .space SNC_MAX_FUNCS*8   // SNC_MAX_FUNCS functions * 8 bytes
-fn_name_lens:   .space SNC_MAX_FUNCS*8
-fn_body_cursors: .space SNC_MAX_FUNCS*8
-fn_body_lines:  .space SNC_MAX_FUNCS*8
-fn_source_ptrs: .space SNC_MAX_FUNCS*8
-fn_source_lens: .space SNC_MAX_FUNCS*8
-fn_param_counts: .space SNC_MAX_FUNCS*8
-fn_return_types: .space SNC_MAX_FUNCS*8
-fn_op_starts:    .space SNC_MAX_FUNCS*8   // SNC_MAX_FUNCS functions * 8 bytes
-fn_op_counts:    .space SNC_MAX_FUNCS*8
-fn_param_types: .space SNC_MAX_FUNCS*4*8
-        // SNC_MAX_FUNCS fns * 4 params * 8 bytes
-fn_param_lengths: .space SNC_MAX_FUNCS*4*8
-fn_param_name_ptrs: .space SNC_MAX_FUNCS*4*8
-fn_param_name_lens: .space SNC_MAX_FUNCS*4*8
-fn_param_default_flags: .space SNC_MAX_FUNCS*4*8
-fn_param_default_values: .space SNC_MAX_FUNCS*4*8
-fn_param_default_types: .space SNC_MAX_FUNCS*4*8
-fn_param_default_lengths: .space SNC_MAX_FUNCS*4*8
-fn_return_decl_lengths: .space SNC_MAX_FUNCS*8
-fn_return_extra_types: .space SNC_MAX_FUNCS*8
-fn_return_extra_decl_lengths: .space SNC_MAX_FUNCS*8
+// Function tables: now malloc-backed and GROWABLE (see _snc_grow_fns in
+// vars.s). Each symbol below holds a POINTER to a heap buffer (0 until the
+// first allocation), NOT the storage itself, so the compiler's function table
+// can grow past the old fixed SNC_MAX_FUNCS cap via realloc. SNC_MAX_FUNCS is
+// now merely the INITIAL capacity. Access sites use the LOAD_TBL macro
+// (LOAD_ADDR + deref) so they always see the current buffer.
+fn_name_ptrs:   .quad 0
+fn_name_lens:   .quad 0
+fn_body_cursors: .quad 0
+fn_body_lines:  .quad 0
+fn_source_ptrs: .quad 0
+fn_source_lens: .quad 0
+fn_param_counts: .quad 0
+fn_return_types: .quad 0
+fn_op_starts:    .quad 0
+fn_op_counts:    .quad 0
+fn_param_types: .quad 0
+fn_param_lengths: .quad 0
+fn_param_name_ptrs: .quad 0
+fn_param_name_lens: .quad 0
+fn_param_default_flags: .quad 0
+fn_param_default_values: .quad 0
+fn_param_default_types: .quad 0
+fn_param_default_lengths: .quad 0
+fn_return_decl_lengths: .quad 0
+fn_return_extra_types: .quad 0
+fn_return_extra_decl_lengths: .quad 0
 .global fn_blueprint_ids
-fn_blueprint_ids: .space SNC_MAX_FUNCS*8         // SNC_MAX_FUNCS functions * 8 bytes (-1 if not a method)
+fn_blueprint_ids: .quad 0
+fn_capacity:     .quad 0   // current allocated capacity (in entries) of the fn tables
 fn_return_value: .space 8
 fn_return_length: .space 8
 fn_return_flag:  .space 8
-fn_scope_bases:  .space SNC_MAX_FUNCS*8          // SNC_MAX_FUNCS functions * 8 bytes: var_count at body-parse entry
-fn_frame_sizes:  .space SNC_MAX_FUNCS*8          // SNC_MAX_FUNCS functions * 8 bytes: runtime stack frame size (bytes)
+fn_scope_bases:  .quad 0
+fn_frame_sizes:  .quad 0
 cur_scope_base:  .space 8            // emit-time: slot base of the function being emitted
 last_call_result_slot: .space 8      // parse-time: result slot of the last compiled call
 fn_return_extra: .space 8
@@ -1720,8 +1775,8 @@ inline_end_label:   .space 8              // label id the inlined `return` jumps
 inline_fn_stack:    .space 128            // fn ids currently being inlined (recursion guard; 16 deep)
 fn_name_override_ptr: .space 8
 fn_name_override_len: .space 8
-method_name_storage: .space SNC_MAX_FUNCS*64          // SNC_MAX_FUNCS synthetic fn names * 64 bytes
-hidden_var_name_storage: .space SNC_MAX_VARS*32     // SNC_MAX_VARS hidden var names * 32 bytes
+method_name_storage: .quad 0
+hidden_var_name_storage: .quad 0     // malloc-backed; grows with the var tables (see _snc_grow_vars), 32 bytes/entry, indexed by the global var index
 spawn_capture_fn_id:   .space 8
 spawn_wait_used:       .space 8           // 1 if wait() builtin used -> emit _snc_spawn_wait
 spawn_fn_op_counts:    .space 256         // 32 functions * 8 (op counts for spawn bodies)

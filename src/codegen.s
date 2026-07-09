@@ -107,9 +107,9 @@ Lemit_user_fns_loop:
     b.ge Lemit_user_fns_done
     
     // Skip "main" - we already emitted it as the entry point
-    LOAD_ADDR x9, fn_name_ptrs
+    LOAD_TBL x9, fn_name_ptrs
     ldr x0, [x9, x21, lsl #3]
-    LOAD_ADDR x9, fn_name_lens
+    LOAD_TBL x9, fn_name_lens
     ldr x1, [x9, x21, lsl #3]
     LOAD_ADDR x2, kw_main
     bl _match_cstr_span
@@ -211,7 +211,7 @@ Lemit_list_pool_values_loop:
     LOAD_ADDR x0, asm_quad_prefix
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x10, list_pool_values
+    LOAD_TBL x10, list_pool_values
     ldr x0, [x10, x21, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -233,7 +233,7 @@ Lemit_list_pool_lengths_loop:
     LOAD_ADDR x0, asm_quad_prefix
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x10, list_pool_lengths
+    LOAD_TBL x10, list_pool_lengths
     ldr x0, [x10, x21, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -255,7 +255,7 @@ Lemit_list_base_counts_loop:
     LOAD_ADDR x0, asm_quad_prefix
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x10, list_base_counts
+    LOAD_TBL x10, list_base_counts
     ldr x0, [x10, x21, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -274,7 +274,7 @@ Lemit_list_base_counts_done:
 Lemit_map_key_strs_loop:
     cmp x21, x20
     b.ge Lemit_map_key_strs_done
-    LOAD_ADDR x10, map_pool_key_lengths
+    LOAD_TBL x10, map_pool_key_lengths
     ldr x22, [x10, x21, lsl #3]
     cbz x22, Lemit_map_key_strs_next  // int key, skip
     // emit: .align 3\nmap_key_N:\n    .asciz "..."\n
@@ -290,7 +290,7 @@ Lemit_map_key_strs_loop:
     LOAD_ADDR x0, asm_map_key_suffix
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x10, map_pool_keys
+    LOAD_TBL x10, map_pool_keys
     ldr x0, [x10, x21, lsl #3]
     mov x1, x22
     mov x2, #1
@@ -316,7 +316,7 @@ Lemit_map_key_strs_done:
 Lemit_map_pool_keys_loop:
     cmp x21, x20
     b.ge Lemit_map_pool_keys_done
-    LOAD_ADDR x10, map_pool_key_lengths
+    LOAD_TBL x10, map_pool_key_lengths
     ldr x22, [x10, x21, lsl #3]
     cbz x22, Lemit_map_pool_keys_int  // int key: emit raw value
     // string key: emit .quad map_key_N
@@ -337,7 +337,7 @@ Lemit_map_pool_keys_int:
     LOAD_ADDR x0, asm_quad_prefix
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x10, map_pool_keys
+    LOAD_TBL x10, map_pool_keys
     ldr x0, [x10, x21, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -360,7 +360,7 @@ Lemit_map_pool_key_lens_loop:
     LOAD_ADDR x0, asm_quad_prefix
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x10, map_pool_key_lengths
+    LOAD_TBL x10, map_pool_key_lengths
     ldr x0, [x10, x21, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -382,7 +382,7 @@ Lemit_map_pool_values_loop:
     LOAD_ADDR x0, asm_quad_prefix
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x10, map_pool_values
+    LOAD_TBL x10, map_pool_values
     ldr x0, [x10, x21, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -404,7 +404,7 @@ Lemit_map_pool_lens_loop:
     LOAD_ADDR x0, asm_quad_prefix
     mov x1, #1
     bl _write_cstr_fd
-    LOAD_ADDR x10, map_pool_lengths
+    LOAD_TBL x10, map_pool_lengths
     ldr x0, [x10, x21, lsl #3]
     mov x1, #1
     bl _write_u64_fd
@@ -737,13 +737,65 @@ _emit_stack_alloc:
     mov x29, sp
     stp x19, x20, [sp, #-16]!
     mov x19, x0
+    // Frames >= 65536 bytes cannot use a single `mov x16, #imm` (16-bit imm);
+    // materialize the size with movz/movk. Reachable now the var table grows.
+    cmp x19, #0x10000
+    b.ge Lstackalloc_big
     LOAD_ADDR x0, asm_mov_x16_prefix
     mov x1, #1
     bl _write_cstr_fd
     mov x0, x19
     mov x1, #1
     bl _write_i64_fd
+    b Lstackalloc_sub
+Lstackalloc_big:
+    mov x0, x19
+    mov x1, #0                 // reg selector 0 => x16
+    bl _emit_movzk_reg
+Lstackalloc_sub:
     LOAD_ADDR x0, asm_sp_sub_x16
+    mov x1, #1
+    bl _write_cstr_fd
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+// x0 = value (0..2^32-1), x1 = reg selector (0 => x16, 1 => x28). Emits
+//     movz <reg>, #<value & 0xffff>
+//     movk <reg>, #<(value>>16) & 0xffff>, lsl #16
+// with no trailing newline (the caller appends its own suffix). Used to
+// materialize frame sizes / stack-slot offsets that exceed the 16-bit
+// immediate range of `mov` (now reachable because the var table grows).
+_emit_movzk_reg:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    mov x19, x0                // value
+    mov x20, x1                // reg selector (0=x16, 1=x28)
+    cbz x20, Lmovzk_movz_x16
+    LOAD_ADDR x0, asm_movz_x28
+    b Lmovzk_movz_w
+Lmovzk_movz_x16:
+    LOAD_ADDR x0, asm_movz_x16
+Lmovzk_movz_w:
+    mov x1, #1
+    bl _write_cstr_fd
+    and x0, x19, #0xffff
+    mov x1, #1
+    bl _write_u64_fd
+    cbz x20, Lmovzk_movk_x16
+    LOAD_ADDR x0, asm_movk_x28
+    b Lmovzk_movk_w
+Lmovzk_movk_x16:
+    LOAD_ADDR x0, asm_movk_x16
+Lmovzk_movk_w:
+    mov x1, #1
+    bl _write_cstr_fd
+    lsr x0, x19, #16
+    and x0, x0, #0xffff
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_lsl16
     mov x1, #1
     bl _write_cstr_fd
     ldp x19, x20, [sp], #16
@@ -785,12 +837,20 @@ _emit_stack_load_reg_fd:
     b Lemit_stack_load_done
 
 Lemit_stack_load_large:
+    cmp x21, #0x10000
+    b.ge Lesll_bigoff
     LOAD_ADDR x0, asm_x28_offset_prefix
     mov x1, #1
     bl _write_cstr_fd
     mov x0, x21
     mov x1, #1
     bl _write_u64_fd
+    b Lesll_offdone
+Lesll_bigoff:
+    mov x0, x21
+    mov x1, #1                 // reg selector 1 => x28
+    bl _emit_movzk_reg
+Lesll_offdone:
     LOAD_ADDR x0, asm_x28_sub_suffix
     mov x1, #1
     bl _write_cstr_fd
@@ -843,12 +903,20 @@ _emit_stack_store_reg_fd:
     b Lemit_stack_store_done
 
 Lemit_stack_store_large:
+    cmp x21, #0x10000
+    b.ge Less_bigoff
     LOAD_ADDR x0, asm_x28_offset_prefix
     mov x1, #1
     bl _write_cstr_fd
     mov x0, x21
     mov x1, #1
     bl _write_u64_fd
+    b Less_offdone
+Less_bigoff:
+    mov x0, x21
+    mov x1, #1                 // reg selector 1 => x28
+    bl _emit_movzk_reg
+Less_offdone:
     LOAD_ADDR x0, asm_x28_sub_suffix
     mov x1, #1
     bl _write_cstr_fd
@@ -3986,9 +4054,9 @@ Lemit_op_fn_call_args_done:
     mov x1, #1
     bl _write_cstr_fd
     
-    LOAD_ADDR x9, fn_name_ptrs
+    LOAD_TBL x9, fn_name_ptrs
     ldr x0, [x9, x23, lsl #3]
-    LOAD_ADDR x9, fn_name_lens
+    LOAD_TBL x9, fn_name_lens
     ldr x1, [x9, x23, lsl #3]
     mov x2, #1
     bl _write_buffer_fd
@@ -4471,7 +4539,7 @@ _emit_var_slot_data:
 Lemit_var_slot_loop:
     cmp x21, x20
     b.ge Lemit_var_slot_done
-    LOAD_ADDR x19, var_types
+    LOAD_TBL x19, var_types
     ldr x22, [x19, x21, lsl #3]
     cmp x22, #2
     b.eq Lemit_var_slot_next
@@ -4685,7 +4753,7 @@ _stack_slot_to_offset:
     cmp x20, #100
     b.lt Lstack_slot_no_scope_base
     sub x20, x20, #100
-    LOAD_ADDR x21, fn_scope_bases
+    LOAD_TBL x21, fn_scope_bases
     ldr x21, [x21, x20, lsl #3]
     cmp x19, x21
     b.lt Lstack_slot_no_scope_base
@@ -4756,9 +4824,9 @@ Lemit_main_body_check_fn_main:
     add x1, x19, #100
     str x1, [x0]
 
-    LOAD_ADDR x9, fn_op_starts
+    LOAD_TBL x9, fn_op_starts
     ldr x21, [x9, x19, lsl #3]
-    LOAD_ADDR x9, fn_op_counts
+    LOAD_TBL x9, fn_op_counts
     ldr x22, [x9, x19, lsl #3]
     
     mov x20, #0
@@ -4812,9 +4880,9 @@ _emit_user_function:
     mov x1, #1
     bl _write_cstr_fd
 
-    LOAD_ADDR x9, fn_name_ptrs
+    LOAD_TBL x9, fn_name_ptrs
     ldr x20, [x9, x19, lsl #3] // ptr
-    LOAD_ADDR x9, fn_name_lens
+    LOAD_TBL x9, fn_name_lens
     ldr x21, [x9, x19, lsl #3] // len
     
     mov x0, x20
@@ -4849,14 +4917,14 @@ _emit_user_function:
     // locals -- e.g. a recursive solver whose helper call corrupted its loop
     // counters. The epilogue restores via `mov sp, x29`, so any (16-aligned)
     // size is balanced.
-    LOAD_ADDR x9, fn_frame_sizes
+    LOAD_TBL x9, fn_frame_sizes
     ldr x0, [x9, x19, lsl #3]
     bl _emit_stack_alloc
 
     // Store incoming argument registers into this function's parameter slots.
-    LOAD_ADDR x9, fn_scope_bases
+    LOAD_TBL x9, fn_scope_bases
     ldr x20, [x9, x19, lsl #3]
-    LOAD_ADDR x9, fn_param_counts
+    LOAD_TBL x9, fn_param_counts
     ldr x21, [x9, x19, lsl #3]
     mov x22, #0
 Lemit_fn_param_store_loop:
@@ -4870,9 +4938,9 @@ Lemit_fn_param_store_loop:
 Lemit_fn_param_store_done:
     
     // Emit the operations
-    LOAD_ADDR x9, fn_op_starts
+    LOAD_TBL x9, fn_op_starts
     ldr x22, [x9, x19, lsl #3] // start index
-    LOAD_ADDR x9, fn_op_counts
+    LOAD_TBL x9, fn_op_counts
     ldr x23, [x9, x19, lsl #3] // count
     
         

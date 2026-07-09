@@ -33,8 +33,15 @@ _define_variable:
 
     LOAD_ADDR x22, var_count
     ldr x23, [x22]
-    cmp x23, #SNC_MAX_VARS
-    b.ge Ldefine_full
+    // Grow the malloc-backed variable tables on demand instead of failing at a
+    // fixed cap. x22 (&var_count) and x23 (index) are callee-saved and survive
+    // the grow, as do the incoming args in x19,x20,x21,x25,x26,x27.
+    LOAD_ADDR x24, var_capacity
+    ldr x24, [x24]
+    cmp x23, x24
+    b.lt Ldefine_have_space
+    bl _snc_grow_vars
+Ldefine_have_space:
 
     LOAD_ADDR x24, var_scope_base
     ldr x24, [x24]
@@ -50,12 +57,12 @@ Ldefine_dup_loop:
     cmp x28, x24
     b.lt Ldefine_store
 
-    LOAD_ADDR x9, var_name_lens
+    LOAD_TBL x9, var_name_lens
     ldr x10, [x9, x28, lsl #3]
     cmp x10, x20
     b.ne Ldefine_dup_next
 
-    LOAD_ADDR x9, var_name_ptrs
+    LOAD_TBL x9, var_name_ptrs
     ldr x11, [x9, x28, lsl #3]
     mov x0, x19
     mov x1, x20
@@ -69,17 +76,17 @@ Ldefine_dup_next:
 
 Ldefine_store:
 
-    LOAD_ADDR x24, var_name_ptrs
+    LOAD_TBL x24, var_name_ptrs
     str x19, [x24, x23, lsl #3]
-    LOAD_ADDR x24, var_name_lens
+    LOAD_TBL x24, var_name_lens
     str x20, [x24, x23, lsl #3]
-    LOAD_ADDR x24, var_values
+    LOAD_TBL x24, var_values
     str x21, [x24, x23, lsl #3]
-    LOAD_ADDR x24, var_const_flags
+    LOAD_TBL x24, var_const_flags
     str x25, [x24, x23, lsl #3]
-    LOAD_ADDR x24, var_types
+    LOAD_TBL x24, var_types
     str x26, [x24, x23, lsl #3]
-    LOAD_ADDR x24, var_lengths
+    LOAD_TBL x24, var_lengths
     str x27, [x24, x23, lsl #3]
     add x23, x23, #1
     str x23, [x22]
@@ -139,12 +146,12 @@ Lset_loop:
     cmp x22, #-1
     b.eq Lset_unknown
 
-    LOAD_ADDR x9, var_name_lens
+    LOAD_TBL x9, var_name_lens
     ldr x10, [x9, x22, lsl #3]
     cmp x10, x20
     b.ne Lset_next
 
-    LOAD_ADDR x9, var_name_ptrs
+    LOAD_TBL x9, var_name_ptrs
     ldr x11, [x9, x22, lsl #3]
     mov x0, x19
     mov x1, x20
@@ -152,11 +159,11 @@ Lset_loop:
     bl _match_span_span
     cbz x0, Lset_next
 
-    LOAD_ADDR x9, var_const_flags
+    LOAD_TBL x9, var_const_flags
     ldr x10, [x9, x22, lsl #3]
     cbnz x10, Lset_const
 
-    LOAD_ADDR x9, var_values
+    LOAD_TBL x9, var_values
     str x21, [x9, x22, lsl #3]
     mov x0, #0
     b Lset_return
@@ -211,11 +218,11 @@ _set_variable_metadata:
 Lset_meta_loop:
     cmp x22, #-1
     b.eq Lset_meta_fail
-    LOAD_ADDR x9, var_name_lens
+    LOAD_TBL x9, var_name_lens
     ldr x10, [x9, x22, lsl #3]
     cmp x10, x20
     b.ne Lset_meta_next
-    LOAD_ADDR x9, var_name_ptrs
+    LOAD_TBL x9, var_name_ptrs
     ldr x11, [x9, x22, lsl #3]
     mov x0, x19
     mov x1, x20
@@ -226,7 +233,7 @@ Lset_meta_next:
     sub x22, x22, #1
     b Lset_meta_loop
 Lset_meta_found:
-    LOAD_ADDR x9, var_lengths
+    LOAD_TBL x9, var_lengths
     str x21, [x9, x22, lsl #3]
     mov x0, #0
     b Lset_meta_ret
@@ -254,12 +261,12 @@ Llookup_loop:
     cmp x21, #-1
     b.eq Llookup_fail
 
-    LOAD_ADDR x9, var_name_lens
+    LOAD_TBL x9, var_name_lens
     ldr x10, [x9, x21, lsl #3]
     cmp x10, x20
     b.ne Llookup_next
 
-    LOAD_ADDR x9, var_name_ptrs
+    LOAD_TBL x9, var_name_ptrs
     ldr x11, [x9, x21, lsl #3]
     mov x0, x19
     mov x1, x20
@@ -267,11 +274,11 @@ Llookup_loop:
     bl _match_span_span
     cbz x0, Llookup_next
 
-    LOAD_ADDR x9, var_values
+    LOAD_TBL x9, var_values
     ldr x1, [x9, x21, lsl #3]
-    LOAD_ADDR x9, var_types
+    LOAD_TBL x9, var_types
     ldr x2, [x9, x21, lsl #3]
-    LOAD_ADDR x9, var_lengths
+    LOAD_TBL x9, var_lengths
     ldr x3, [x9, x21, lsl #3]
     mov x4, x21
     mov x0, #1
@@ -314,12 +321,12 @@ Lset_full_loop:
     cmp x22, #-1
     b.eq Lset_full_unknown
 
-    LOAD_ADDR x9, var_name_lens
+    LOAD_TBL x9, var_name_lens
     ldr x10, [x9, x22, lsl #3]
     cmp x10, x20
     b.ne Lset_full_next
 
-    LOAD_ADDR x9, var_name_ptrs
+    LOAD_TBL x9, var_name_ptrs
     ldr x11, [x9, x22, lsl #3]
     mov x0, x19
     mov x1, x20
@@ -327,15 +334,15 @@ Lset_full_loop:
     bl _match_span_span
     cbz x0, Lset_full_next
 
-    LOAD_ADDR x9, var_const_flags
+    LOAD_TBL x9, var_const_flags
     ldr x10, [x9, x22, lsl #3]
     cbnz x10, Lset_full_const
 
-    LOAD_ADDR x9, var_values
+    LOAD_TBL x9, var_values
     str x21, [x9, x22, lsl #3]
-    LOAD_ADDR x9, var_types
+    LOAD_TBL x9, var_types
     str x25, [x9, x22, lsl #3]
-    LOAD_ADDR x9, var_lengths
+    LOAD_TBL x9, var_lengths
     str x26, [x9, x22, lsl #3]
     mov x0, #0
     b Lset_full_return
@@ -708,6 +715,242 @@ Lrecord_spawn_op_full:
     ret
 #endif
 
+.global _snc_grow_fns
+// --------------------------------------------------------------------------
+// Grow the malloc-backed function tables. All 25 parallel arrays grow together:
+// sixteen 8-byte/entry tables, eight 32-byte/entry tables (4 param slots per
+// function), and the 64-byte/entry synthetic method-name storage. Doubles the
+// current capacity, or allocates the initial SNC_MAX_FUNCS entries when the
+// capacity is 0, preserving existing contents via realloc, then updates
+// fn_capacity. fn_blueprint_ids defaults to -1 for every new entry.
+//
+// Register contract: callers keep live function ids and parse state in
+// callee-saved registers and/or reload fn_count after the call. This routine
+// saves/restores any callee-saved registers it uses; libc _realloc preserves
+// callee-saved registers too, so caller state survives. On allocation failure
+// it prints "too many functions" and exits.
+// --------------------------------------------------------------------------
+_snc_grow_fns:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+    stp x25, x26, [sp, #-16]!
+    stp x27, x28, [sp, #-16]!
+
+    LOAD_ADDR x19, fn_capacity
+    ldr x20, [x19]             // old capacity (entries)
+    lsl x21, x20, #1           // new capacity = old * 2
+    cbnz x20, Lgrow_fns_have_cap
+    mov x21, #SNC_MAX_FUNCS    // first allocation: initial capacity
+Lgrow_fns_have_cap:
+    lsl x22, x21, #3           // 8-byte arrays: bytes = new_cap * 8
+    lsl x24, x21, #5           // 32-byte arrays: bytes = new_cap * 32
+    lsl x25, x21, #6           // 64-byte arrays: bytes = new_cap * 64
+
+    LOAD_ADDR x23, fn_name_ptrs
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_fns_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, fn_name_lens
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_fns_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, fn_body_cursors
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_fns_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, fn_body_lines
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_fns_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, fn_source_ptrs
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_fns_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, fn_source_lens
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_fns_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, fn_param_counts
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_fns_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, fn_return_types
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_fns_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, fn_op_starts
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_fns_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, fn_op_counts
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_fns_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, fn_return_decl_lengths
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_fns_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, fn_return_extra_types
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_fns_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, fn_return_extra_decl_lengths
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_fns_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, fn_blueprint_ids
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_fns_fail
+    str x0, [x23]
+    mov x27, x0
+    mov x26, x20
+    mov x28, #-1
+Lgrow_fns_fill_bp_loop:
+    cmp x26, x21
+    b.ge Lgrow_fns_fill_bp_done
+    str x28, [x27, x26, lsl #3]
+    add x26, x26, #1
+    b Lgrow_fns_fill_bp_loop
+Lgrow_fns_fill_bp_done:
+
+    LOAD_ADDR x23, fn_scope_bases
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_fns_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, fn_frame_sizes
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_fns_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, fn_param_types
+    ldr x0, [x23]
+    mov x1, x24
+    bl _realloc
+    cbz x0, Lgrow_fns_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, fn_param_lengths
+    ldr x0, [x23]
+    mov x1, x24
+    bl _realloc
+    cbz x0, Lgrow_fns_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, fn_param_name_ptrs
+    ldr x0, [x23]
+    mov x1, x24
+    bl _realloc
+    cbz x0, Lgrow_fns_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, fn_param_name_lens
+    ldr x0, [x23]
+    mov x1, x24
+    bl _realloc
+    cbz x0, Lgrow_fns_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, fn_param_default_flags
+    ldr x0, [x23]
+    mov x1, x24
+    bl _realloc
+    cbz x0, Lgrow_fns_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, fn_param_default_values
+    ldr x0, [x23]
+    mov x1, x24
+    bl _realloc
+    cbz x0, Lgrow_fns_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, fn_param_default_types
+    ldr x0, [x23]
+    mov x1, x24
+    bl _realloc
+    cbz x0, Lgrow_fns_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, fn_param_default_lengths
+    ldr x0, [x23]
+    mov x1, x24
+    bl _realloc
+    cbz x0, Lgrow_fns_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, method_name_storage
+    ldr x0, [x23]
+    mov x1, x25
+    bl _realloc
+    cbz x0, Lgrow_fns_fail
+    str x0, [x23]
+
+    str x21, [x19]             // fn_capacity = new_cap
+
+    ldp x27, x28, [sp], #16
+    ldp x25, x26, [sp], #16
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+Lgrow_fns_fail:
+    LOAD_ADDR x0, msg_too_many_fns
+    mov x1, #2
+    bl _write_cstr_fd
+    mov x0, #1
+    bl _exit
+
 .global _snc_grow_ops
 // --------------------------------------------------------------------------
 // Grow the malloc-backed op tables (op_kinds + op_arg0..op_arg4). Doubles the
@@ -864,15 +1107,391 @@ Lgrow_pr_fail:
     mov x0, #1
     bl _exit
 
+.global _snc_grow_list_pool
+// --------------------------------------------------------------------------
+// Grow the malloc-backed list element pools. list_pool_values/list_pool_lengths/
+// list_base_counts are 8 bytes/entry; list_base_is_runtime is 1 byte/entry.
+// Doubles the current capacity, or allocates the initial SNC_MAX_LIST_ELEMS
+// entries when capacity is 0, preserving existing contents via realloc, then
+// updates list_pool_capacity. CRITICALLY it ZEROES every newly-added entry in
+// [old_cap, new_cap) of each array: realloc does NOT zero new memory, but the
+// old fixed .space pools were zero-initialized and codegen relies on that
+// (reserved-but-unfilled split slots, non-base count slots, and the default
+// list_base_is_runtime[base]=0 "not runtime-mutated" flag). Saves/restores
+// x19-x24 only and never touches x25-x28; libc _realloc preserves callee-saved
+// registers, so callers keep their live state (Llist_store holds its value/length
+// in x23/x25, the split reserve holds its base in x23). On OOM it exits.
+// --------------------------------------------------------------------------
+_snc_grow_list_pool:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+
+    LOAD_ADDR x19, list_pool_capacity
+    ldr x20, [x19]             // old capacity (entries)
+    lsl x21, x20, #1           // new capacity = old * 2
+    cbnz x20, Lgrow_lp_have_cap
+    mov x21, #SNC_MAX_LIST_ELEMS // first allocation: initial capacity
+Lgrow_lp_have_cap:
+    lsl x22, x21, #3           // 8-byte arrays: bytes = new_cap * 8
+
+    // list_pool_values (8 bytes/entry) + zero [old_cap, new_cap)
+    LOAD_ADDR x23, list_pool_values
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_lp_fail
+    str x0, [x23]
+    mov x24, x20
+Lgrow_lp_zv:
+    cmp x24, x21
+    b.ge Lgrow_lp_zv_done
+    str xzr, [x0, x24, lsl #3]
+    add x24, x24, #1
+    b Lgrow_lp_zv
+Lgrow_lp_zv_done:
+
+    // list_pool_lengths (8 bytes/entry) + zero [old_cap, new_cap)
+    LOAD_ADDR x23, list_pool_lengths
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_lp_fail
+    str x0, [x23]
+    mov x24, x20
+Lgrow_lp_zl:
+    cmp x24, x21
+    b.ge Lgrow_lp_zl_done
+    str xzr, [x0, x24, lsl #3]
+    add x24, x24, #1
+    b Lgrow_lp_zl
+Lgrow_lp_zl_done:
+
+    // list_base_counts (8 bytes/entry) + zero [old_cap, new_cap)
+    LOAD_ADDR x23, list_base_counts
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_lp_fail
+    str x0, [x23]
+    mov x24, x20
+Lgrow_lp_zc:
+    cmp x24, x21
+    b.ge Lgrow_lp_zc_done
+    str xzr, [x0, x24, lsl #3]
+    add x24, x24, #1
+    b Lgrow_lp_zc
+Lgrow_lp_zc_done:
+
+    // list_base_is_runtime (1 byte/entry) + zero [old_cap, new_cap)
+    LOAD_ADDR x23, list_base_is_runtime
+    ldr x0, [x23]
+    mov x1, x21               // 1-byte array: bytes = new_cap
+    bl _realloc
+    cbz x0, Lgrow_lp_fail
+    str x0, [x23]
+    mov x24, x20
+Lgrow_lp_zr:
+    cmp x24, x21
+    b.ge Lgrow_lp_zr_done
+    strb wzr, [x0, x24]
+    add x24, x24, #1
+    b Lgrow_lp_zr
+Lgrow_lp_zr_done:
+
+    str x21, [x19]             // list_pool_capacity = new_cap
+
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+Lgrow_lp_fail:
+    mov x0, #1
+    bl _exit
+
+.global _snc_grow_map_pool
+// --------------------------------------------------------------------------
+// Grow the malloc-backed map element pools (map_pool_keys/map_pool_key_lengths/
+// map_pool_key_ptrs/map_pool_values/map_pool_lengths, all 8 bytes/entry).
+// Doubles capacity (or allocates the initial SNC_MAX_MAP_ELEMS entries when 0),
+// preserving contents via realloc, then updates map_pool_capacity. ZEROES every
+// newly-added entry in [old_cap, new_cap) of each array because codegen relies
+// on the pool being zero-initialized (see _snc_grow_list_pool). Saves/restores
+// x19-x24 only and never touches x25-x28; libc _realloc preserves callee-saved
+// registers, so callers keep their live state (Lmap_store holds key/val data in
+// x23-x28). On OOM it exits.
+// --------------------------------------------------------------------------
+_snc_grow_map_pool:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+
+    LOAD_ADDR x19, map_pool_capacity
+    ldr x20, [x19]             // old capacity (entries)
+    lsl x21, x20, #1           // new capacity = old * 2
+    cbnz x20, Lgrow_mp_have_cap
+    mov x21, #SNC_MAX_MAP_ELEMS  // first allocation: initial capacity
+Lgrow_mp_have_cap:
+    lsl x22, x21, #3           // 8-byte arrays: bytes = new_cap * 8
+
+    // map_pool_keys + zero [old_cap, new_cap)
+    LOAD_ADDR x23, map_pool_keys
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_mp_fail
+    str x0, [x23]
+    mov x24, x20
+Lgrow_mp_zk:
+    cmp x24, x21
+    b.ge Lgrow_mp_zk_done
+    str xzr, [x0, x24, lsl #3]
+    add x24, x24, #1
+    b Lgrow_mp_zk
+Lgrow_mp_zk_done:
+
+    // map_pool_key_lengths + zero [old_cap, new_cap)
+    LOAD_ADDR x23, map_pool_key_lengths
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_mp_fail
+    str x0, [x23]
+    mov x24, x20
+Lgrow_mp_zkl:
+    cmp x24, x21
+    b.ge Lgrow_mp_zkl_done
+    str xzr, [x0, x24, lsl #3]
+    add x24, x24, #1
+    b Lgrow_mp_zkl
+Lgrow_mp_zkl_done:
+
+    // map_pool_key_ptrs + zero [old_cap, new_cap)
+    LOAD_ADDR x23, map_pool_key_ptrs
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_mp_fail
+    str x0, [x23]
+    mov x24, x20
+Lgrow_mp_zkp:
+    cmp x24, x21
+    b.ge Lgrow_mp_zkp_done
+    str xzr, [x0, x24, lsl #3]
+    add x24, x24, #1
+    b Lgrow_mp_zkp
+Lgrow_mp_zkp_done:
+
+    // map_pool_values + zero [old_cap, new_cap)
+    LOAD_ADDR x23, map_pool_values
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_mp_fail
+    str x0, [x23]
+    mov x24, x20
+Lgrow_mp_zv:
+    cmp x24, x21
+    b.ge Lgrow_mp_zv_done
+    str xzr, [x0, x24, lsl #3]
+    add x24, x24, #1
+    b Lgrow_mp_zv
+Lgrow_mp_zv_done:
+
+    // map_pool_lengths + zero [old_cap, new_cap)
+    LOAD_ADDR x23, map_pool_lengths
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_mp_fail
+    str x0, [x23]
+    mov x24, x20
+Lgrow_mp_zvl:
+    cmp x24, x21
+    b.ge Lgrow_mp_zvl_done
+    str xzr, [x0, x24, lsl #3]
+    add x24, x24, #1
+    b Lgrow_mp_zvl
+Lgrow_mp_zvl_done:
+
+    str x21, [x19]             // map_pool_capacity = new_cap
+
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+Lgrow_mp_fail:
+    mov x0, #1
+    bl _exit
+
+.global _snc_grow_src
+// --------------------------------------------------------------------------
+// Grow (or first-allocate) the malloc-backed source input buffer. src_buffer_cap
+// holds the current CONTENT-byte capacity (excluding the trailing NUL). This
+// doubles it (or sets it to SNC_SRC_BYTES-1 on the first call when 0) and
+// reallocs `buffer` to cap+1 bytes, preserving contents. Replaces the old fixed
+// .space source buffer that truncated input beyond 1 MB; the compiler can now
+// read a source file of any size. On OOM it prints msg_read_error and exits.
+// Saves/restores x19,x20; libc _realloc preserves callee-saved regs, so callers
+// (only _read_into_buffer, which reloads the base afterwards) are unaffected.
+// --------------------------------------------------------------------------
+_snc_grow_src:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+
+    LOAD_ADDR x19, src_buffer_cap
+    ldr x20, [x19]             // old content-byte capacity
+    lsl x1, x20, #1           // new cap = old * 2
+    cbnz x20, Lgrow_src_have
+    mov x1, #SNC_SRC_BYTES
+    sub x1, x1, #1            // first allocation: initial cap = SNC_SRC_BYTES - 1
+Lgrow_src_have:
+    str x1, [x19]             // src_buffer_cap = new cap
+    mov x20, x1               // keep new cap
+    LOAD_ADDR x9, buffer
+    ldr x0, [x9]              // current buffer ptr (0 => realloc acts as malloc)
+    add x1, x20, #1           // bytes = cap + 1 (room for the NUL terminator)
+    bl _realloc
+    cbz x0, Lgrow_src_fail
+    LOAD_ADDR x9, buffer
+    str x0, [x9]
+
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+Lgrow_src_fail:
+    LOAD_ADDR x0, msg_open_error
+    mov x1, #2
+    bl _write_cstr_fd
+    mov x0, #1
+    bl _exit
+
+.global _snc_grow_vars
+// --------------------------------------------------------------------------
+// Grow the malloc-backed variable tables (var_name_ptrs/var_name_lens/
+// var_values/var_lengths/var_const_flags/var_types). All six are 8 bytes/entry
+// and grow together. Doubles the current capacity, or allocates the initial
+// SNC_MAX_VARS entries when capacity is 0, preserving existing contents via
+// realloc, then updates var_capacity. This replaces the old fixed "too many
+// variables" cap so the variable table grows on demand.
+//
+// Register contract: callers (_define_variable, _allocate_temp_var, the hidden
+// -var path) keep their live state in callee-saved registers (x19-x28) and/or
+// reload from var_count after the call. This routine saves/restores x19-x24 and
+// never touches x25-x28; libc _realloc preserves callee-saved registers, so all
+// caller state in x19-x28 survives. On allocation failure it prints "too many
+// variables" and exits (only reachable if the machine is truly out of memory).
+// --------------------------------------------------------------------------
+_snc_grow_vars:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+
+    LOAD_ADDR x19, var_capacity
+    ldr x20, [x19]             // old capacity (entries)
+    lsl x21, x20, #1           // new capacity = old * 2
+    cbnz x20, Lgrow_vars_have_cap
+    mov x21, #SNC_MAX_VARS      // first allocation: initial capacity
+Lgrow_vars_have_cap:
+    lsl x22, x21, #3           // 8-byte arrays: bytes = new_cap * 8
+
+    LOAD_ADDR x23, var_name_ptrs
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_vars_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, var_name_lens
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_vars_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, var_values
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_vars_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, var_lengths
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_vars_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, var_const_flags
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_vars_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, var_types
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_vars_fail
+    str x0, [x23]
+
+    // hidden_var_name_storage is 32 bytes/entry (indexed by the global var
+    // index) and grows in lockstep, so any var index past the old cap has valid
+    // name storage. new_cap is in x21; bytes = new_cap * 32.
+    LOAD_ADDR x23, hidden_var_name_storage
+    ldr x0, [x23]
+    lsl x1, x21, #5
+    bl _realloc
+    cbz x0, Lgrow_vars_fail
+    str x0, [x23]
+
+    str x21, [x19]             // var_capacity = new_cap
+
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+Lgrow_vars_fail:
+    LOAD_ADDR x0, msg_too_many_vars
+    mov x1, #2
+    bl _write_cstr_fd
+    mov x0, #1
+    bl _exit
+
 .global _allocate_temp_var
 _allocate_temp_var:
     LOAD_ADDR x9, var_count
     ldr x0, [x9]
-    // Hard cap: without this check the zero-stores below silently write
-    // past the 512-entry tables into adjacent storage (corrupting e.g.
-    // var_name_ptrs), causing wild pointer crashes much later.
-    cmp x0, #SNC_MAX_VARS
-    b.ge Lalloc_temp_full
+    // Grow the malloc-backed variable tables on demand instead of failing at a
+    // fixed cap. Growing needs a frame for the call; afterwards x0/x9 are
+    // reloaded from var_count (realloc clobbers caller-saved x0-x18).
+    LOAD_ADDR x1, var_capacity
+    ldr x1, [x1]
+    cmp x0, x1
+    b.lt Lalloc_temp_have_space
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    bl _snc_grow_vars
+    ldp x29, x30, [sp], #16
+    LOAD_ADDR x9, var_count
+    ldr x0, [x9]
+Lalloc_temp_have_space:
     add x1, x0, #1
     str x1, [x9]
 
@@ -884,10 +1503,10 @@ _allocate_temp_var:
 
 Lalloc_temp_meta:
     
-    LOAD_ADDR x10, var_types
+    LOAD_TBL x10, var_types
     str xzr, [x10, x0, lsl #3]
     
-    LOAD_ADDR x10, var_lengths
+    LOAD_TBL x10, var_lengths
     str xzr, [x10, x0, lsl #3]
 
     // CRITICAL: also clear this temp's NAME length and pointer. Previously
@@ -899,9 +1518,9 @@ Lalloc_temp_meta:
     // (the "match_span_span" crashes seen in the example sweep). Zeroing
     // the name length makes a temp never match a real (non-empty) name
     // lookup, and _match_span_span never dereferences a zero-length span.
-    LOAD_ADDR x10, var_name_lens
+    LOAD_TBL x10, var_name_lens
     str xzr, [x10, x0, lsl #3]
-    LOAD_ADDR x10, var_name_ptrs
+    LOAD_TBL x10, var_name_ptrs
     str xzr, [x10, x0, lsl #3]
     ret
 

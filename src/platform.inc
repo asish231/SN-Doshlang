@@ -11,6 +11,16 @@
         adrp \reg, \sym
         add \reg, \reg, :lo12:\sym
     .endm
+
+    // LOAD_TBL: like LOAD_ADDR, but loads the POINTER stored at \sym into
+    // \reg (i.e. LOAD_ADDR + one deref). Used for the malloc-backed growable
+    // tables (var_*, fn_*, op_*, print_*, list_pool_*, map_pool_*, source
+    // buffer) whose symbol now holds a heap pointer rather than the storage.
+    .macro LOAD_TBL reg, sym
+        adrp \reg, \sym
+        add \reg, \reg, :lo12:\sym
+        ldr \reg, [\reg]
+    .endm
 #else
 #define ENTRY_MAIN _main
 #define C_OPEN _open
@@ -23,6 +33,16 @@
     .macro LOAD_ADDR reg, sym
         adrp \reg, \sym@PAGE
         add \reg, \reg, \sym@PAGEOFF
+    .endm
+
+    // LOAD_TBL: like LOAD_ADDR, but loads the POINTER stored at \sym into
+    // \reg (i.e. LOAD_ADDR + one deref). Used for the malloc-backed growable
+    // tables (var_*, fn_*, op_*, print_*, list_pool_*, map_pool_*, source
+    // buffer) whose symbol now holds a heap pointer rather than the storage.
+    .macro LOAD_TBL reg, sym
+        adrp \reg, \sym@PAGE
+        add \reg, \reg, \sym@PAGEOFF
+        ldr \reg, [\reg]
     .endm
 #endif
 
@@ -44,4 +64,6 @@
 #define SNC_MAX_OPS     32768
 #define SNC_MAX_PRINTS  16384
 #define SNC_MAX_FUNCS   256
+#define SNC_MAX_LIST_ELEMS 4096
+#define SNC_MAX_MAP_ELEMS  4096
 #define SNC_SRC_BYTES   1048576
