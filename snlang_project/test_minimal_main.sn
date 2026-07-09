@@ -1,0 +1,15 @@
+use math_utils
+use grade
+use student
+use report
+
+fn main() {
+    int s1_math    = 92
+    int s1_science = 88
+    int s1_english = 75
+    int s1_history = 95
+    int s1_cs      = 99
+    
+    int high1_4 = student_highest(s1_math, s1_science, s1_english, s1_history)
+    print(high1_4)
+}

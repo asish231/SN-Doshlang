@@ -33,3 +33,15 @@
 #define _close C_CLOSE
 #define _exit C_EXIT
 #define _printf C_PRINTF
+
+// -------------------------------------------------------------------------
+// Compiler capacity limits (formerly hard-coded fixed-size tables). Raised so
+// snc can compile large programs — a prerequisite for self-hosting. Both the
+// backing array storage (`.space` in data.s) and the "too many ..." cap checks
+// derive from these single definitions, so a cap and its storage can never
+// drift out of sync. All backing storage lives in .bss (zero on-disk cost).
+#define SNC_MAX_VARS    4096
+#define SNC_MAX_OPS     32768
+#define SNC_MAX_PRINTS  16384
+#define SNC_MAX_FUNCS   256
+#define SNC_SRC_BYTES   1048576

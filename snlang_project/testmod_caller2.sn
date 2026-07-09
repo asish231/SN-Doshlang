@@ -1,0 +1,5 @@
+use testmod
+
+fn main() {
+    print(testmod_fn(10, 20))
+}

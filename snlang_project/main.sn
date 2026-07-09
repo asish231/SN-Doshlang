@@ -1,0 +1,99 @@
+use math_utils
+use grade
+use student
+use report
+
+fn main() {
+    // --- Student 1: Asish ---
+    str name1 = "Asish"
+    int id1 = 101
+    int s1_math    = 92
+    int s1_science = 88
+    int s1_english = 75
+    int s1_history = 95
+    int s1_cs      = 99
+
+    int s1_total = s1_math + s1_science + s1_english + s1_history + s1_cs
+    str grade1   = letter_grade(avg_of5(s1_total))
+    int passed1 = student_passed5(student_passed_all(s1_math, s1_science, s1_english, s1_history), s1_cs)
+
+    print_report_header(name1, id1)
+    print_divider()
+    print_subject_score("Math", s1_math)
+    print_subject_score("Science", s1_science)
+    print_subject_score("English", s1_english)
+    print_subject_score("History", s1_history)
+    print_subject_score("CS", s1_cs)
+    print_divider()
+    str high_line1 = "Highest  : {student_highest5(student_highest(s1_math, s1_science, s1_english, s1_history), s1_cs)}"
+    print(high_line1)
+    str low_line1 = "Lowest   : {student_lowest5(student_lowest(s1_math, s1_science, s1_english, s1_history), s1_cs)}"
+    print(low_line1)
+    print_summary(avg_of5(s1_total), grade1, passed1)
+    print_divider()
+
+    // --- Student 2: Priya ---
+    str name2 = "Priya"
+    int id2 = 102
+    int s2_math    = 78
+    int s2_science = 55
+    int s2_english = 82
+    int s2_history = 70
+    int s2_cs      = 65
+
+    int s2_total = s2_math + s2_science + s2_english + s2_history + s2_cs
+    str grade2   = letter_grade(avg_of5(s2_total))
+    int passed2 = student_passed5(student_passed_all(s2_math, s2_science, s2_english, s2_history), s2_cs)
+
+    print_report_header(name2, id2)
+    print_divider()
+    print_subject_score("Math", s2_math)
+    print_subject_score("Science", s2_science)
+    print_subject_score("English", s2_english)
+    print_subject_score("History", s2_history)
+    print_subject_score("CS", s2_cs)
+    print_divider()
+    str high_line2 = "Highest  : {student_highest5(student_highest(s2_math, s2_science, s2_english, s2_history), s2_cs)}"
+    print(high_line2)
+    str low_line2 = "Lowest   : {student_lowest5(student_lowest(s2_math, s2_science, s2_english, s2_history), s2_cs)}"
+    print(low_line2)
+    print_summary(avg_of5(s2_total), grade2, passed2)
+    print_divider()
+
+    // --- Student 3: Rahul ---
+    str name3 = "Rahul"
+    int id3 = 103
+    int s3_math    = 45
+    int s3_science = 50
+    int s3_english = 58
+    int s3_history = 62
+    int s3_cs      = 55
+
+    int s3_total = s3_math + s3_science + s3_english + s3_history + s3_cs
+    str grade3   = letter_grade(avg_of5(s3_total))
+    int passed3 = student_passed5(student_passed_all(s3_math, s3_science, s3_english, s3_history), s3_cs)
+
+    print_report_header(name3, id3)
+    print_divider()
+    print_subject_score("Math", s3_math)
+    print_subject_score("Science", s3_science)
+    print_subject_score("English", s3_english)
+    print_subject_score("History", s3_history)
+    print_subject_score("CS", s3_cs)
+    print_divider()
+    str high_line3 = "Highest  : {student_highest5(student_highest(s3_math, s3_science, s3_english, s3_history), s3_cs)}"
+    print(high_line3)
+    str low_line3 = "Lowest   : {student_lowest5(student_lowest(s3_math, s3_science, s3_english, s3_history), s3_cs)}"
+    print(low_line3)
+    print_summary(avg_of5(s3_total), grade3, passed3)
+    print_divider()
+
+    // --- Class summary ---
+    int total = 3
+    int passed_count = 0
+    if (passed1 >= 1) { passed_count += 1 }
+    if (passed2 >= 1) { passed_count += 1 }
+    if (passed3 >= 1) { passed_count += 1 }
+    int failed_count = total - passed_count
+    print_class_summary(total, passed_count, failed_count)
+}

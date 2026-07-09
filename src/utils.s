@@ -21,6 +21,7 @@
  .global _restore_parser_state
  .global _file_exists
  .global _add_module_search_path
+ .global _add_source_dir_search_path
  .global _init_default_search_paths
  .global _register_imported_function
  .global _resolve_function_call
@@ -631,7 +632,16 @@ _file_write:
     mov x1, #0x601  // O_WRONLY | O_CREAT | O_TRUNC
 #endif
     mov x2, #0644 // mode
+    // NOTE: open()'s mode is a variadic argument; on the AArch64 Apple/ABI
+    // calling convention, variadic args must be passed on the stack, not in
+    // a register, or the callee reads garbage (see the identical, verified
+    // fix for the generated-program runtime in src/data.s asm_runtime_helpers
+    // _file_write, and ISSUES.md 2.6/2.7). This function is currently unused
+    // by the compiler itself, but is fixed here too to avoid the same trap.
+    sub sp, sp, #16
+    str x2, [sp]
     bl _open
+    add sp, sp, #16
     cmp x0, #0
     b.lt Lfile_write_fail
     mov x22, x0 // fd
@@ -1490,24 +1500,28 @@ _add_module_search_path:
     stp x29, x30, [sp, #-16]!
     mov x29, sp
     stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
     
     mov x19, x0  // path ptr
     
-    // Get current count
+    // Get current count. Keep it (and the length below) in CALLEE-SAVED
+    // registers: _malloc/_cstring_length are free to clobber x9-x15, and using
+    // x9/x10 across those calls previously stored the new entry at a garbage
+    // table index (wild write -> SIGSEGV).
     LOAD_ADDR x20, module_search_count
-    ldr x9, [x20]
+    ldr x21, [x20]  // x21 = current count
     
     // Check limit
-    cmp x9, #128
+    cmp x21, #128
     b.ge Ladd_search_path_limit
     
     // Calculate path length
     mov x0, x19
     bl _cstring_length
-    mov x10, x0  // path length
+    mov x22, x0  // x22 = path length
     
     // Allocate memory for path copy
-    add x0, x10, #1  // + null terminator
+    add x0, x22, #1  // + null terminator
 #ifdef _WIN32
     bl malloc
 #else
@@ -1520,7 +1534,7 @@ _add_module_search_path:
     // Copy path
     mov x12, #0
 Ladd_search_path_copy:
-    cmp x12, x10
+    cmp x12, x22
     b.ge Ladd_search_path_copy_done
     add x13, x19, x12
     ldrb w14, [x13]
@@ -1531,16 +1545,16 @@ Ladd_search_path_copy:
 
 Ladd_search_path_copy_done:
     // Null terminate
-    add x13, x11, x10
+    add x13, x11, x22
     strb wzr, [x13]
     
     // Store in search paths array
     LOAD_ADDR x12, module_search_paths
-    str x11, [x12, x9, lsl #3]
+    str x11, [x12, x21, lsl #3]
     
     // Increment count
-    add x9, x9, #1
-    str x9, [x20]
+    add x21, x21, #1
+    str x21, [x20]
     
     mov x0, #1  // success
     b Ladd_search_path_return
@@ -1550,6 +1564,52 @@ Ladd_search_path_alloc_error:
     mov x0, #0  // error
 
 Ladd_search_path_return:
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+// _add_source_dir_search_path: given the compiled source file's path (x0,
+// null-terminated), register its directory as a module search path so that
+// `use foo` resolves foo.sn located NEXT TO the importing file, regardless of
+// the process's current working directory. If the path has no '/', the file is
+// in the CWD which is already covered by the default "." search path.
+_add_source_dir_search_path:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+
+    mov x19, x0          // source path ptr
+    mov x9, #0           // scan index
+    mov x20, #-1         // index of last '/'
+Lasdsp_scan:
+    ldrb w10, [x19, x9]
+    cbz w10, Lasdsp_scan_done
+    cmp w10, #'/'
+    b.ne Lasdsp_scan_next
+    mov x20, x9
+Lasdsp_scan_next:
+    add x9, x9, #1
+    b Lasdsp_scan
+Lasdsp_scan_done:
+    cmn x20, #1
+    b.eq Lasdsp_ret      // no '/', dir is CWD (already "." )
+    cbz x20, Lasdsp_ret  // slash at index 0 (root-relative): skip, rare
+    // Copy the directory portion [0..x20) into the scratch buffer and add it.
+    LOAD_ADDR x11, module_file_path_buf
+    mov x9, #0
+Lasdsp_copy:
+    cmp x9, x20
+    b.ge Lasdsp_copy_done
+    ldrb w10, [x19, x9]
+    strb w10, [x11, x9]
+    add x9, x9, #1
+    b Lasdsp_copy
+Lasdsp_copy_done:
+    strb wzr, [x11, x20]
+    mov x0, x11
+    bl _add_module_search_path
+Lasdsp_ret:
     ldp x19, x20, [sp], #16
     ldp x29, x30, [sp], #16
     ret

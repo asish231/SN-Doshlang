@@ -1,0 +1,5 @@
+use grade
+fn main() {
+    str g = letter_grade(85)
+    print(g)
+}

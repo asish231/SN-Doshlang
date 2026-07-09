@@ -1,0 +1,6 @@
+use testmod
+
+fn main() {
+    int x = testmod_fn(10, 20)
+    print(x)
+}

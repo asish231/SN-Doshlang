@@ -1,0 +1,34 @@
+// utils/math_utils.sn
+// Math helper functions for the grade tracker
+
+fn average(int a, int b, int c, int d) -> int {
+    int total = a + b + c + d
+    int avg = total / 4
+    return avg
+}
+
+fn average5(int abcd, int e) -> int {
+    int total = abcd + e
+    int avg = total / 5
+    return avg
+}
+
+fn max_of(int a, int b) -> int {
+    if (a > b) {
+        return a
+    }
+    return b
+}
+
+fn min_of(int a, int b) -> int {
+    if (a < b) {
+        return a
+    }
+    return b
+}
+
+fn clamp(int val, int lo, int hi) -> int {
+    int result = max_of(val, lo)
+    result = min_of(result, hi)
+    return result
+}

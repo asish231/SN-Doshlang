@@ -1,0 +1,13 @@
+// A small sample program tokenized by selfhost/lexer.sn (run `make selfhost`).
+fn add(a: int, b: int) -> int {
+    return a + b
+}
+
+fn main() {
+    int x = 42
+    str msg = "hi there"
+    if (x >= 10 and x != 0) {
+        print(add(x, 8))
+        print(msg)
+    }
+}

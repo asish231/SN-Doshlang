@@ -9,26 +9,18 @@
 ## A. ABOUT SNLANG
 ==================
 
-**SNlang** is a programming language created from scratch by **Asish Kumar Sharma**. The challenge was to build a programming language from the ground up in 7 days — it was completed in just 5.
+**SNlang** is a programming language created from scratch by **Asish Kumar Sharma**.
 
 ### The Motive and Story
 
-The core motive behind SNlang is to make programming **natively fast** while remaining **incredibly simple** to write. It was born out of a desire to eliminate repetitive boilerplate code and unnecessary syntax, like the semicolon (`;`), when they aren't actually needed.
+The core motive behind SNlang is to explore a lighter syntax for a natively compiled language while reducing repetitive boilerplate in common cases.
 
-SNlang is designed to give you:
-- The **speed and structuring** of C (but better looking and easier to use).
-- The **simplicity** of Golang.
-- The **feel and readability** of Python.
-- Zero boilerplate, removing the verbose overhead of Java (like `Class obj = new Class();`).
-
-To achieve this clarity, SNlang strips away confusing and misleading legacy keywords:
-- `class` is replaced with `blueprint`.
-- `extends` is replaced with `from`.
-- Pointers don't use confusing `*` syntax; they use a readable `ref<T>` approach.
-- Cumbersome input methods like `scanf` or `System.in` are replaced with a simple `input()`.
-- Function return types use a clear arrow syntax, like `-> int` or `-> str`, making the code actually readable.
-
-It is a natively compiled language that is **fast enough to be broadly used**, providing the raw performance of native execution without sacrificing the developer experience.
+Some of the syntax choices in SNlang are:
+- `blueprint` in place of `class`
+- `from` in place of `extends`
+- `ref<T>` for pointer-style values
+- `input()` for console input
+- Arrow return types such as `-> int` or `-> str`
 
 `snc` is a small programming language compiler written in ARM64 assembly. It reads `.sn` source code and emits ARM64 assembly that can be assembled with `clang`. The source includes a platform macro layer for ARM64 Mach-O output and is currently validated for macOS on ARM64.
 
@@ -50,34 +42,14 @@ The old single-file version is archived at `archive/snc.monolith.s`.
 
 ---
 
-### Implementation Status
+### Current Status
 
-#### ✅ SELF-HOSTING READY (May 3, 2026)
+Current verified status for this repository:
 
-All critical infrastructure is complete and functional:
-
-**Core Language Features:**
-- Typed variables and constants
-- Arithmetic and comparisons
-- Control flow (`if`, `while`, `for`, `for in`)
-- Function definitions, parameters, returns
-- String methods (`.length()`, `.slice()`, `.contains()`, `.replace()`, `.split()`, `.upper()`, `.lower()`)
-- Collections (`list<T>`, `map<K, V>`)
-- Error handling (`try`/`catch`, `throw`)
-- Pointers (`ref<T>`, `alloc()`, `free()`)
-- Pattern matching (`match`)
-
-**Module System:**
-- Module imports and exports (`use module`)
-- Module qualified access (`module.func()`)
-- Selective imports (`use module only func1, func2`)
-- Cross-file function calls
-- Module search paths
-
-**Performance:**
-- Benchmark: 829ms for 100M iterations (comparable to C without optimization)
-- Native ARM64 assembly generation
-- No garbage collector — manual memory management
+- Builds on macOS ARM64
+- `make assert` passes `200/200` must-pass checks
+- `155/162` examples run; the remaining `7` are deliberate negative tests
+- The project is a working hobby/portfolio language and compiler, not a self-hosting or production-ready toolchain
 
 ---
 
@@ -155,12 +127,6 @@ fn main() {
 
 ---
 
-### Self-Hosting Status
-
-SNlang is now **self-hosting capable** in the practical sense that you can start writing a compiler in SNlang today and bootstrap it with the current `snc`. The language/runtime baseline is stable enough on macOS for compiler-work, and the core module, map runtime store, cast, and slice paths are validated.
-
----
-
 ## SNlang OOP Syntax (Zero Boilerplate)
 
 ### 1. Blueprints (Classes)
@@ -229,62 +195,25 @@ blueprint Dog from Animal {
 
 ## SNlang Concurrency
 
-### 1. Spawning Threads
+Current concurrency support is limited to detached fire-and-forget thread spawning via `spawn fn()` or `spawn obj.method()`.
+
+The following forms are planned / not yet implemented and should not be treated as working language features:
+
+- `spawn { ... }` blocks
+- Channels such as `chan<int>` with `.send()`, `.receive()`, and `.close()`
+- `lock`-based synchronization
+- `async` / `await`
+
+### Detached `spawn` example
 
 ```sn
-spawn {
-    for (i in 0..1000) {
-        print("Working: " + i)
-    }
-}
-print("Main continues immediately")
-```
-
-### 2. Channels (Message Passing)
-
-```sn
-chan<int> numbers
-
-spawn {
-    for (i in 0..10) { numbers.send(i) }
-    numbers.close()
-}
-
-spawn {
-    while (numbers.open) {
-        print("Received: " + numbers.receive())
-    }
-}
-```
-
-### 3. Locks (Synchronization)
-
-```sn
-lock counterLock
-int counter = 0
-
-fn increment() {
-    lock(counterLock) { counter += 1 }
-}
-
-spawn increment()
-spawn increment()
-print(counter)  // Output: 2
-```
-
-### 4. Async/Await
-
-```sn
-async fn fetchData(str url) -> str {
-    result = await httpGet(url)
-    return result
+fn worker() {
+    print("Working in background")
 }
 
 fn main() {
-    data = async fetchData("https://api.example.com")
-    print("Fetching...")
-    result = await data
-    print("Got: " + result)
+    spawn worker()
+    print("Main continues immediately")
 }
 ```
 
@@ -380,7 +309,8 @@ You can also explore the `examples/` directory:
 | `make run` | Emit assembly for the example |
 | `make example` | Compile and run the example program |
 | `make test` | Run the current language checks |
-| `./build.ps1` | Build on PowerShell (no `make` required) |
+
+The repository does not include a local `build.ps1`; the available PowerShell helper is `scripts/remote_mac_build.ps1`, which connects to a Mac to perform the build.
 
 Compile your own program:
 
@@ -398,30 +328,7 @@ On Windows ARM64, the generated assembly expects COFF/Windows-style symbol resol
 
 SNlang produces **native ARM64 machine code** — no VM, no interpreter, just direct CPU instructions.
 
-### Benchmark Results
-
-| Test | Time | Performance |
-|------|------|-------------|
-| 1M loop iterations | 0.4s | ~2.5M ops/sec |
-| Compilation (typical file) | 4ms | ~250 files/sec |
-
-### Why It's Fast
-
-- **Native code**: Compiles to ARM64 assembly → direct CPU execution
-- **No runtime**: Uses standard C library (`_printf`, `_malloc`, `_open`)
-- **No GC overhead**: Simple stack allocation, no garbage collector
-- **Tight loops**: Compiled loops are direct CPU instructions
-
-### Speed Comparison
-
-| Language | Relative Speed |
-|----------|----------------|
-| C / C++ / Rust / Go | 1x |
-| **SNlang** | **~1x** (native code) |
-| JavaScript | ~20x slower |
-| Python | ~100x slower |
-
-For details on performance theory, see `THEORY.md`.
+No benchmark figures or cross-language speed comparisons are currently verified in this document, so none are claimed here.
 
 ---
 

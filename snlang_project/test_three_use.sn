@@ -1,0 +1,10 @@
+use grade
+use student
+use report
+fn main() {
+    str g = letter_grade(85)
+    int h = student_highest(10, 20, 30, 40)
+    print_divider()
+    print(g)
+    print(h)
+}

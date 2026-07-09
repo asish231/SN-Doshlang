@@ -1,0 +1,75 @@
+// models/student.sn
+// Student model - holds name, ID, and five subject scores
+
+// Workaround: compiler max 4 params, so we pass sum+e separately
+fn student_average(int s1, int s2, int s3, int s4) -> int {
+    int total = s1 + s2 + s3 + s4
+    int avg = total / 4
+    return avg
+}
+
+fn student_average5(int abcd, int e) -> int {
+    int total = abcd + e
+    int avg = total / 5
+    return avg
+}
+
+fn student_highest(int s1, int s2, int s3, int s4) -> int {
+    int best = s1
+    if (s2 > best) {
+        best = s2
+    }
+    if (s3 > best) {
+        best = s3
+    }
+    if (s4 > best) {
+        best = s4
+    }
+    return best
+}
+
+fn student_highest5(int best4, int s5) -> int {
+    int best = best4
+    if (s5 > best) {
+        best = s5
+    }
+    return best
+}
+
+fn student_lowest(int s1, int s2, int s3, int s4) -> int {
+    int worst = s1
+    if (s2 < worst) {
+        worst = s2
+    }
+    if (s3 < worst) {
+        worst = s3
+    }
+    if (s4 < worst) {
+        worst = s4
+    }
+    return worst
+}
+
+fn student_lowest5(int worst4, int s5) -> int {
+    int worst = worst4
+    if (s5 < worst) {
+        worst = s5
+    }
+    return worst
+}
+
+fn student_passed_all(int s1, int s2, int s3, int s4) -> bool {
+    bool ok = false
+    if (s1 >= 60 and s2 >= 60 and s3 >= 60 and s4 >= 60) {
+        ok = true
+    }
+    return ok
+}
+
+fn student_passed5(bool ok4, int s5) -> bool {
+    bool ok = false
+    if (ok4 and s5 >= 60) {
+        ok = true
+    }
+    return ok
+}

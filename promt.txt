@@ -1,0 +1,417 @@
+# World Graph & Cognitive Overlay Specification
+
+### File Location: `/Users/asishsharma/programming/micro/safarnow_docs/world_graph_cognitive_overlay_spec.md`
+
+### Companion Specification to Main Architecture — Single Source of Truth
+
+This engineering document establishes the production blueprint for data ingestion, semantic structuring, and high-concurrency simulation loops within the **SafarNow Routing Engine**. It defines the absolute operational boundaries between AI-driven semantic interpretation, multi-provider factual grounding, and memory-insulated simulation loops.
+
+---
+
+## 1. Core Structural Separation (The Clean Rule)
+
+The engineering foundation of the SafarNow architecture splits trip planning into distinct, decoupled execution boundaries:
+
+> **The Clean Rule of SafarNow Architecture:**
+> 1. **Cognitive Overlay (Gemini):** Interprets open-ended human expressions, extracts qualitative intent, uncovers hidden local tracks/lanes, and constructs metadata classification filters. *It is strictly prohibited from writing data records directly to the execution layer.*
+> 2. **Provider APIs (Maps / Stays / Transit):** Serves as the source of absolute geographical, operational, and financial truth parameters.
+> 3. **World Graph:** Caches and stores verified physical coordinates, live constraints, and time-dependent edges.
+> 4. **Simulation Engine:** Executes stack-allocated search branches against strict survival sandboxes, ranking paths through multi-objective optimization.
+> 
+> 
+> *Core System Mandate: The Java simulator never trusts Gemini directly.*
+
+```text
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                                SYSTEM PIPELINE FLOW                                    │
+├───────────────────────────┬───────────────────────────┬────────────────────────────────┤
+│      COGNITIVE STAGE      │      GROUNDING STAGE      │       SIMULATION STAGE         │
+├───────────────────────────┼───────────────────────────┼────────────────────────────────┤
+│  User Intent Extraction   │   Deterministic Verify    │  Allocation-Free Search Loop   │
+│         (Gemini)          │  (Maps / Transit / Stays) │    (State Arena Pools)         │
+│             │             │             │             │               │                │
+│             ▼             │             ▼             │               ▼                │
+│    [candidate_buffer]     │     [verified_nodes]      │     NSGA-II Sorter & Pareto    │
+│  (Staged Vibe Overlays)   │  (Mapped Virtual Tokens)  │     (Diverse Top-10 Outputs)   │
+└───────────────────────────┴───────────────────────────┴────────────────────────────────┘
+
+```
+
+---
+
+## 2. The 8-Layer World Graph Storage Topology
+
+Data within a targeted metropolitan boundary is divided into eight operational abstraction layers to decouple volatile runtime dynamics from permanent structural indexes.
+
+### Layer 1: `provider_facts`
+
+Houses raw operational inputs scraped from external networks (OpenStreetMap, Mappls, Google Places, Open-Meteo, Booking.com, SerpAPI, and SearchAPI). Every record maintains its native data provider attribution token, a collection timestamp, an explicit Time-to-Live (TTL) ceiling, and a source confidence ranking.
+
+### Layer 2: `verified_nodes`
+
+Contains validated core spatial records representing physical locations.
+
+* **`localNodeId`:** An internal graph node key represented as a standard 32-bit integer, capable of scaling to any database length.
+* **`completionTokenId`:** A dense, stack-allocated token index limited to the range $0 \le \text{ID} \le 63$.
+
+> **Completion Token Rule:** Only selected, non-revisitable primary itinerary goals (such as key monuments, booked ticket venues, or fixed attractions) consume a completion token bit. Support nodes, hotels, restaurants, transit hubs, cafes, and delivery zones use a fallback sentinel value of `-1` and **never** consume completion tokens.
+
+### Layer 3: `verified_edges`
+
+A time-dependent route matrix mapping edge distances, multivariant transit durations (accounting for traffic swings), multicode fare tables (Metro, Auto, Cab, Walking), night safety vectors, and atmospheric exposure metrics linking the nodes.
+
+### Layer 4: `cognitive_overlays`
+
+The semantic classification layer populated by Gemini. It appends neighborhood vibe descriptors, authentic local meaning modifiers, and hidden track indicators directly to `verified_nodes`. It lives strictly as an extended metadata collection; it cannot mutate relational database tables or corrupt system code structures.
+
+### Layer 5: `candidate_buffer`
+
+A transient, low-overhead staging cache holding unvetted recommendations, street lanes, or local street food alleys compiled by Gemini before they are passed through formal API verification.
+
+### Layer 6: `infeasible_buffer`
+
+A tracking repository indexing rejected location nodes along with structured failure enums (e.g., `REJECTED_COORDINATE_NOT_FOUND`, `REJECTED_UNSAFE_AT_NIGHT`, `REJECTED_OUT_OF_BUDGET`). This block stops the system from running costly re-evaluations on known invalid nodes during a live planning session.
+
+### Layer 7: `combo_suggestions`
+
+Pre-calculated, geographically optimized location pairs and activity clusters that have successfully cleared a shallow, 3-layer lookahead simulation layout.
+
+### Layer 8: `accommodation_anchor_scores`
+
+A localized index matrix that scores lodging candidates against top activity clusters by optimizing for transit friction, surge boundaries, and safety risk profiles.
+
+---
+
+## 3. Cognitive Overlay & Fixed Experiential Buckets
+
+Gemini standardizes human experiences, cultural nuances, and street intelligence into **five fixed architectural semantic buckets**. Sub-categorical properties live as array strings inside the overlay definition, avoiding any physical schema drift.
+
+### The Outer Buckets
+
+* `PLACES`: Permanent physical landmarks, monuments, viewpoints, nature preserves, and architectural sites.
+* `THINGS_MUST_DO`: Immersive local actions, walking tours, cultural ceremonies, and localized micro-experiences.
+* `MUST_EAT_FOOD`: Legendary street food corridors, authentic historical culinary tracks, and critical culinary hotspots.
+* `MARKET_SHOPPING`: Historical local traditional bazaars, specialized handicraft lanes, spice corridors, and artisan markets.
+* `HIDDEN_SPOTS`: High-potential, low-visibility regional gems verified from local knowledge graphs but missed by global data aggregators.
+
+### Filter Shield JSON Definition
+
+Gemini is completely restricted from outputting raw query blocks. It evaluates human conversational parameters and compiles a clean, standardized metadata object:
+
+```json
+{
+  "includeTags": ["street_food_lane", "old_city_walk", "traditional_bazaar"],
+  "excludeTags": ["commercial_luxury", "high_fatigue_stairs"],
+  "bucket": "MARKET_SHOPPING"
+}
+
+```
+
+The Java application layer reads this payload, extracts the array strings, and dynamically compiles secure database query executions against the `cognitive_overlays` cache.
+
+---
+
+## 4. Ingestion Data Flow & $\pm 2$ Recommendation Engine
+
+To guarantee consistent user responsiveness, the engine groups valid locations into **Combo Pairs** and executes a shallow, high-speed **3-Layer Lookahead Simulation** to calculate trip metrics before constructing a full multi-day layout.
+
+### The $\pm 2$ Recovery Strategy
+
+If a user explicitly rejects an automated combo selection or activity node while customizing their trip, the backend bypasses a full-tree re-simulation. It executes the alternative search using this strict safety precedence:
+
+1. **Query `verified_replacement_pool` First:** Pulls alternative options that match the spatial, financial, and temporal footprint of the discarded item.
+> **System Definition:** The `verified_replacement_pool` is not a separate structural layer; it is an optimized materialized view/cache derived directly from `verified_nodes` + `cognitive_overlays` + `combo_suggestions`.
+
+
+2. **Fallback to `candidate_buffer`:** If the verified pool is exhausted, the engine can pull from the `candidate_buffer`. However, these ideas **must pass deterministic provider verification** (opening hours, location verification, coordinate checks) *before* they are shown to the user or injected into the live simulation.
+
+---
+
+## 5. High-Performance Step Evaluation Engine Code
+
+The following core component handles branch transitions using stack primitives, enforcing full-interval sandboxing to reject failures before memory commitment.
+
+> ### Scratch Buffer Strategy
+> 
+> 
+> To enforce the "reject before memory commitment" design principle, the method writes directly into a passing scratch state buffer (`outNextState`). Only after a `COMMIT_SUCCESS` code is returned should the orchestration loop copy or commit this scratch state into a live pooled arena node. Memory allocations remain completely **allocation-controlled under normal pool capacity**.
+
+```java
+package com.safarnow.engine;
+
+public class HighPerformanceRouteEvaluator {
+
+    public static final int COMMIT_SUCCESS = 0;
+    public static final int ERR_CIRCULAR_LOOP = 1;
+    public static final int ERR_WEATHER_BLOCKED = 2;
+    public static final int ERR_FINANCIAL_BANKRUPTCY = 3;
+    public static final int ERR_BIOMETRIC_EXHAUSTION = 4;
+    public static final int ERR_CRITICAL_STARVATION = 5;
+    public static final int ERR_NIGHT_WINDOW_LOCKOUT = 6;
+    public static final int ERR_BITMASK_OVERFLOW = 7;
+
+    public static class StatePool {
+        private final State[] pool;
+        private int head;
+
+        public StatePool(int capacity) {
+            this.pool = new State[capacity];
+            for (int i = 0; i < capacity; i++) {
+                this.pool[i] = new State();
+            }
+            this.head = 0;
+        }
+
+        public synchronized State borrowNode() {
+            // Emergency structural fallback is metered and should not occur under nominal production runs
+            if (head >= pool.length) return new State(); 
+            return pool[head++];
+        }
+
+        public synchronized void release(int count) {
+            head = Math.max(0, head - count);
+        }
+    }
+
+    public static class State {
+        public int currentTimeMinutes;  // Continuous minutes from trip start
+        public int remainingBudgetINR;
+        public float remainingEnergy;   // 0.0f to 1.0f
+        public float hungerLevel;       // 0.0f to 1.0f
+        public float walkedKmToday;
+        public float accumulatedUncertainty;
+        public long destinationBitmask; // Bounded 0-63 primary itinerary goals
+        public int currentLocalNodeId;
+        public int activeAccommodationId;
+        public byte dayCounter;
+        public int actionHistoryMask;
+        public int parentArenaId;
+        public int parentStateIndex;
+        public int parentGenerationId;
+    }
+
+    public static class ActionEdge {
+        public int durationMinutes;
+        public int costINR;
+        public float fatigueImpact;
+        public float transitDistanceKM;
+        public float uncertaintyImpact;
+        public int targetLocalNodeId;
+        public int targetCompletionTokenId; // 0-63 for primary destinations, -1 otherwise
+        public int nodeTypeClassification;  // 1 = ATTRACTION, 2 = RESTAURANT, 3 = TRANSIT
+        public int unifiedCategoryId;       // Canonical 0-15 category token
+        public boolean isOutdoorActivity;
+        public boolean isEnRouteTransit;    // Sleeper train/flight override switch
+        public boolean isVisitableDestination;
+    }
+
+    public int evaluateStep(State current, ActionEdge action, int[] hourlyWeatherForecast, float weakestAgeMultiplier, int tripStartWallClockOffsetMinutes, State outNextState) {
+        
+        // 1. Completion Token Bounds Guard
+        if (action.isVisitableDestination && action.targetCompletionTokenId >= 0) {
+            if (action.targetCompletionTokenId >= 64) {
+                return ERR_BITMASK_OVERFLOW;
+            }
+            long locationFlag = 1L << action.targetCompletionTokenId;
+            if ((current.destinationBitmask & locationFlag) != 0) {
+                return ERR_CIRCULAR_LOOP;
+            }
+        }
+
+        // 2. Full-Interval Proactive Weather Shield Check
+        if (action.isOutdoorActivity) {
+            int startMinute = current.currentTimeMinutes;
+            int endMinute = current.currentTimeMinutes + action.durationMinutes;
+            for (int m = startMinute; m <= endMinute; m++) {
+                int normalizedWallClockHour = ((tripStartWallClockOffsetMinutes + m) % 1440) / 60;
+                if (hourlyWeatherForecast[normalizedWallClockHour] == 4) { // Code 4 represents HEAVY_RAIN
+                    return ERR_WEATHER_BLOCKED;
+                }
+            }
+        }
+
+        // 3. Double-Ended Absolute Midnight Safety Sandbox Lockout
+        // Enforces complete validation across the entire action span between 10:00 PM (1320) and 6:00 AM (360)
+        if (!action.isEnRouteTransit) {
+            int startMinute = current.currentTimeMinutes;
+            int endMinute = current.currentTimeMinutes + action.durationMinutes;
+            for (int m = startMinute; m <= endMinute; m++) {
+                int normalizedWallClockMinute = (tripStartWallClockOffsetMinutes + m) % 1440;
+                if (normalizedWallClockMinute > 1320 || normalizedWallClockMinute < 360) {
+                    return ERR_NIGHT_WINDOW_LOCKOUT;
+                }
+            }
+        }
+
+        // 4. Primitive Mutator Computations into the Scratch State Buffer
+        outNextState.currentTimeMinutes = current.currentTimeMinutes + action.durationMinutes;
+        outNextState.remainingBudgetINR = current.remainingBudgetINR - action.costINR;
+        outNextState.walkedKmToday = current.walkedKmToday + action.transitDistanceKM;
+        outNextState.remainingEnergy = current.remainingEnergy - (action.fatigueImpact * weakestAgeMultiplier);
+        outNextState.hungerLevel = current.hungerLevel + (action.durationMinutes / 240.0f);
+        outNextState.accumulatedUncertainty = current.accumulatedUncertainty + action.uncertaintyImpact;
+        outNextState.activeAccommodationId = current.activeAccommodationId;
+        outNextState.dayCounter = current.dayCounter;
+        outNextState.currentLocalNodeId = action.targetLocalNodeId;
+
+        if (action.isVisitableDestination && action.targetCompletionTokenId >= 0) {
+            outNextState.destinationBitmask = current.destinationBitmask | (1L << action.targetCompletionTokenId);
+        } else {
+            outNextState.destinationBitmask = current.destinationBitmask;
+        }
+
+        // Update 28-bit packed action history mask (7 slots × 4 bits)
+        outNextState.actionHistoryMask = ((current.actionHistoryMask << 4) | (action.unifiedCategoryId & 0x0F)) & 0x0FFFFFFF;
+
+        // 5. Context Override Processing
+        if (action.nodeTypeClassification == 2) { // RESTAURANT Node Code
+            outNextState.hungerLevel = 0.0f;
+            outNextState.remainingEnergy = Math.min(1.0f, outNextState.remainingEnergy + 0.15f);
+        }
+
+        // 6. Need-Layer Binary Sandbox Filters
+        if (outNextState.remainingBudgetINR < 0) return ERR_FINANCIAL_BANKRUPTCY;
+        if (outNextState.remainingEnergy <= 0.10f) return ERR_BIOMETRIC_EXHAUSTION;
+        if (outNextState.hungerLevel >= 0.85f) return ERR_CRITICAL_STARVATION;
+
+        return COMMIT_SUCCESS;
+    }
+}
+
+```
+
+---
+
+## 6. Upgraded 3D Optimization Matrix
+
+Surviving simulation branches at execution boundaries are evaluated across a three-dimensional fitness coordinate layout: $J(S) = [F_{\text{finance}}, T_{\text{temporal}}, C_{\text{comfort}}]^T$.
+
+### Axis 1: Budget Value Density with Temporal Spending Dampener
+
+Normalizes financial output to protect the frontier from early-trip hoarding patterns where zero-spend branches distort optimization tracking.
+
+$$F_{\text{finance}} = \left( \frac{\sum_{i \in \mathbf{V}_k} \text{Weight}(L_i)}{\max(1, B_{\text{spent}})} \right) \times \Phi(B_{\text{remaining}}) \times \min\left(1.0, \frac{B_{\text{spent}}}{B_{\text{expected}}}\right) \times \left(1.0 - \min(1.0, \Omega_k)\right)$$
+
+Where the bounding boundary protection function $\Phi$ penalizes capital deceleration spikes:
+
+$$\Phi(B_{\text{remaining}}) = \begin{cases}
+1.0 & \text{if } B_{\text{remaining}} \ge B_{\text{safety}} \
+\frac{B_{\text{remaining}}}{B_{\text{safety}}} & \text{if } B_{\text{remaining}} < B_{\text{safety}}
+\end{cases}$$
+
+Temporal progression scales continuously using elapsed minutes to prevent division-by-zero vulnerabilities:
+
+$$p_{\text{elapsed}} = \max\left(0.01, \frac{T_k}{T_{\text{trip\_total}}}\right)$$
+
+$$B_{\text{safety}} = B_{\text{total}} \times (1.0 - p_{\text{elapsed}}) \qquad B_{\text{expected}} = \max(1, B_{\text{total}} \times p_{\text{elapsed}})$$
+
+### Axis 2: Temporal Efficiency
+
+Maps active engagement intervals against idle logistical latency blocks. Pre-scheduled relaxation windows count directly as active experience time.
+
+$$T_{\text{temporal}} = \frac{\sum T_{\text{activity}}}{\sum T_{\text{transit}} + \sum T_{\text{waiting}} + \sum T_{\text{activity}}}$$
+
+### Axis 3: Weakest-Link Comfort
+
+Binds itinerary speed and distance directly to the biometric tolerance of the group's most vulnerable tracking asset.
+
+$$C_{\text{comfort}} = E_k \times \left(1.0 - \frac{W_{\text{km}}}{\text{Max\_Walking\_Tolerance}_{\text{group}}}\right)$$
+
+---
+
+## 7. Soft Protection of Iconic Popularity Anchors
+
+Highly popular landmarks (where $\text{Weight}_{\text{popularity}}(L_n) \ge 0.85$, such as the Red Fort or India Gate) are granted **Soft Popularity Anchor Protection**. Iconic nodes are retained by default during initial planning stages and are **only** discarded if a hard survival constraint, weather block, closure, safety, or explicit user dislike forces their removal:
+
+$$\text{KeepAnchor}(L_{\text{iconic}}) = \text{True}$$
+
+$$\text{Except if: } \begin{cases}
+\mathbf{U}*{\text{dislike}}(L*{\text{iconic}}) = \text{True} & \text{(User explicitly excludes it)} \
+B_{\text{remaining}} < 0 \quad \text{OR} \quad T_{\text{elapsed}} > T_{\text{cutoff}} & \text{(Hard Budget or Time bounds break)} \
+\text{WeatherForecast}(T_{\text{action}}) = \text{HEAVY_RAIN} & \text{(Weather makes conditions non-operational)} \
+\text{OperatingHours}(T_{\text{action}}) = \text{CLOSED} & \text{(Location is physically closed)} \
+E_{\text{group_stamina}} \le 0.10 \quad \text{OR} \quad \text{Safety}_{\text{zone}} < \text{Threshold} & \text{(Group energy or neighborhood safety fails)}
+\end{cases}$$
+
+---
+
+## 8. Adaptive Accommodation Centroid Optimization Vector
+
+Selecting a base lodging node ($H_k$) requires evaluating more than just the nightly room rate. The engine tracks the state of the accommodation and calculates an **Adaptive Centroid Weighting** to minimize travel friction and prevent late-night transport failures.
+
+### The Real Stay Cost Formulation
+
+$$RealStayCost(H_j) = \text{RoomCost}(H_j) + \sum_{i \in \mathbf{V}_{\text{anchor}}} \left[ \text{Fare}_{\text{transit}}(H_j, L_i) + \omega \cdot \text{Time}_{\text{transit}}(H_j, L_i) \right] + \Psi(H_j)$$
+
+$$\Psi(H_j) = \text{Friction}_{\text{check\_in}} + \text{Risk}_{\text{night\_return\_safety}} + \text{Penalty}_{\text{reception\_closed}} + \text{Constraint}_{\text{luggage\_capacity}}$$
+
+```text
+IF AccommodationState == CONFIRMED_RESERVATION:
+  - RoomCost(H_j) updates to 0.0 (Sunk cost, cash already paid).
+  - The system locks H_j as a non-negotiable geographical return anchor.
+  - Focus shifts entirely to minimizing Time_transit, maximizing night return safety, validating room capacity, and check-in feasibility.
+
+IF AccommodationState == UNBOOKED_CANDIDATE:
+  - RoomCost(H_j) runs at full market pricing.
+  - The hotel node remains fluid; the simulator can swap hotels if an alternative candidate drastically improves the overall trip score.
+
+```
+
+---
+
+## 9. Dynamic Telemetry Re-Planner with Hotel Anchoring
+
+When a client device transmits an active real-world deviation vector greater than 30 minutes, the re-planner initiates an inline recovery sweep while protecting pinned landmarks and lodging paths.
+
+```text
+Algorithm: Telemetry Rolling Horizon Re-Planner (With Base Return Anchoring)
+Input: Current Selected Plan, Telemetry Vector (T_actual, L_actual, B_actual, E_actual), UserPinnedBitmask
+
+1. Calculate System Execution Time Slip: Delta_T = T_actual - T_planned
+2. If Delta_T <= 30 Minutes Then:
+     - Absorb slip into current location node duration buffer. Terminate re-plan.
+
+3. If Delta_T > 30 Minutes (Timeline Drift Confirmed):
+     a. Instantiate an isolated mutated state root "S_mutation_root" using live tracking metrics.
+     b. Isolate all unvisited target destination nodes remaining in the user's plan stack.
+
+4. Resilient Resolution & Verification Loop:
+     a. Construct a candidate sequence layout of the remaining unvisited locations.
+     b. Append a mandatory Terminal Return Edge from the final sequence activity node 
+        directly to the active locked accommodation identifier (H_k).
+     
+     c. Run predictive forward simulation tracing across that experimental chain.
+     d. Evaluate the full path against the Bounded Search Rules:
+        
+        If (Chain violates Sandbox Lockout Window OR Budget Bounds OR drops C_comfort below 0.10):
+          i.   Isolate the remaining unvisited activity locations.
+          ii.  Filter out any location IDs whose bits are flipped to 1 in the UserPinnedBitmask.
+          iii. If the remaining unpinned location pool is empty, immediately wipe all upcoming unpinned activities,
+               force an immediate direct transit edge back to Accommodation ID (H_k), and terminate.
+          iv.  From the surviving unpinned pool, identify the node with the lowest structural popularity Weight(L_n).
+          v.   Erase that lowest-weighted node completely from the unvisited index pool.
+          vi.  Request a repaired sequence linkage path (TransitEdge lookup) from the cached World Graph.
+          vii. Re-route the execution loop back to Step 4.b to re-test with the new terminal hotel hook.
+          
+        Else (Path successfully handles the terminal return edge to the hotel without breaking sandboxes):
+          i.   Convert the virtual token sequence path back into real-world Database UUID keys.
+          ii.  Stream the optimized alternative itinerary packets down to the client UI via WebSockets.
+          iii. Exit Loop.
+
+```
+
+---
+
+## 10. Architectural Integrity & Security Verification Matrix
+
+This architectural blueprint enforces continuous safety checks across all transaction pipelines, preventing common distributed routing bugs under production loads.
+
+| Targeted System Vulnerability | Root Production Failure Vector | Engine Architectural Remediation |
+| --- | --- | --- |
+| **Bitmask Overflow Crash** | Shifting beyond native 64-bit primitive boundaries ($1\text{L} \ll \text{ID}$). | **Virtual Completion Tokens:** Decouples internal graph keys (`localNodeId`) from the bitmask layout. Only unique, non-revisitable primary goals receive a token mapping between 0-63. |
+| **Midnight Tracking Rollover** | Core 24-hour clock counters resetting to zero, blinding the lockout gates. | **Continuous Chronological Banks:** Tracks absolute cumulative minutes ($T_k$) from the trip start. Uses absolute interval loops over wall-clock minutes to trap late-night or early-morning activity leakage. |
+| **Unverified Recommendation Leaks** | $\pm 2$ engine picking suggestions directly from the raw AI candidate buffer. | **Verified Pool Precedence Strategy:** Enforces lookups against the view-derived `verified_replacement_pool` cache first. Raw candidates must clear API grounding before display. |
+| **Data & Schema Mutation Pollution** | Allowing generative models to output ungrounded JSON string schemas or raw queries. | **Structured Metadata Filter Shield:** Restricts Gemini to flat context parameters. The native Java backend parses the tags and compiles the internal queries. |
+| **Late-Night Traveler Strand** | Sudden execution delays cutting off logistical paths back to lodging. | **Terminal Return-to-Base Anchor Step:** Forces a mock return edge execution to $H_k$ at day boundaries, pruning backward until safe arrival is confirmed. |
+| **Heap Memory Allocation Storms** | Instantiating short-lived Java objects inside millions of iterative steps. | **Allocation-Controlled Arena Pools:** Reuses primitive execution containers in fixed array blocks, eliminating active heap thrashing inside search paths. |
+| **Early-Trip Hoarding Distortion** | Empty Day 1 tracks outranking active paths by conserving all cash. | **Temporal Spending Dampener:** Multiplies the $F_{\text{finance}}$ matrix score against progress velocity, stabilizing Pareto frontier selection from day one. |

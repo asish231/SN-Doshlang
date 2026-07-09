@@ -94,7 +94,7 @@ Lmain_load_file:
     mov x3, #-1
     mov x4, #0
 Linit_fn_bp_ids:
-    cmp x4, #64
+    cmp x4, #SNC_MAX_FUNCS
     b.ge Linit_fn_bp_ids_done
     LOAD_ADDR x5, fn_blueprint_ids
     str x3, [x5, x4, lsl #3]
@@ -131,6 +131,18 @@ Linit_fn_bp_ids_done:
     // Initialize module system
     bl _init_default_search_paths
 
+    // Also search for modules next to the source file being compiled, so
+    // `use foo` finds a sibling foo.sn regardless of the working directory.
+    mov x0, x21
+    bl _add_source_dir_search_path
+
+    // Allocate the initial (growable, malloc-backed) op and print/data tables
+    // before anything is recorded. Capacity starts at 0, so these first grows
+    // allocate SNC_MAX_OPS / SNC_MAX_PRINTS entries; the record paths grow
+    // (realloc-double) further on demand.
+    bl _snc_grow_ops
+    bl _snc_grow_prints
+
     bl _parse_program
     cbnz x0, Lmain_fail
 
@@ -140,16 +152,19 @@ Linit_fn_bp_ids_done:
     LOAD_ADDR x1, global_op_count
     str x0, [x1]
 
-    // Now parse all defined functions
+    // Now parse all defined functions. fn_count is RE-READ every iteration:
+    // parsing a body can register NESTED `fn` definitions (appended to the
+    // table), and those bodies must be compiled too.
     LOAD_ADDR x19, fn_count
-    ldr x20, [x19]
     mov x21, #0
 Lmain_parse_fns_loop:
+    ldr x20, [x19]
     cmp x21, x20
     b.ge Lmain_parse_fns_done
     
     mov x0, x21
     bl _parse_function_body
+    cbnz x0, Lmain_fail
     add x21, x21, #1
     b Lmain_parse_fns_loop
 Lmain_parse_fns_done:
@@ -216,7 +231,9 @@ _read_into_buffer:
     LOAD_ADDR x21, buffer
 
 Lread_loop:
-     mov x22, #65535
+     // Remaining space = (buffer capacity - 1, for the NUL) - bytes read so far.
+     LOAD_ADDR x22, src_buffer_cap
+     ldr x22, [x22]
      sub x22, x22, x20
      cbz x22, Lbuffer_full
 
@@ -226,7 +243,7 @@ Lread_loop:
      bl _read
      cbz x0, Lread_done
      b.lt Lread_failed
-     // Cap read at buffer limit (65535 content + 1 null terminator = 65536)
+     // Cap read at buffer limit (src_buffer_cap content bytes + 1 NUL terminator)
      cmp x0, x22
      b.gt Lbuffer_full
 

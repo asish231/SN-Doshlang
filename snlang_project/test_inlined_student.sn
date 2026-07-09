@@ -1,0 +1,12 @@
+fn student_highest(int s1, int s2, int s3, int s4) -> int {
+    int best = s1
+    if (s2 > best) { best = s2 }
+    if (s3 > best) { best = s3 }
+    if (s4 > best) { best = s4 }
+    return best
+}
+
+fn main() {
+    int x = student_highest(10, 20, 30, 40)
+    print(x)
+}

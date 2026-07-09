@@ -11,6 +11,10 @@ _parse_program:
     stp x29, x30, [sp, #-16]!
     mov x29, sp
 
+    LOAD_ADDR x9, current_parse_fn_id
+    mov x10, #-1
+    str x10, [x9]
+
     bl _preparse_functions
     cbnz x0, Lprogram_fail
 
@@ -142,6 +146,14 @@ _parse_statement:
     stp x23, x24, [sp, #-16]!
     stp x25, x26, [sp, #-16]!
     stp x27, x28, [sp, #-16]!
+
+    // Alternate array-type declaration `[T] name = <expr>` (e.g. `[int] nums =
+    // [1,2,3]`). A statement starting with '[' is a list declaration in the
+    // bracket dialect; route it to the shared list-declaration path.
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, #'['
+    b.eq Lstmt_bracket_list_decl
 
     bl _parse_identifier
     cbz x0, Lstmt_need_keyword
@@ -365,8 +377,13 @@ Lstmt_spawn:
     ldrb w11, [x9, x10]
     cmp w11, #'.'
     b.ne Lstmt_spawn_simple
+    // A '.' here means `spawn obj.method()`. Report the clear "not yet
+    // supported" error immediately -- the method-capture path below is dead
+    // (it clobbered the object-name registers before _lookup_variable, then
+    // used an out-of-range spawn slot), so it only produced an empty error.
+    b Lstmt_spawn_method_fail
 
-    // Method call detected
+    // Method call detected (dead code, kept for reference)
     add x10, x10, #1
     LOAD_ADDR x9, cursor_pos
     str x10, [x9]
@@ -389,38 +406,13 @@ Lstmt_spawn:
     b.ne Lstmt_spawn_simple // fallback or fail
 
 Lstmt_spawn_method_ok:
-    // Capture method call into spawn buffer
-    LOAD_ADDR x9, spawn_capture_fn_id
-    mov x10, #63 // use slot 63 for method spawns
-    str x10, [x9]
-    
-    // Clear spawn buffer for this slot
-    LOAD_ADDR x9, spawn_fn_op_counts
-    str xzr, [x9, x10, lsl #3]
-
-    // This will record the synthetic method call into the spawn buffer
-    mov x0, x3   // instance id (slot)
-    mov x1, x1   // type (10/11)
-    mov x2, x2   // blueprint id
-    mov x3, x23  // method name ptr
-    mov x4, x24  // method name len
-    bl _call_object_method
-    mov x24, x0
-    
-    LOAD_ADDR x9, spawn_capture_fn_id
-    mov x10, #-1
-    str x10, [x9]
-    cbnz x24, Lstmt_fail
-    
-    // Record spawn op for the captured method in main stream
-    mov x0, #91
-    mov x1, #63
-    mov x2, #0
-    bl _record_operation
-    cbnz x0, Lstmt_fail
-    bl _consume_optional_semicolon
-    mov x0, #0
-    b Lstmt_return
+    // Spawning a blueprint METHOD (`spawn obj.method()`) is NOT yet supported.
+    // The old capture path wrote into an out-of-range spawn buffer slot (63,
+    // while the spawn tables hold only 32 entries) and its worker was never
+    // emitted by codegen, so it only ever produced a confusing EMPTY diagnostic
+    // and failed to compile. Report a clear error instead. (`spawn fn()` on a
+    // zero-arg function works, and wait() joins it -- see examples/spawn_wait.sn.)
+    b Lstmt_spawn_method_fail
 
 Lstmt_spawn_simple:
     LOAD_ADDR x9, spawn_capture_fn_id
@@ -495,6 +487,13 @@ Lstmt_spawn_import_fail:
 
 Lstmt_spawn_params_fail:
     LOAD_ADDR x0, msg_spawn_params
+    bl _report_error_prefix
+    bl _write_newline_stderr
+    mov x0, #5
+    b Lstmt_return
+
+Lstmt_spawn_method_fail:
+    LOAD_ADDR x0, msg_spawn_method
     bl _report_error_prefix
     bl _write_newline_stderr
     mov x0, #5
@@ -619,7 +618,7 @@ Lstmt_throw:
     cbz x0, Lstmt_fail
     mov x21, x1 // error message value
     mov x22, x2 // type ID (should be str)
-    mov x23, x4 // meta
+    mov x23, x3 // length (meta) -- string literal length lives in x3
 
     bl _skip_whitespace
     mov w0, #')'
@@ -628,9 +627,50 @@ Lstmt_throw:
 
     bl _consume_optional_semicolon
 
-    // Emit throw operation (95)
+    // A string-literal message is a raw source pointer; intern it into the
+    // data table so error_value stores a stable data-value id (a small int
+    // that `mov x0, #id` can load) -- mirrors Lstmt_let_str. This makes the
+    // caught variable `e` a normal str whose value prints correctly.
+    cmp x22, #2
+    b.ne Lstmt_throw_emit
+    mov x0, x21
+    mov x1, #2
+    mov x2, x23
+    bl _record_data_value
+    mov x21, x0 // data-value id
+
+Lstmt_throw_emit:
+    // If we are lexically inside a block try's body, a throw must NOT exit the
+    // program: set error_value/flag WITHOUT exiting (op 108), then branch to the
+    // enclosing catch label. Outside any try, keep the terminating throw (op 95).
+    LOAD_ADDR x9, current_catch_label
+    ldr x9, [x9]
+    cbz x9, Lstmt_throw_toplevel
+
+    mov x0, #108 // op_throw_no_exit
+    mov x1, x21  // error message data-value id
+    mov x2, x23  // string length
+    bl _record_operation
+    cbnz x0, Lstmt_fail
+
+    mov x0, #41  // op_jump: real unconditional branch to the enclosing catch
+                 // (op 35 merely PLACES a label -- see Lemit_op_if_end)
+    LOAD_ADDR x9, current_catch_label
+    ldr x1, [x9]
+    sub x1, x1, #1   // recover the true label id (stored as id+1; see Lstmt_try_block_impl)
+    mov x2, #0
+    mov x3, #0
+    mov x4, #0
+    bl _record_operation4
+    cbnz x0, Lstmt_fail
+
+    mov x0, #0
+    b Lstmt_return
+
+Lstmt_throw_toplevel:
+    // Emit throw operation (95): set error_value/flag and exit(1).
     mov x0, #95 // op_throw
-    mov x1, x21 // error message pointer
+    mov x1, x21 // error message data-value id
     mov x2, x23 // string length
     bl _record_operation
     cbnz x0, Lstmt_fail
@@ -642,7 +682,7 @@ Lstmt_try:
     bl _skip_whitespace
     bl _peek_char
     cmp w0, #'{'
-    b.eq Lstmt_try_block
+    b.eq Lstmt_try_block_impl
 
     // Expression form: try expr catch (e) { ... } or try expr catch fallback
     bl _parse_expr_value
@@ -701,9 +741,209 @@ Lstmt_try_catch_block_form:
     cbz x0, Lstmt_fail
 
 Lstmt_try_block:
-    // Block form: try { ... } catch (e) { ... }
-    // TODO: Implement full block try-catch with error variable
-    // For now, error out
+    // Mixed form `try expr catch (e) { ... }` still falls through here and is
+    // unsupported (errors cleanly). The pure block form is handled below.
+    b Lstmt_fail
+
+// ============================================================
+// Block form:  try { A } catch (e) { B }   (also `catch { B }`)
+// Emits a REAL runtime error path (no compile-time faking):
+//   [op105] clear error_flag                 <- try entry, start clean
+//   <A>            (throws inside A set error_value/flag via op108 and
+//                   jump straight to Lcatch via op35 -- see Lstmt_throw)
+//   [op106] if error_flag != 0 goto Lcatch   <- also catches built-in errors
+//   [op35]  b Lend                           <- success path skips catch
+//   [op36]  Lcatch:
+//   [op107] e = error_value                  <- bind catch var (if present)
+//   [op105] clear error_flag                 <- consume the error
+//   <B>
+//   [op36]  Lend:
+// current_catch_label makes throws inside A target THIS catch; it is saved and
+// restored so nested try blocks behave correctly. Cursor enters at the try
+// body's '{'.
+// ============================================================
+Lstmt_try_block_impl:
+    bl _get_next_label
+    mov x24, x0                 // Lcatch
+    bl _get_next_label
+    mov x25, x0                 // Lend
+
+    // Save the enclosing catch label and install ours for the try body.
+    // We store (catch_label_id + 1) so that a real label id of 0 is still
+    // distinguishable from the "not inside a try" sentinel (0). `throw`
+    // subtracts 1 to recover the true id.
+    LOAD_ADDR x9, current_catch_label
+    ldr x26, [x9]
+    add x10, x24, #1
+    str x10, [x9]
+
+    // op105: clear error_flag at entry
+    mov x0, #105
+    mov x1, #0
+    mov x2, #0
+    bl _record_operation
+    cbnz x0, Ltryb_fail_restore
+
+    // consume the try body '{'
+    mov w0, #'{'
+    bl _expect_char
+    cbz x0, Ltryb_fail_restore
+
+Ltryb_try_body:
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, #'}'
+    b.eq Ltryb_try_done
+    cbz w0, Ltryb_unclosed
+    bl _parse_statement
+    cbz x0, Ltryb_try_body
+    cmp x0, #2                  // stop: jump op already recorded
+    b.eq Ltryb_try_body
+    cmp x0, #3                  // skip: jump op already recorded
+    b.eq Ltryb_try_body
+    cmp x0, #4                  // return: op already recorded
+    b.eq Ltryb_try_body
+    b Ltryb_fail_restore
+
+Ltryb_try_done:
+    bl _advance_char            // consume '}'
+
+    // Restore the enclosing catch label BEFORE the catch body, so throws in the
+    // catch body (or after the whole try) do not target our own catch.
+    LOAD_ADDR x9, current_catch_label
+    str x26, [x9]
+
+    // op106: if a built-in error set error_flag during A, go to Lcatch.
+    mov x0, #106
+    mov x1, x24
+    mov x2, #0
+    bl _record_operation
+    cbnz x0, Ltryb_fail
+
+    // op41: success -> unconditionally jump over the catch block to Lend.
+    // (op 35 merely PLACES a label; using it here duplicated the Lend label.)
+    mov x0, #41
+    mov x1, x25
+    mov x2, #0
+    mov x3, #0
+    mov x4, #0
+    bl _record_operation4
+    cbnz x0, Ltryb_fail
+
+    // op36: place Lcatch.
+    mov x0, #36
+    mov x1, x24
+    mov x2, #0
+    mov x3, #0
+    mov x4, #0
+    bl _record_operation4
+    cbnz x0, Ltryb_fail
+
+    // expect the `catch` keyword
+    bl _skip_whitespace
+    LOAD_ADDR x0, kw_catch
+    bl _consume_keyword
+    cbz x0, Ltryb_fail
+
+    // optional `(e)`
+    mov x27, #0                 // catch var name ptr (0 = none)
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, #'('
+    b.ne Ltryb_catch_clear
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Ltryb_fail
+    bl _skip_whitespace
+    bl _parse_identifier
+    cbz x0, Lstmt_need_name
+    mov x27, x0                 // name ptr
+    mov x28, x1                 // name len
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Ltryb_fail
+
+    // Bind `e` (reuse if it already exists so nested catches with the same name
+    // do not trip the duplicate-variable check). e is a str whose value is the
+    // thrown message's data-value id; op107 loads error_value into its slot.
+    mov x0, x27
+    mov x1, x28
+    bl _lookup_variable
+    cbnz x0, Ltryb_evar_ready
+    mov x0, x27
+    mov x1, x28
+    mov x2, #0
+    mov x3, #0
+    mov x4, #2                  // type str
+    mov x5, #0
+    bl _define_variable
+    cbnz x0, Ltryb_fail
+    mov x0, x27
+    mov x1, x28
+    bl _lookup_variable
+    cbz x0, Ltryb_fail
+Ltryb_evar_ready:
+    mov x1, x4                  // e slot
+    mov x0, #107
+    mov x2, #0
+    bl _record_operation
+    cbnz x0, Ltryb_fail
+
+Ltryb_catch_clear:
+    // op105: clear error_flag (the error is now handled).
+    mov x0, #105
+    mov x1, #0
+    mov x2, #0
+    bl _record_operation
+    cbnz x0, Ltryb_fail
+
+    // consume the catch body '{'
+    bl _skip_whitespace
+    mov w0, #'{'
+    bl _expect_char
+    cbz x0, Ltryb_fail
+
+Ltryb_catch_body:
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, #'}'
+    b.eq Ltryb_catch_done
+    cbz w0, Ltryb_unclosed
+    bl _parse_statement
+    cbz x0, Ltryb_catch_body
+    cmp x0, #2
+    b.eq Ltryb_catch_body
+    cmp x0, #3
+    b.eq Ltryb_catch_body
+    cmp x0, #4
+    b.eq Ltryb_catch_body
+    b Ltryb_fail
+
+Ltryb_catch_done:
+    bl _advance_char            // consume '}'
+
+    // op36: place Lend.
+    mov x0, #36
+    mov x1, x25
+    mov x2, #0
+    mov x3, #0
+    mov x4, #0
+    bl _record_operation4
+    cbnz x0, Ltryb_fail
+
+    mov x0, #0
+    b Lstmt_return
+
+Ltryb_unclosed:
+    LOAD_ADDR x9, current_catch_label
+    str x26, [x9]
+    b Lwhile_unclosed
+
+Ltryb_fail_restore:
+    LOAD_ADDR x9, current_catch_label
+    str x26, [x9]
+Ltryb_fail:
     b Lstmt_fail
 
 Lstmt_let:
@@ -1313,6 +1553,17 @@ Lstmt_str_input:
     mov x0, #0
     b Lstmt_return
 
+Lstmt_bracket_list_decl:
+    // `[T] name = <expr>` (bracket array-type dialect). _parse_type_spec handles
+    // the whole `[T]` and returns x1=4 (list type), x2=(elemType<<32); converge
+    // on the shared list path (name, '=', value, element-type check).
+    bl _parse_type_spec
+    cbz x0, Lstmt_fail
+    lsr x23, x2, #32 // element type
+    mov x25, #0      // element length/scale (overwritten by the value's metadata)
+    mov x24, #4      // unified list type ID
+    b Lstmt_list_name
+
 Lstmt_list:
     bl _skip_whitespace
     mov w0, #'<'
@@ -1814,28 +2065,14 @@ Lstmt_print_done:
     b Lstmt_return
 
 Lstmt_fn:
-    LOAD_ADDR x9, compilation_mode
-    ldr x9, [x9]
-    cbz x9, Lstmt_fn_real
-
-    // Compilation mode: skip the whole definition to avoid recording in global stream
-    // We already matched 'fn'.
-Lstmt_fn_skip_loop:
-    bl _skip_whitespace
-    bl _peek_char
-    cbz w0, Lstmt_fail
-    cmp w0, #'{'
-    b.eq Lstmt_fn_skip_body
-    bl _advance_char
-    b Lstmt_fn_skip_loop
-
-Lstmt_fn_skip_body:
-    bl _advance_char // '{'
-    bl _skip_block_contents
-    cbnz x0, Lstmt_fail
-    mov x0, #0
-    b Lstmt_return
-
+    // NESTED FUNCTIONS: a `fn` inside a function body used to be skipped
+    // WITHOUT being registered (so `inner(...)` later in the same body failed
+    // with "unknown function"). _parse_fn_definition only registers metadata
+    // and skips the body (no ops are recorded into the current stream), and it
+    // is redefinition-safe (reuses the slot if the name already exists), so it
+    // is safe to run in both top-level and compilation mode. The nested fn's
+    // body is compiled later: the main fn-body loop re-reads fn_count each
+    // iteration, picking up functions registered mid-parse.
 Lstmt_fn_real:
     bl _parse_fn_definition
     cbnz x0, Lstmt_fail
@@ -2014,6 +2251,7 @@ Lstmt_return_single:
     b.eq Lstmt_return_void
     bl _parse_expr_value
     cbz x0, Lstmt_fail
+    mov x24, x4 // runtime result/source var slot when expression materialized one
     // Store return value
     LOAD_ADDR x9, fn_return_value
     str x1, [x9]
@@ -2022,14 +2260,69 @@ Lstmt_return_single:
     LOAD_ADDR x9, fn_return_flag
     mov x10, #1
     str x10, [x9]
-    
-    // Record return operation
-    mov x0, #4  // operation code for return
-    mov x1, x1  // return value slot
-    mov x2, #0
+
+    // If returning an immediate string literal (type str, no runtime slot),
+    // materialize it into a temp slot via op 72 (store_str_lit) so the return
+    // path loads a real stack slot instead of the raw data pointer.
+    cmp x2, #2
+    b.ne Lstmt_return_scalar_mat
+    cmn x24, #1
+    b.ne Lstmt_return_single_record
+    mov x0, x1      // str data ptr
+    mov x1, #2      // type str
+    mov x2, x3      // len
+    bl _record_data_value
+    mov x23, x0     // data id
+    bl _allocate_temp_var
+    mov x24, x0     // temp slot -> becomes the return slot
+    mov x0, #72
+    mov x1, x24
+    mov x2, x23
+    bl _record_operation
+    b Lstmt_return_single_record
+
+Lstmt_return_scalar_mat:
+    // If returning an immediate SCALAR literal with no runtime slot (a bool
+    // literal `return true`/`return false`, or byte/int immediate), materialize
+    // it into a temp slot via op 1 (store_var). The return op (op 4) treats its
+    // argument as a *slot* to load from; without a slot it would load the raw
+    // value 1/0 as a stack offset and return garbage. (Int literals already get
+    // a slot from Lprimary_number; this covers bool/byte/int-immediate paths.)
+    cmn x24, #1
+    b.ne Lstmt_return_single_record   // already has a runtime slot
+    cmp x2, #1                        // bool
+    b.eq Lstmt_return_scalar_do
+    cmp x2, #3                        // byte
+    b.eq Lstmt_return_scalar_do
+    cmp x2, #0                        // int
+    b.ne Lstmt_return_single_record
+Lstmt_return_scalar_do:
+    stp x1, x2, [sp, #-16]!           // save value, type across the calls
+    LOAD_ADDR x0, hidden_var_name_storage // valid ptr, zero-length: never matched
+    mov x1, #0
+    ldr x2, [sp]                      // compile-time value
+    mov x3, #0                        // not const
+    ldr x4, [sp, #8]                  // type
+    mov x5, #0
+    bl _define_variable
+    mov x24, x4                       // temp slot becomes the return slot
+    ldr x2, [sp]                      // reload value as op-1 arg1
+    mov x0, #1                        // op 1: store_var (immediate -> slot)
+    mov x1, x24
     mov x3, #0
     mov x4, #0
     bl _record_operation4
+    add sp, sp, #16
+
+Lstmt_return_single_record:
+    // Record return operation (gated: inline method body vs normal function --
+    // see _record_return_op). x1 = op4 arg (slot when available); x2 = the true
+    // runtime slot (-1 if none) that an inlined return copies into its result.
+    cmp x24, #-1
+    csel x1, x24, x1, ne  // return runtime result slot when available
+    mov x2, x24
+    bl _record_return_op
+    cbnz x0, Lstmt_fail
     
     bl _consume_optional_semicolon
     mov x0, #4 // special return code: return
@@ -2045,6 +2338,7 @@ Lstmt_return_single_fail:
     b.eq Lstmt_return_void
     bl _parse_expr_value
     cbz x0, Lstmt_fail
+    mov x24, x4 // runtime result/source var slot when expression materialized one
     // Store return value
     LOAD_ADDR x9, fn_return_value
     str x1, [x9]
@@ -2053,6 +2347,12 @@ Lstmt_return_single_fail:
     LOAD_ADDR x9, fn_return_flag
     mov x10, #1
     str x10, [x9]
+    // Record return operation for fallback single-expression parsing too.
+    cmp x24, #-1
+    csel x1, x24, x1, ne
+    mov x2, x24
+    bl _record_return_op
+    cbnz x0, Lstmt_fail
     bl _consume_optional_semicolon
     mov x0, #4 // special return code: return
     b Lstmt_return
@@ -2066,13 +2366,11 @@ Lstmt_return_void:
     LOAD_ADDR x9, fn_return_length
     str xzr, [x9]
     
-    // Record void return operation
-    mov x0, #4  // operation code for return
+    // Record void return operation (gated: inline method body vs normal)
     mov x1, #-1 // -1 indicates void return
-    mov x2, #0
-    mov x3, #0
-    mov x4, #0
-    bl _record_operation4
+    mov x2, #-1 // no runtime slot to copy for an inlined return
+    bl _record_return_op
+    cbnz x0, Lstmt_fail
     
     mov x0, #4 // special return code: return
     b Lstmt_return
@@ -2090,9 +2388,9 @@ Lstmt_assign:
     cmp w0, #'='
     b.eq Lstmt_assign_set
     cmp w0, #'+'
-    b.eq Lstmt_assign_add
+    b.eq Lstmt_assign_plus
     cmp w0, #'-'
-    b.eq Lstmt_assign_subtract
+    b.eq Lstmt_assign_minus
     cmp w0, #'*'
     b.eq Lstmt_assign_multiply
     cmp w0, #'/'
@@ -2146,6 +2444,16 @@ Lstmt_object_member_ready:
     bl _peek_char
     cmp w0, #'('
     b.eq Lstmt_object_method_call
+    cmp w0, #'+'
+    b.eq Lstmt_object_field_op_plus
+    cmp w0, #'-'
+    b.eq Lstmt_object_field_op_minus
+    cmp w0, #'*'
+    b.eq Lstmt_object_field_op_mul
+    cmp w0, #'/'
+    b.eq Lstmt_object_field_op_div
+    cmp w0, #'%'
+    b.eq Lstmt_object_field_op_mod
     mov w0, #'='
     bl _expect_char
     cbz x0, Lstmt_fail
@@ -2212,6 +2520,144 @@ Lstmt_object_method_call:
     bl _consume_optional_semicolon
     mov x0, #0
     b Lstmt_return
+
+// Compound assignment on an object field: self.field OP= rhs, or self.field ++/--.
+// The field is backed by a real variable slot (x16), so we lower to the same
+// runtime compound ops (23-32) used for plain variables, computed on that slot.
+// Entry: x23=instance id, x25=blueprint id, x21/x22=field name ptr/len. Each op
+// handler sets x26=op type (1=add 2=sub 3=mul 4=div 5=mod), then converges on
+// _common with the rhs in x9 (imm value) / x12 (slot id, -1 = immediate).
+Lstmt_object_field_op_plus:
+    bl _advance_char // consume '+'
+    bl _peek_char
+    cmp w0, #'+'
+    b.eq Lstmt_object_field_incr
+    mov x26, #1
+    b Lstmt_object_field_compound_parse
+Lstmt_object_field_incr:
+    bl _advance_char // consume second '+'
+    mov x26, #1
+    mov x9, #1
+    mov x12, #-1
+    b Lstmt_object_field_compound_common
+Lstmt_object_field_op_minus:
+    bl _advance_char // consume '-'
+    bl _peek_char
+    cmp w0, #'-'
+    b.eq Lstmt_object_field_decr
+    mov x26, #2
+    b Lstmt_object_field_compound_parse
+Lstmt_object_field_decr:
+    bl _advance_char // consume second '-'
+    mov x26, #2
+    mov x9, #1
+    mov x12, #-1
+    b Lstmt_object_field_compound_common
+Lstmt_object_field_op_mul:
+    bl _advance_char // consume '*'
+    mov x26, #3
+    b Lstmt_object_field_compound_parse
+Lstmt_object_field_op_div:
+    bl _advance_char // consume '/'
+    mov x26, #4
+    b Lstmt_object_field_compound_parse
+Lstmt_object_field_op_mod:
+    bl _advance_char // consume '%'
+    mov x26, #5
+    b Lstmt_object_field_compound_parse
+
+Lstmt_object_field_compound_parse:
+    // consumed the op char; expect '=' then parse the rhs expression.
+    mov w0, #'='
+    bl _expect_char
+    cbz x0, Lstmt_fail
+    bl _parse_expr_value
+    cbz x0, Lstmt_fail
+    mov x9, x1  // rhs immediate value (valid when slot == -1)
+    mov x12, x4 // rhs slot id (-1 = immediate)
+
+Lstmt_object_field_compound_common:
+    // Resolve the field's backing variable slot, then apply target = target OP rhs.
+    // Save rhs value/slot across the field lookup (x9/x12 are caller-saved).
+    stp x9, x12, [sp, #-16]!
+    mov x0, x25
+    mov x1, x21
+    mov x2, x22
+    bl _lookup_blueprint_field
+    cbz x0, Lstmt_object_field_compound_lookup_fail
+    mov x13, x1 // field offset within instance
+    ldp x9, x12, [sp], #16
+    // backing var idx x16 = object_field_var_idxs[instance*8 + field_offset]
+    mov x16, x23
+    lsl x16, x16, #3
+    add x16, x16, x13
+    LOAD_ADDR x17, object_field_var_idxs
+    ldr x16, [x17, x16, lsl #3]
+    // If rhs came from a slot, load its compile-time value into x9.
+    cmn x12, #1
+    b.eq Lstmt_object_field_compound_rhs_ready
+    LOAD_ADDR x17, var_values
+    ldr x9, [x17, x12, lsl #3]
+Lstmt_object_field_compound_rhs_ready:
+    // current field compile-time value -> x10
+    LOAD_ADDR x17, var_values
+    ldr x10, [x17, x16, lsl #3]
+    cmp x26, #1
+    b.eq Lstmt_ofc_add
+    cmp x26, #2
+    b.eq Lstmt_ofc_sub
+    cmp x26, #3
+    b.eq Lstmt_ofc_mul
+    cmp x26, #4
+    b.eq Lstmt_ofc_div
+    cmp x26, #5
+    b.eq Lstmt_ofc_mod
+    b Lstmt_fail
+Lstmt_ofc_add:
+    add x11, x10, x9
+    b Lstmt_ofc_store
+Lstmt_ofc_sub:
+    sub x11, x10, x9
+    b Lstmt_ofc_store
+Lstmt_ofc_mul:
+    mul x11, x10, x9
+    b Lstmt_ofc_store
+Lstmt_ofc_div:
+    cbz x9, Lstmt_assign_divide_zero
+    udiv x11, x10, x9
+    b Lstmt_ofc_store
+Lstmt_ofc_mod:
+    cbz x9, Lstmt_assign_divide_zero
+    udiv x17, x10, x9
+    msub x11, x17, x9, x10
+Lstmt_ofc_store:
+    // store new compile-time value into the field slot
+    LOAD_ADDR x17, var_values
+    str x11, [x17, x16, lsl #3]
+    // record the runtime compound op on var slot x16 (target = target OP rhs)
+    cmn x12, #1
+    b.eq Lstmt_ofc_record_imm
+    add x0, x26, #27 // ops 28-32: var OP var-slot
+    mov x1, x16
+    mov x2, x16
+    mov x3, x12
+    bl _record_operation3
+    b Lstmt_ofc_done
+Lstmt_ofc_record_imm:
+    add x0, x26, #22 // ops 23-27: var OP immediate
+    mov x1, x16
+    mov x2, x16
+    mov x3, #0
+    mov x4, x9
+    bl _record_operation4
+Lstmt_ofc_done:
+    cbnz x0, Lstmt_fail
+    bl _consume_optional_semicolon
+    mov x0, #0
+    b Lstmt_return
+Lstmt_object_field_compound_lookup_fail:
+    add sp, sp, #16
+    b Lstmt_fail
 
 Lstmt_index_assign:
     // Parse target index/key: name[expr] = expr
@@ -2286,27 +2732,110 @@ Lstmt_index_assign_list:
     cmp x22, #0
     b.ne Lstmt_type_mismatch
 
-    // If index came from a variable, read actual index value.
-    cmn x24, #1
-    b.eq Lstmt_index_list_idx_ready
-    LOAD_ADDR x12, var_values
-    ldr x21, [x12, x24, lsl #3]
-Lstmt_index_list_idx_ready:
+    // Detect whether the target list is a function PARAMETER (its runtime value
+    // is a pool base, so element access must happen at run time). Mirror the
+    // read path (Lprimary_list_index): slot in [fn_scope_base, base+param_count).
+    mov x16, #0                 // is_param flag
+    LOAD_ADDR x12, current_parse_fn_id
+    ldr x12, [x12]
+    cmn x12, #1
+    b.eq Lstmt_ial_param_done
+    LOAD_ADDR x13, fn_scope_bases
+    ldr x13, [x13, x12, lsl #3]
+    cmp x18, x13
+    b.lt Lstmt_ial_param_done
+    LOAD_ADDR x14, fn_param_counts
+    ldr x14, [x14, x12, lsl #3]
+    add x14, x13, x14
+    cmp x18, x14
+    b.ge Lstmt_ial_param_done
+    mov x16, #1                 // target is a list parameter
+Lstmt_ial_param_done:
 
+    // Was this local list already runtime-mutated (params are always runtime)?
+    mov x17, #0
+    cbnz x16, Lstmt_ial_decide
+    LOAD_ADDR x12, list_base_is_runtime
+    ldrb w17, [x12, x9]
+
+Lstmt_ial_decide:
+    // Runtime store (op 109) is required when the index is a variable, the
+    // target is a parameter, or the list was already runtime-mutated. Otherwise
+    // (local list, immediate index, never runtime) fold at compile time so the
+    // literal's emitted initial data reflects the write.
+    cmn x24, #1
+    b.ne Lstmt_ial_runtime      // variable index
+    cbnz x16, Lstmt_ial_runtime // parameter target
+    cbnz w17, Lstmt_ial_runtime // already runtime-mutated
+
+    // ---- compile-time fold (constant index into a local literal list) ----
     and x12, x11, #0xFFFFFFFF // count
     cmp x21, x12
     b.ge Lstmt_fail
-
     lsr x13, x11, #32 // element type
     cmp x26, x13
     b.ne Lstmt_type_mismatch
-
     add x14, x9, x21
     LOAD_ADDR x15, list_pool_values
     str x25, [x15, x14, lsl #3]
     LOAD_ADDR x15, list_pool_lengths
     str x27, [x15, x14, lsl #3]
+    bl _consume_optional_semicolon
+    mov x0, #0
+    b Lstmt_return
 
+Lstmt_ial_runtime:
+    // Mark a local list base as runtime-mutated so later reads (even with a
+    // constant index) resolve against runtime memory instead of the folded
+    // literal. (Its element count is already recorded in list_base_counts.)
+    cbnz x16, Lstmt_ial_rt_flags
+    LOAD_ADDR x12, list_base_is_runtime
+    mov w13, #1
+    strb w13, [x12, x9]
+
+Lstmt_ial_rt_flags:
+    // flags: bit1 = immediate index, bit2 = runtime/param base, bit3 = imm rhs
+    mov x5, #0
+    cmn x24, #1
+    b.ne Lstmt_ial_flag_base
+    orr x5, x5, #2
+Lstmt_ial_flag_base:
+    cbz x16, Lstmt_ial_flag_rhs
+    orr x5, x5, #4
+Lstmt_ial_flag_rhs:
+    cmn x28, #1
+    b.ne Lstmt_ial_emit
+    orr x5, x5, #8
+
+Lstmt_ial_emit:
+    // op 109: list_store(arg0=rhs, arg1=index, arg2=base, arg3=flags)
+    mov x0, #109
+    // arg0 = rhs value (immediate) or slot
+    cmn x28, #1
+    b.ne Lstmt_ial_a0_slot
+    mov x1, x25
+    b Lstmt_ial_a1
+Lstmt_ial_a0_slot:
+    mov x1, x28
+Lstmt_ial_a1:
+    // arg1 = index value (immediate) or slot
+    cmn x24, #1
+    b.ne Lstmt_ial_a1_slot
+    mov x2, x21
+    b Lstmt_ial_a2
+Lstmt_ial_a1_slot:
+    mov x2, x24
+Lstmt_ial_a2:
+    // arg2 = pool base (local) or param base slot
+    cbz x16, Lstmt_ial_a2_local
+    mov x3, x18
+    b Lstmt_ial_a3
+Lstmt_ial_a2_local:
+    mov x3, x9
+Lstmt_ial_a3:
+    mov x4, x5
+    bl _record_operation4
+    cbnz x0, Lstmt_fail
     bl _consume_optional_semicolon
     mov x0, #0
     b Lstmt_return
@@ -2912,6 +3441,49 @@ Lstmt_assign_rt_mod:
     msub x21, x9, x26, x25
     b Lstmt_assign_store
 
+Lstmt_assign_plus:
+    // '+' seen at statement level after an identifier: distinguish 'x++' (increment)
+    // from 'x += rhs' (compound add). Consume the first '+', then look ahead one char.
+    bl _advance_char // consume first '+'
+    bl _peek_char
+    cmp w0, #'+'
+    b.eq Lstmt_incdec_plus
+    mov x21, #1
+    b Lstmt_assign_compound_after_op
+Lstmt_incdec_plus:
+    bl _advance_char // consume second '+'
+    mov x21, #1
+    b Lstmt_incdec_apply
+Lstmt_assign_minus:
+    // '-' seen: distinguish 'x--' (decrement) from 'x -= rhs' (compound sub).
+    bl _advance_char // consume first '-'
+    bl _peek_char
+    cmp w0, #'-'
+    b.eq Lstmt_incdec_minus
+    mov x21, #2
+    b Lstmt_assign_compound_after_op
+Lstmt_incdec_minus:
+    bl _advance_char // consume second '-'
+    mov x21, #2
+    b Lstmt_incdec_apply
+
+Lstmt_incdec_apply:
+    // x21 = 1 (++) or 2 (--). Treat as 'target (+/-)= 1' by reusing the shared
+    // compound eval/record/set path with an immediate rhs of 1.
+    mov x0, x19
+    mov x1, x20
+    bl _lookup_variable
+    cbz x0, Lstmt_unknown_var_assign
+    mov x22, x4 // target idx
+    mov x23, x2 // target type
+    mov x25, x1 // current value
+    mov x26, x3 // scale
+    cmp x23, #6
+    b.eq Lstmt_type_mismatch // ++/-- on decimal unsupported
+    mov x24, #1  // rhs immediate 1
+    mov x27, #-1 // immediate (no rhs slot)
+    b Lstmt_assign_compound_rhs_ready
+
 Lstmt_assign_add:
     mov x21, #1
     b Lstmt_assign_compound_shared
@@ -2931,6 +3503,7 @@ Lstmt_assign_mod:
 Lstmt_assign_compound_shared:
     // x21 = op type (1=add, 2=sub, 3=mul, 4=div, 5=mod)
     bl _advance_char // consume op
+Lstmt_assign_compound_after_op:
     mov w0, #'='
     bl _expect_char
     cbz x0, Lstmt_fail
@@ -3232,6 +3805,8 @@ Lstmt_assign_do_store_full:
     // For string type, handle runtime store separately
     cmp x23, #2
     b.eq Lstmt_assign_str_full
+    cmp x23, #18
+    b.eq Lstmt_assign_str_full
 
     mov x0, x19
     mov x1, x20
@@ -3287,7 +3862,7 @@ Lstmt_assign_str_full_imm:
     mov x0, x19
     mov x1, x20
     mov x2, x25    // string ptr
-    mov x3, #2     // type str
+    mov x3, x23    // type str/str?
     mov x4, x24    // length
     bl _set_variable_full
     cbnz x0, Lstmt_fail
@@ -3534,19 +4109,29 @@ _parse_if_statement_after_keyword:
     stp x23, x24, [sp, #-16]!
     mov x24, #0 // whether op34 (else label placement) was emitted
 
+    // Parentheses around the condition are OPTIONAL: `if (c) {` and `if c {`
+    // both parse. Peek for '(' and remember whether we consumed it, so we only
+    // require the matching ')' when an opening '(' was actually present.
     bl _skip_whitespace
-    mov w0, #'('
-    bl _expect_char
-    cbz x0, Lif_fail
-
+    bl _peek_char
+    cmp w0, #'('
+    b.ne Lif_cond_no_paren
+    bl _advance_char // consume '('
+    mov x22, #1
+    b Lif_cond_parse
+Lif_cond_no_paren:
+    mov x22, #0
+Lif_cond_parse:
     bl _parse_condition_value
     cbz x0, Lif_fail
     mov x19, x1 // temp_var_id
 
+    cbz x22, Lif_cond_no_close
     bl _skip_whitespace
     mov w0, #')'
     bl _expect_char
     cbz x0, Lif_fail
+Lif_cond_no_close:
 
     bl _skip_whitespace
     mov w0, #'{'
@@ -3586,8 +4171,17 @@ Lif_body_loop:
     cmp x0, #3
     b.eq Lif_body_loop
     cmp x0, #4
-    b.eq Lif_return_propagate
+    b.eq Lif_body_return_stmt
     b Lif_fail
+
+Lif_body_return_stmt:
+    // Compile mode (fn_exec_depth == 0): a `return` inside the block is just
+    // a recorded op -- keep parsing the rest of the block so the code after
+    // the if statement is still compiled. Interpret mode must propagate.
+    LOAD_ADDR x9, fn_exec_depth
+    ldr x9, [x9]
+    cbz x9, Lif_body_loop
+    b Lif_return_propagate
 
 Lif_return_propagate:
     cbnz x24, Lif_return_emit_end_only
@@ -3680,8 +4274,15 @@ Lif_else_loop:
     cmp x0, #3
     b.eq Lif_else_loop
     cmp x0, #4
-    b.eq Lif_return_propagate
+    b.eq Lif_else_return_stmt
     b Lif_fail
+
+Lif_else_return_stmt:
+    // Same compile-mode rule as the then-body (see Lif_body_return_stmt).
+    LOAD_ADDR x9, fn_exec_depth
+    ldr x9, [x9]
+    cbz x9, Lif_else_loop
+    b Lif_return_propagate
 
 Lif_check_else_if:
     LOAD_ADDR x0, kw_if
@@ -3815,11 +4416,15 @@ _parse_while_statement_after_keyword:
     mov x4, #0
     bl _record_operation4
 
+    // Parentheses around the condition are OPTIONAL: `while (c) {` and `while c {`
+    // both parse. The open '(' and its close ')' are each consumed only if present
+    // (a bare '{' terminates the condition either way).
     bl _skip_whitespace
-    mov w0, #'('
-    bl _expect_char
-    cbz x0, Lwhile_fail
-
+    bl _peek_char
+    cmp w0, #'('
+    b.ne Lwhile_cond_parse
+    bl _advance_char // consume '('
+Lwhile_cond_parse:
     bl _parse_condition_value
     cbz x0, Lwhile_fail
     mov x23, x1 // temp_var_id
@@ -3833,9 +4438,11 @@ _parse_while_statement_after_keyword:
     bl _record_operation4
 
     bl _skip_whitespace
-    mov w0, #')'
-    bl _expect_char
-    cbz x0, Lwhile_fail
+    bl _peek_char
+    cmp w0, #')'
+    b.ne Lwhile_cond_no_close
+    bl _advance_char // consume ')'
+Lwhile_cond_no_close:
 
     bl _skip_whitespace
     mov w0, #'{'
@@ -3862,8 +4469,17 @@ Lwhile_body_loop:
     cmp x0, #3
     b.eq Lwhile_body_loop
     cmp x0, #4
-    b.eq Lwhile_return_propagate
+    b.eq Lwhile_body_return_stmt
     b Lwhile_fail
+
+Lwhile_body_return_stmt:
+    // Compile mode: `return` inside a while body is a recorded op; keep
+    // parsing so the loop is closed properly (op 38) and code after the
+    // loop still compiles. Interpret mode propagates the return.
+    LOAD_ADDR x9, fn_exec_depth
+    ldr x9, [x9]
+    cbz x9, Lwhile_body_loop
+    b Lwhile_return_propagate
 
 Lwhile_return_propagate:
     cbz x24, Lwhile_return_restore_only
@@ -3948,7 +4564,7 @@ _parse_for_statement_after_keyword:
     stp x23, x24, [sp, #-16]!
     stp x25, x26, [sp, #-16]!
     stp x27, x28, [sp, #-16]!
-    sub sp, sp, #32
+    sub sp, sp, #48
 
     LOAD_ADDR x9, current_loop_start
     ldr x10, [x9]
@@ -3957,10 +4573,30 @@ _parse_for_statement_after_keyword:
     stp x10, x11, [sp]
     str xzr, [sp, #16]
 
+    // Block scoping: save the current variable floor and count, then start a
+    // fresh block at the current count. The duplicate-variable check is bounded
+    // by var_scope_base, so a loop counter (or a body-local) may now shadow an
+    // outer variable of the same name, and two sibling loops may each declare
+    // the same counter name. On exit (Lfor_return) both are restored, popping
+    // the loop's block-local variables and freeing their slots for reuse.
+    LOAD_ADDR x9, var_scope_base
+    ldr x10, [x9]
+    str x10, [sp, #32]
+    LOAD_ADDR x9, var_count
+    ldr x11, [x9]
+    str x11, [sp, #40]
+    LOAD_ADDR x9, var_scope_base
+    str x11, [x9]
+
+    // Parentheses around the for-header are OPTIONAL: `for (…) {` and `for … {`
+    // both parse. Consume the '(' only if present; the header still terminates
+    // at '{' (and each form only requires a matching ')' when '(' was consumed).
     bl _skip_whitespace
-    mov w0, #'('
-    bl _expect_char
-    cbz x0, Lfor_fail
+    bl _peek_char
+    cmp w0, #'('
+    b.ne Lfor_no_open_paren
+    bl _advance_char // consume '('
+Lfor_no_open_paren:
 
     // Probe for `for (item in iterable)` first.
     LOAD_ADDR x9, cursor_pos
@@ -4057,12 +4693,15 @@ Lfor_skip_update_text:
     cbz w0, Lfor_counted_fail
     cmp w0, #')'
     b.eq Lfor_update_end
+    // Paren-less header: the update text ends at '{' (no closing ')').
+    cmp w0, #'{'
+    b.eq Lfor_update_at_brace
     bl _advance_char
     b Lfor_skip_update_text
 
 Lfor_update_end:
-    bl _advance_char
-
+    bl _advance_char // consume ')'
+Lfor_update_at_brace:
     bl _skip_whitespace
     mov w0, #'{'
     bl _expect_char
@@ -4087,8 +4726,16 @@ Lfor_body_loop:
     cmp x0, #3
     b.eq Lfor_body_loop
     cmp x0, #4
-    b.eq Lfor_counted_return_propagate
+    b.eq Lfor_body_return_stmt
     b Lfor_counted_fail
+
+Lfor_body_return_stmt:
+    // Compile mode: keep parsing the for body after a `return` (the op is
+    // already recorded); interpret mode propagates the return upward.
+    LOAD_ADDR x9, fn_exec_depth
+    ldr x9, [x9]
+    cbz x9, Lfor_body_loop
+    b Lfor_counted_return_propagate
 
 Lfor_body_done:
     bl _advance_char
@@ -4237,7 +4884,15 @@ Lfor_fail_restore_labels:
     mov x0, #1
 
 Lfor_return:
-    add sp, sp, #32
+    // Restore the enclosing block's variable floor and pop this loop's
+    // block-local variables (preserve x0 = return status).
+    ldr x10, [sp, #32]
+    LOAD_ADDR x9, var_scope_base
+    str x10, [x9]
+    ldr x11, [sp, #40]
+    LOAD_ADDR x9, var_count
+    str x11, [x9]
+    add sp, sp, #48
     ldp x27, x28, [sp], #16
     ldp x25, x26, [sp], #16
     ldp x23, x24, [sp], #16
@@ -4249,14 +4904,18 @@ Lfor_return:
 Lfor_in_setup:
     bl _parse_for_iterable_value
     cbz x0, Lfor_fail
-    mov x19, x1 // list start index
-    mov x20, x2 // list count
+    mov x19, x1 // list start index (compile-time base)
+    mov x20, x2 // list count (compile-time; unknown for a list parameter)
     mov x21, x3 // element type
+    str x4, [sp, #24] // source var slot (or -1) -> lets us detect a list parameter
 
+    // Close ')' is optional (matches the optional open paren for the for-header).
     bl _skip_whitespace
-    mov w0, #')'
-    bl _expect_char
-    cbz x0, Lfor_fail
+    bl _peek_char
+    cmp w0, #')'
+    b.ne Lfor_in_no_close
+    bl _advance_char // consume ')'
+Lfor_in_no_close:
 
     bl _skip_whitespace
     mov w0, #'{'
@@ -4269,20 +4928,50 @@ Lfor_in_setup:
     mov x10, #1
     str x10, [sp, #16]
 
+    // Capture the body-start cursor (used by the str compile-time unroll path,
+    // which re-parses the body once per element).
     LOAD_ADDR x9, cursor_pos
     ldr x22, [x9]
     LOAD_ADDR x9, current_line
     ldr x23, [x9]
 
-    cbz x20, Lfor_skip_block_done
+    // STRING element lists normally keep the proven compile-time unroll:
+    // list_pool_values holds a str element's data-value id (not a runtime
+    // pointer), so op 80 can't load it as a runtime string. EXCEPTION: a
+    // runtime-count str list (a str.split result) stores real runtime char*
+    // pointers in the pool and its count is only known at run time, so it must
+    // use the runtime loop (op 80 str path loads the pointer directly).
+    // Integer/scalar lists always use the runtime loop below.
+    cmp x21, #2
+    b.ne Lfor_in_use_runtime_loop
+    LOAD_ADDR x9, list_base_is_runtime
+    ldrb w9, [x9, x19]
+    cbz w9, Lfor_in_iteration
 
+Lfor_in_use_runtime_loop:
+    // Emit a real runtime loop (no compile-time unrolling). This works for
+    // both local lists (base immediate, count constant) and list PARAMETERS
+    // (base = the param's runtime slot, count computed at runtime via op 81).
+    // The loop var name is in x24/x25 (captured at the for-statement entry).
+    mov x0, x19             // compile-time base index
+    mov x1, x20             // compile-time count
+    mov x2, x21             // element type
+    ldr x3, [sp, #24]       // source var slot (or -1)
+    mov x4, x24             // loop var name ptr
+    mov x5, x25             // loop var name len
+    bl _emit_for_in_runtime_loop
+    cbz x0, Lfor_fail
+    b Lfor_in_done
+
+    // ---- STRING element compile-time unroll (preserves pre-existing behavior) ----
+Lfor_in_iteration:
+    cbz x20, Lfor_skip_block_done
     bl _get_next_label
     LOAD_ADDR x9, current_loop_end
     str x0, [x9]
-
     mov x26, #0
 
-Lfor_in_iteration:
+Lfor_in_str_iter:
     cmp x26, x20
     b.ge Lfor_in_done
 
@@ -4299,7 +4988,7 @@ Lfor_in_iteration:
     mov x0, x24
     mov x1, x25
     bl _lookup_variable
-    cbz x0, Lfor_in_define
+    cbz x0, Lfor_in_str_define
 
     mov x0, x24
     mov x1, x25
@@ -4308,9 +4997,9 @@ Lfor_in_iteration:
     mov x4, x28
     bl _set_variable_full
     cbnz x0, Lfor_fail
-    b Lfor_in_store_runtime
+    b Lfor_in_str_body_reset
 
-Lfor_in_define:
+Lfor_in_str_define:
     mov x0, x24
     mov x1, x25
     mov x2, x27
@@ -4320,41 +5009,28 @@ Lfor_in_define:
     bl _define_variable
     cbnz x0, Lfor_fail
 
-Lfor_in_store_runtime:
-    cmp x21, #2
-    b.eq Lfor_in_body_reset
-    mov x0, x24
-    mov x1, x25
-    bl _lookup_variable
-    cbz x0, Lfor_fail
-    mov x0, x4
-    mov x1, x27
-    bl _record_store_variable
-    cbnz x0, Lfor_fail
-
-Lfor_in_body_reset:
+Lfor_in_str_body_reset:
     LOAD_ADDR x9, cursor_pos
     str x22, [x9]
     LOAD_ADDR x9, current_line
     str x23, [x9]
 
-Lfor_in_body_loop:
+Lfor_in_str_body_loop:
     bl _skip_whitespace
     bl _peek_char
     cmp w0, #'}'
-    b.eq Lfor_in_body_done
+    b.eq Lfor_in_str_body_done
     cbz w0, Lwhile_unclosed
     bl _parse_statement
-    cbz x0, Lfor_in_body_loop
+    cbz x0, Lfor_in_str_body_loop
     cmp x0, #2
-    b.eq Lfor_in_stop
+    b.eq Lfor_in_str_stop
     cmp x0, #3
-    b.eq Lfor_in_skip_rest
+    b.eq Lfor_in_str_skip_rest
     b Lfor_fail
 
-Lfor_in_body_done:
+Lfor_in_str_body_done:
     bl _advance_char
-
     mov x0, #35
     LOAD_ADDR x9, current_loop_start
     ldr x1, [x9]
@@ -4362,14 +5038,12 @@ Lfor_in_body_done:
     mov x3, #0
     mov x4, #0
     bl _record_operation4
-
     add x26, x26, #1
-    b Lfor_in_iteration
+    b Lfor_in_str_iter
 
-Lfor_in_skip_rest:
+Lfor_in_str_skip_rest:
     bl _skip_block_contents
     cbnz x0, Lfor_fail
-
     mov x0, #35
     LOAD_ADDR x9, current_loop_start
     ldr x1, [x9]
@@ -4377,21 +5051,20 @@ Lfor_in_skip_rest:
     mov x3, #0
     mov x4, #0
     bl _record_operation4
-
     add x26, x26, #1
-    b Lfor_in_iteration
+    b Lfor_in_str_iter
 
-Lfor_in_stop:
+Lfor_in_str_stop:
     bl _skip_block_contents
     cbnz x0, Lfor_fail
     ldr x12, [sp, #16]
-    cbz x12, Lfor_in_stop_no_depth
+    cbz x12, Lfor_in_str_stop_no_depth
     LOAD_ADDR x9, loop_context_depth
     ldr x10, [x9]
     sub x10, x10, #1
     str x10, [x9]
     str xzr, [sp, #16]
-Lfor_in_stop_no_depth:
+Lfor_in_str_stop_no_depth:
     mov x0, #35
     LOAD_ADDR x9, current_loop_end
     ldr x1, [x9]
@@ -4399,17 +5072,19 @@ Lfor_in_stop_no_depth:
     mov x3, #0
     mov x4, #0
     bl _record_operation4
-
     ldp x10, x11, [sp]
     LOAD_ADDR x9, current_loop_start
     str x10, [x9]
     LOAD_ADDR x9, current_loop_end
     str x11, [x9]
-
     mov x0, #0
     b Lfor_return
 
 Lfor_in_done:
+    // The runtime loop is fully emitted by _emit_for_in_runtime_loop (which
+    // also placed the end label via op 38 and restored the outer loop labels).
+    // Here we only close the loop-context depth and restore the saved labels
+    // for consistency with the counted-for exit paths, then return 0.
     ldr x12, [sp, #16]
     cbz x12, Lfor_in_done_no_depth
     LOAD_ADDR x9, loop_context_depth
@@ -4418,20 +5093,11 @@ Lfor_in_done:
     str x10, [x9]
     str xzr, [sp, #16]
 Lfor_in_done_no_depth:
-    mov x0, #35
-    LOAD_ADDR x9, current_loop_end
-    ldr x1, [x9]
-    mov x2, #0
-    mov x3, #0
-    mov x4, #0
-    bl _record_operation4
-
     ldp x10, x11, [sp]
     LOAD_ADDR x9, current_loop_start
     str x10, [x9]
     LOAD_ADDR x9, current_loop_end
     str x11, [x9]
-
     mov x0, #0
     b Lfor_return
 
@@ -4446,6 +5112,7 @@ _parse_for_iterable_value:
     mov x23, x1 // list start index
     mov x24, x2 // list type
     mov x22, x3 // list metadata
+    mov x21, x4 // source var slot when the iterable is a plain variable (or -1)
 
     cmp x24, #4 // list<T>
     b.eq Lfor_iterable_list_unified
@@ -4462,15 +5129,297 @@ Lfor_iterable_list_unified:
     mov x1, x23 // start index
     and x2, x22, #0xFFFFFFFF // count
     lsr x3, x22, #32 // element type
-    b Lfor_iterable_return
+    mov x4, x21 // source var slot (or -1) so the caller can detect a list parameter
     b Lfor_iterable_return
 
 Lfor_iterable_fail:
     LOAD_ADDR x0, msg_expected_list
     bl _report_error_prefix
     mov x0, #0
+    mov x4, #-1
 
 Lfor_iterable_return:
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+// ========================================================
+// _emit_for_in_runtime_loop
+//   x0 = compile-time base index (pool base for a local list/literal)
+//   x1 = compile-time count (valid for a local list; ignored for a param)
+//   x2 = element type
+//   x3 = source var slot of the iterable, or -1 (used to detect a list param)
+//   x4 = loop variable name ptr
+//   x5 = loop variable name len
+// Emits a REAL runtime loop over the list (no compile-time unrolling), so it
+// works for local lists (base immediate, count constant) AND for list
+// PARAMETERS (base = the param's runtime slot value, count read at runtime via
+// op 81), and large loops no longer overflow the fixed op table. The body is
+// parsed exactly once; `stop`/`skip`/`return` inside it are handled by
+// _parse_statement via the current_loop_start/current_loop_end globals, exactly
+// like the counted-for loop. Cursor must sit just after the opening '{'; on
+// return the closing '}' has been consumed. Returns x0 = 1 ok, 0 on failure.
+// Stack scratch (sub sp,#64):
+//   [0]  saved current_loop_start   [8]  saved current_loop_end
+//   [16] base_ct                    [24] count_ct
+//   [32] elemtype                   [40] srcslot
+//   [48] cnt_slot                   [56] is_param, then reused for cond slot
+// ========================================================
+_emit_for_in_runtime_loop:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+    stp x25, x26, [sp, #-16]!
+    stp x27, x28, [sp, #-16]!
+    sub sp, sp, #64
+
+    str x0, [sp, #16]           // base_ct
+    str x1, [sp, #24]           // count_ct
+    str x2, [sp, #32]           // elemtype
+    str x3, [sp, #40]           // srcslot
+    mov x24, x4                 // loop var name ptr (kept until define/lookup)
+    mov x25, x5                 // loop var name len
+
+    // Save outer loop labels so nested loops restore correctly.
+    LOAD_ADDR x9, current_loop_start
+    ldr x10, [x9]
+    str x10, [sp, #0]
+    LOAD_ADDR x9, current_loop_end
+    ldr x10, [x9]
+    str x10, [sp, #8]
+
+    // -------- is the iterable a list PARAMETER? store 0/1 at sp[56] --------
+    mov x12, #0
+    ldr x28, [sp, #40]          // srcslot
+    cmn x28, #1
+    b.eq Lforr_param_stored     // -1 -> not a variable -> local
+    LOAD_ADDR x9, current_parse_fn_id
+    ldr x9, [x9]
+    cmn x9, #1
+    b.eq Lforr_param_stored     // not inside a function
+    LOAD_ADDR x10, fn_scope_bases
+    ldr x10, [x10, x9, lsl #3]
+    cmp x28, x10
+    b.lt Lforr_param_stored     // slot < scope base -> not a param
+    LOAD_ADDR x11, fn_param_counts
+    ldr x11, [x11, x9, lsl #3]
+    add x11, x10, x11
+    cmp x28, x11
+    b.ge Lforr_param_stored     // slot >= scope base + param count -> not a param
+    mov x12, #1                 // it's a list parameter
+Lforr_param_stored:
+    str x12, [sp, #56]          // is_param
+
+    // -------- define / look up loop variable, get its slot (x23) ----------
+    mov x0, x24
+    mov x1, x25
+    bl _lookup_variable
+    cbnz x0, Lforr_loopvar_found
+    mov x0, x24
+    mov x1, x25
+    mov x2, #0                  // initial value (overwritten each iteration)
+    mov x3, #0                  // not const
+    ldr x4, [sp, #32]           // type = element type
+    mov x5, #0                  // length
+    bl _define_variable
+    cbnz x0, Lforr_fail
+    mov x0, x24
+    mov x1, x25
+    bl _lookup_variable
+    cbz x0, Lforr_fail
+Lforr_loopvar_found:
+    mov x23, x4                 // loop var slot
+
+    // -------- counter slot idx = 0 (materialized as a runtime store) ------
+    mov x0, #0
+    bl _expr_materialize_ct_int
+    cmn x0, #1
+    b.eq Lforr_fail
+    mov x19, x0                 // idx_slot (held across body)
+
+    // -------- count slot: param OR runtime-count local -> runtime op 81;
+    // plain local -> compile-time constant. -------------------------------
+    ldr x9, [sp, #56]           // is_param
+    cbnz x9, Lforr_cnt_param
+    // Runtime-count local list (e.g. a str.split result held in a local)?
+    ldr x0, [sp, #16]           // base_ct
+    LOAD_ADDR x9, list_base_is_runtime
+    ldrb w9, [x9, x0]
+    cbnz w9, Lforr_cnt_rtlocal
+    ldr x0, [sp, #24]           // compile-time count
+    bl _expr_materialize_ct_int
+    cmn x0, #1
+    b.eq Lforr_fail
+    str x0, [sp, #48]           // cnt_slot
+    b Lforr_cnt_done
+Lforr_cnt_rtlocal:
+    // Base is an immediate; materialize it into a slot, then op 81 reads
+    // list_base_counts[base] at run time. Element access still uses the
+    // immediate base (is_param stays 0 below).
+    ldr x0, [sp, #16]           // base_ct
+    bl _expr_materialize_ct_int
+    cmn x0, #1
+    b.eq Lforr_fail
+    str x0, [sp, #48]           // stash base slot temporarily in cnt_slot
+    bl _allocate_temp_var
+    ldr x2, [sp, #48]           // arg1 = base slot
+    str x0, [sp, #48]           // cnt_slot (dest)
+    mov x1, x0                  // arg0 = dest
+    mov x0, #81                 // op list_length_runtime
+    bl _record_operation
+    cbnz x0, Lforr_fail
+    b Lforr_cnt_done
+Lforr_cnt_param:
+    bl _allocate_temp_var
+    str x0, [sp, #48]           // cnt_slot (dest)
+    mov x1, x0                  // arg0 = dest
+    ldr x2, [sp, #40]           // arg1 = source list-parameter slot
+    mov x0, #81                 // op list_length_runtime
+    bl _record_operation
+    cbnz x0, Lforr_fail
+Lforr_cnt_done:
+
+    // -------- base operand (x27) and op-80 flags (x28) --------------------
+    // index is always a var (idx_slot) -> bit1 stays clear.
+    // base: local = immediate (bit2 clear); param = var slot (bit2 set).
+    // element type str -> bit0 set (codegen loads a string pointer).
+    ldr x9, [sp, #32]           // elemtype
+    cmp x9, #2
+    cset x28, eq                // bit0 = (elemtype == str)
+    ldr x9, [sp, #56]           // is_param
+    cbnz x9, Lforr_base_param
+    ldr x27, [sp, #16]          // base_ct (immediate)
+    b Lforr_base_done
+Lforr_base_param:
+    ldr x27, [sp, #40]          // param slot (runtime base)
+    orr x28, x28, #4            // bit2 = base is a var
+Lforr_base_done:
+
+    // -------- allocate labels: start (x20), end (x21), cont (x22) ---------
+    bl _get_next_label
+    mov x20, x0
+    bl _get_next_label
+    mov x21, x0
+    bl _get_next_label
+    mov x22, x0
+
+    // skip -> cont label (still runs the increment); stop -> end label.
+    LOAD_ADDR x9, current_loop_start
+    str x22, [x9]
+    LOAD_ADDR x9, current_loop_end
+    str x21, [x9]
+
+    // op 36: start label
+    mov x0, #36
+    mov x1, x20
+    mov x2, #0
+    mov x3, #0
+    mov x4, #0
+    bl _record_operation4
+    cbnz x0, Lforr_fail
+
+    // op 40: cond = (idx < cnt) into a fresh temp (stored at sp[56])
+    bl _allocate_temp_var
+    str x0, [sp, #56]           // cond slot
+    mov x4, x0                  // dest = cond slot
+    mov x0, #40
+    mov x1, x19                 // left = idx
+    ldr x2, [sp, #48]           // right = cnt
+    mov x3, #3                  // operator: less-than
+    bl _record_operation4
+    cbnz x0, Lforr_fail
+
+    // op 37: branch to end when the condition is false
+    mov x0, #37
+    ldr x1, [sp, #56]           // cond slot
+    mov x2, x21                 // end label
+    mov x3, #0
+    mov x4, #0
+    bl _record_operation4
+    cbnz x0, Lforr_fail
+
+    // op 80: loop_var = list[base + idx]
+    mov x0, #80
+    mov x1, x23                 // dest = loop var slot
+    mov x2, x19                 // index = idx slot (var; bit1 clear)
+    mov x3, x27                 // base (immediate for local, slot for param)
+    mov x4, x28                 // flags
+    bl _record_operation4
+    cbnz x0, Lforr_fail
+
+    // -------- parse the loop body exactly once --------
+Lforr_body_loop:
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, #'}'
+    b.eq Lforr_body_done
+    cbz w0, Lforr_unclosed
+    bl _parse_statement
+    cbz x0, Lforr_body_loop
+    cmp x0, #2                  // stop: its jump op is already recorded
+    b.eq Lforr_body_loop
+    cmp x0, #3                  // skip: its jump op is already recorded
+    b.eq Lforr_body_loop
+    cmp x0, #4                  // return: op already recorded (compile mode)
+    b.eq Lforr_body_loop
+    b Lforr_fail
+
+Lforr_body_done:
+    bl _advance_char
+
+    // op 46: continue label (target of `skip`)
+    mov x0, #46
+    mov x1, x22
+    mov x2, #0
+    mov x3, #0
+    mov x4, #0
+    bl _record_operation4
+    cbnz x0, Lforr_fail
+
+    // op 104: idx = idx + 1
+    mov x0, #104
+    mov x1, x19
+    mov x2, #0
+    bl _record_operation
+    cbnz x0, Lforr_fail
+
+    // op 38: branch back to start and place the end label
+    mov x0, #38
+    mov x1, x20
+    mov x2, x21
+    mov x3, #0
+    mov x4, #0
+    bl _record_operation4
+    cbnz x0, Lforr_fail
+
+    mov x0, #1                  // success
+    b Lforr_restore
+
+Lforr_unclosed:
+    LOAD_ADDR x0, msg_expected_char
+    bl _report_error_prefix
+    LOAD_ADDR x0, close_brace_char
+    mov x1, #1
+    mov x2, #2
+    bl _write_buffer_fd
+    bl _write_newline_stderr
+Lforr_fail:
+    mov x0, #0
+Lforr_restore:
+    // Restore the outer loop labels (nested-loop safe).
+    ldr x10, [sp, #0]
+    LOAD_ADDR x9, current_loop_start
+    str x10, [x9]
+    ldr x10, [sp, #8]
+    LOAD_ADDR x9, current_loop_end
+    str x10, [x9]
+    add sp, sp, #64
+    ldp x27, x28, [sp], #16
+    ldp x25, x26, [sp], #16
     ldp x23, x24, [sp], #16
     ldp x21, x22, [sp], #16
     ldp x19, x20, [sp], #16
@@ -4565,6 +5514,12 @@ Llist_take_comma:
 
 Llist_done:
     bl _advance_char
+    // Record this list's element count at its pool BASE index so that a
+    // runtime .length() on a list PARAMETER can read list_base_counts[base]
+    // (the param carries the pool base as its runtime value). x20=base,
+    // x21=count.
+    LOAD_ADDR x9, list_base_counts
+    str x21, [x9, x20, lsl #3]
     mov x0, #1
     mov x1, x20 // list start index
     mov x2, #4 // unified list type ID
@@ -5054,12 +6009,207 @@ Lskip_paren_return:
     ldp x29, x30, [sp], #16
     ret
 
+// _parse_expr_value: the value-context expression entry point. It parses a
+// full additive expression (via _parse_addsub_value) and then, if a single
+// relational operator follows, lowers "L <cmp> R" into a runtime 0/1 boolean
+// temp -- the exact same lowering _parse_condition_atom uses (ops 39/40).
+// This makes comparisons usable as FIRST-CLASS VALUES:
+//     print(a > b)        bool b = a > b        return a > b
+// not only inside if/while/for conditions. A lone '=' (assignment) is never
+// consumed here: '==' / '!=' are recognised only via a two-char lookahead.
+// Conditions are unaffected because _parse_condition_atom parses its operands
+// through _parse_addsub_value directly and keeps handling comparisons itself.
 _parse_expr_value:
     stp x29, x30, [sp, #-16]!
     mov x29, sp
     stp x19, x20, [sp, #-16]!
     stp x21, x22, [sp, #-16]!
     stp x23, x24, [sp, #-16]!
+    stp x25, x26, [sp, #-16]!
+    stp x27, x28, [sp, #-16]!   // preserve caller live state (see addsub note)
+
+    bl _parse_addsub_value
+    cbz x0, Lcmpv_fail
+    mov x19, x4    // left slot (-1 if immediate)
+    mov x20, x1    // left value (immediate / compile-time)
+    mov x25, x2    // left type (kept for the passthrough case)
+    mov x26, x3    // left meta (kept for the passthrough case)
+
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, #'='
+    b.eq Lcmpv_maybe_eq
+    cmp w0, #'!'
+    b.eq Lcmpv_maybe_ne
+    cmp w0, #'>'
+    b.eq Lcmpv_gt
+    cmp w0, #'<'
+    b.eq Lcmpv_lt
+    b Lcmpv_passthrough
+
+Lcmpv_maybe_eq:
+    bl _peek_next_char
+    cmp w0, #'='
+    b.ne Lcmpv_passthrough      // single '=' is assignment: leave it alone
+    bl _advance_char            // consume first '='
+    bl _advance_char            // consume second '='
+    mov x21, #0                 // EQ
+    b Lcmpv_parse_right
+Lcmpv_maybe_ne:
+    bl _peek_next_char
+    cmp w0, #'='
+    b.ne Lcmpv_passthrough      // lone '!' is not a value operator
+    bl _advance_char            // consume '!'
+    bl _advance_char            // consume '='
+    mov x21, #1                 // NE
+    b Lcmpv_parse_right
+Lcmpv_gt:
+    bl _advance_char
+    bl _peek_char
+    cmp w0, #'='
+    b.eq Lcmpv_ge
+    mov x21, #2                 // GT
+    b Lcmpv_parse_right
+Lcmpv_ge:
+    bl _advance_char
+    mov x21, #4                 // GE
+    b Lcmpv_parse_right
+Lcmpv_lt:
+    bl _advance_char
+    bl _peek_char
+    cmp w0, #'='
+    b.eq Lcmpv_le
+    mov x21, #3                 // LT
+    b Lcmpv_parse_right
+Lcmpv_le:
+    bl _advance_char
+    mov x21, #5                 // LE
+    b Lcmpv_parse_right
+
+Lcmpv_parse_right:
+    bl _parse_addsub_value
+    cbz x0, Lcmpv_fail
+    mov x22, x4                 // right slot (-1 if immediate)
+    mov x23, x1                 // right value (immediate)
+
+    bl _allocate_temp_var
+    mov x24, x0                 // dest temp id
+
+    // Compile-time truth value (mirrors _parse_condition_atom) so the
+    // compile-time interpreter path stays consistent with the emitted op.
+    mov x25, x20                // left value
+    cmn x19, #1
+    b.eq Lcmpv_left_ready
+    LOAD_ADDR x9, var_values
+    ldr x25, [x9, x19, lsl #3]
+Lcmpv_left_ready:
+    mov x26, x23                // right value
+    cmn x22, #1
+    b.eq Lcmpv_right_ready
+    LOAD_ADDR x9, var_values
+    ldr x26, [x9, x22, lsl #3]
+Lcmpv_right_ready:
+    cmp x21, #0
+    b.eq Lcmpv_eval_eq
+    cmp x21, #1
+    b.eq Lcmpv_eval_ne
+    cmp x21, #2
+    b.eq Lcmpv_eval_gt
+    cmp x21, #3
+    b.eq Lcmpv_eval_lt
+    cmp x21, #4
+    b.eq Lcmpv_eval_ge
+    cmp x21, #5
+    b.eq Lcmpv_eval_le
+    mov x26, #0
+    b Lcmpv_store_eval
+Lcmpv_eval_eq:
+    cmp x25, x26
+    cset x26, eq
+    b Lcmpv_store_eval
+Lcmpv_eval_ne:
+    cmp x25, x26
+    cset x26, ne
+    b Lcmpv_store_eval
+Lcmpv_eval_gt:
+    cmp x25, x26
+    cset x26, gt
+    b Lcmpv_store_eval
+Lcmpv_eval_lt:
+    cmp x25, x26
+    cset x26, lt
+    b Lcmpv_store_eval
+Lcmpv_eval_ge:
+    cmp x25, x26
+    cset x26, ge
+    b Lcmpv_store_eval
+Lcmpv_eval_le:
+    cmp x25, x26
+    cset x26, le
+Lcmpv_store_eval:
+    LOAD_ADDR x9, var_values
+    str x26, [x9, x24, lsl #3]
+
+    cmn x22, #1                 // right immediate?
+    b.eq Lcmpv_emit_imm
+    mov x0, #40                 // op cmp var
+    mov x1, x19
+    mov x2, x22
+    mov x3, x21
+    mov x4, x24
+    bl _record_operation4
+    cbnz x0, Lcmpv_fail
+    b Lcmpv_result
+Lcmpv_emit_imm:
+    mov x0, #39                 // op cmp imm
+    mov x1, x19
+    mov x2, x23
+    mov x3, x21
+    mov x4, x24
+    bl _record_operation4
+    cbnz x0, Lcmpv_fail
+
+Lcmpv_result:
+    LOAD_ADDR x9, var_values
+    ldr x1, [x9, x24, lsl #3]   // x1 = compile-time truth value (0/1)
+    mov x0, #1
+    mov x2, #1                  // type = bool
+    mov x3, #0
+    mov x4, x24                 // runtime temp slot holding the result
+    b Lcmpv_return
+
+Lcmpv_passthrough:
+    mov x0, #1
+    mov x1, x20                 // original value
+    mov x2, x25                 // original type
+    mov x3, x26                 // original meta
+    mov x4, x19                 // original slot
+    b Lcmpv_return
+
+Lcmpv_fail:
+    mov x0, #0
+    mov x1, #0
+
+Lcmpv_return:
+    ldp x27, x28, [sp], #16
+    ldp x25, x26, [sp], #16
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+// _parse_addsub_value: the additive layer (formerly the body of
+// _parse_expr_value). Handles '+', '-', and the 'otherwise' nullable operator.
+// Comparisons are handled one level up in the _parse_expr_value wrapper.
+_parse_addsub_value:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+    stp x27, x28, [sp, #-16]!   // runtime math paths use x27/x28; callers
+                                // (e.g. _call_function) keep live state there
 
     bl _parse_term_value
     cbz x0, Lexpr_fail
@@ -5122,20 +6272,149 @@ Lexpr_add:
     cmp x20, #2
     b.eq Lexpr_add_str
     cmp x2, #2
-    b.eq Lexpr_type_mismatch
+    b.eq Lexpr_add_left_int_right_str
     cmp x20, #6
     b.eq Lexpr_add_dec
     cmp x2, #6
     b.eq Lexpr_type_mismatch
+    cmp x24, #-1
+    b.ne Lexpr_add_runtime_int
+    cmp x4, #-1
+    b.ne Lexpr_add_runtime_int
     add x19, x19, x1
     mov x20, #0
     mov x21, #0
     mov x24, #-1
     b Lexpr_loop
 
+Lexpr_add_runtime_int:
+    add x27, x19, x1
+    stp x1, x2, [sp, #-48]!
+    stp x3, x4, [sp, #16]
+    stp x27, x24, [sp, #32]
+    bl _allocate_temp_var
+    mov x28, x0
+    ldp x1, x2, [sp]
+    ldp x3, x4, [sp, #16]
+    ldp x27, x24, [sp, #32]
+    add sp, sp, #48
+    cmp x24, #-1
+    b.eq Lexpr_add_runtime_left_imm
+    cmp x4, #-1
+    b.eq Lexpr_add_runtime_right_imm
+    mov x0, #28
+    mov x1, x28
+    mov x2, x24
+    mov x3, x4
+    bl _record_operation3
+    cbnz x0, Lexpr_fail
+    b Lexpr_add_runtime_done
+Lexpr_add_runtime_left_imm:
+    // Materialize the compile-time left value into its own slot, then fall
+    // through to the var-var add (op 28) -- safest, proven op path.
+    stp x1, x4, [sp, #-16]!
+    mov x0, x19
+    bl _expr_materialize_ct_int
+    mov x24, x0
+    ldp x1, x4, [sp], #16
+    cmn x24, #1
+    b.eq Lexpr_fail
+    cmn x4, #1
+    b.eq Lexpr_add_runtime_right_imm
+    b Lexpr_add_runtime_varvar
+Lexpr_add_runtime_right_imm:
+    mov x0, x1
+    bl _expr_materialize_ct_int
+    mov x4, x0
+    cmn x4, #1
+    b.eq Lexpr_fail
+Lexpr_add_runtime_varvar:
+    mov x0, #28
+    mov x1, x28
+    mov x2, x24
+    mov x3, x4
+    bl _record_operation3
+    cbnz x0, Lexpr_fail
+Lexpr_add_runtime_done:
+    mov x19, x27
+    mov x20, #0
+    mov x21, #0
+    mov x24, x28
+    b Lexpr_loop
+
 Lexpr_add_str:
     cmp x2, #2
+    b.eq Lexpr_add_str_ok
+    // Left is str, right is not: allow int(0) right operand by auto-casting it
+    // to a string (op 73 int->str), turning "str + int" into "str + str".
+    cmp x2, #0
     b.ne Lexpr_type_mismatch
+    // preserve left operand state across the cast/materialize helper calls
+    stp x19, x20, [sp, #-32]!
+    stp x21, x24, [sp, #16]
+    cmn x4, #1
+    b.ne Lexpr_add_r_hasvar
+    mov x0, x1                    // immediate int value
+    bl _expr_materialize_ct_int
+    cmn x0, #1
+    b.eq Lexpr_add_coerce_fail_r
+    mov x4, x0
+Lexpr_add_r_hasvar:
+    mov x0, #0                    // src type = int
+    mov x1, #2                    // dst type = str
+    mov x2, #0
+    mov x3, x4                    // src var slot
+    bl _emit_cast_op
+    cmn x0, #1
+    b.eq Lexpr_add_coerce_fail_r
+    mov x4, x0                    // right is now a runtime str var
+    ldp x21, x24, [sp, #16]
+    ldp x19, x20, [sp], #32
+    mov x1, #0
+    mov x2, #2
+    mov x3, #0
+    b Lexpr_add_str_ok
+Lexpr_add_coerce_fail_r:
+    ldp x21, x24, [sp, #16]
+    ldp x19, x20, [sp], #32
+    b Lexpr_type_mismatch
+
+Lexpr_add_left_int_right_str:
+    // Left is not str, right is str. Allow int(0) left operand by auto-casting
+    // it to a string, turning "int + str" into "str + str".
+    cmp x20, #0
+    b.ne Lexpr_type_mismatch
+    // preserve right operand state across the cast/materialize helper calls
+    stp x1, x2, [sp, #-32]!
+    stp x3, x4, [sp, #16]
+    cmn x24, #1
+    b.ne Lexpr_add_l_hasvar
+    mov x0, x19                   // immediate int value
+    bl _expr_materialize_ct_int
+    cmn x0, #1
+    b.eq Lexpr_add_coerce_fail_l
+    mov x24, x0
+Lexpr_add_l_hasvar:
+    mov x0, #0                    // src type = int
+    mov x1, #2                    // dst type = str
+    mov x2, #0
+    mov x3, x24                   // src var slot
+    bl _emit_cast_op
+    cmn x0, #1
+    b.eq Lexpr_add_coerce_fail_l
+    mov x24, x0                   // left is now a runtime str var
+    mov x19, #0
+    mov x20, #2
+    mov x21, #0
+    ldp x3, x4, [sp, #16]
+    ldp x1, x2, [sp], #32
+    b Lexpr_add_str_ok
+Lexpr_add_coerce_fail_l:
+    ldp x3, x4, [sp, #16]
+    ldp x1, x2, [sp], #32
+    b Lexpr_type_mismatch
+
+Lexpr_add_str_ok:
     // Both are strings. 
     // x19=left_val, x20=2, x21=left_len, x24=left_var_id
     // x1=right_val, x2=2, x3=right_len, x4=right_var_id
@@ -5243,10 +6522,58 @@ Lexpr_subtract:
     b.eq Lexpr_sub_dec
     cmp x2, #6
     b.eq Lexpr_type_mismatch
+    cmp x24, #-1
+    b.ne Lexpr_sub_runtime_int
+    cmp x4, #-1
+    b.ne Lexpr_sub_runtime_int
     sub x19, x19, x1
     mov x20, #0
     mov x21, #0
     mov x24, #-1
+    b Lexpr_loop
+
+Lexpr_sub_runtime_int:
+    // At least one side lives in a runtime slot: record op 29 (var - var).
+    // Non-slot sides are materialized first (op 24's operand order is fixed
+    // var-minus-imm, so materializing keeps left/right order correct).
+    sub x27, x19, x1              // compile-time tracking value
+    stp x1, x2, [sp, #-48]!
+    stp x3, x4, [sp, #16]
+    stp x27, x24, [sp, #32]
+    bl _allocate_temp_var
+    mov x28, x0                   // destination slot
+    ldp x1, x2, [sp]
+    ldp x3, x4, [sp, #16]
+    ldp x27, x24, [sp, #32]
+    add sp, sp, #48
+    cmn x24, #1
+    b.ne Lexpr_sub_rt_left_ok
+    stp x1, x4, [sp, #-16]!
+    mov x0, x19
+    bl _expr_materialize_ct_int
+    mov x24, x0
+    ldp x1, x4, [sp], #16
+    cmn x24, #1
+    b.eq Lexpr_fail
+Lexpr_sub_rt_left_ok:
+    cmn x4, #1
+    b.ne Lexpr_sub_rt_right_ok
+    mov x0, x1
+    bl _expr_materialize_ct_int
+    mov x4, x0
+    cmn x4, #1
+    b.eq Lexpr_fail
+Lexpr_sub_rt_right_ok:
+    mov x0, #29
+    mov x1, x28
+    mov x2, x24
+    mov x3, x4
+    bl _record_operation3
+    cbnz x0, Lexpr_fail
+    mov x19, x27
+    mov x20, #0
+    mov x21, #0
+    mov x24, x28
     b Lexpr_loop
 
 Lexpr_sub_dec:
@@ -5275,8 +6602,37 @@ Lexpr_fail:
     mov x0, #0
 
 Lexpr_return:
+    ldp x27, x28, [sp], #16
     ldp x23, x24, [sp], #16
     ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+// ------------------------------------------------------------------
+// _expr_materialize_ct_int
+// x0 = compile-time int value. Allocates a temp var slot and records
+// op 1 (store value -> slot) so the value exists at runtime.
+// Returns x0 = slot, or -1 on failure.
+// Preserves x19-x24, x27, x28 (x25/x26 are clobbered by the record
+// helpers and must not be live across this call).
+// ------------------------------------------------------------------
+_expr_materialize_ct_int:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    mov x19, x0
+    bl _allocate_temp_var
+    mov x20, x0
+    mov x0, x20
+    mov x1, x19
+    bl _record_store_variable
+    cbnz x0, Lexpr_mat_ct_fail
+    mov x0, x20
+    b Lexpr_mat_ct_ret
+Lexpr_mat_ct_fail:
+    mov x0, #-1
+Lexpr_mat_ct_ret:
     ldp x19, x20, [sp], #16
     ldp x29, x30, [sp], #16
     ret
@@ -5292,12 +6648,51 @@ _parse_condition_value:
     cbz x0, Lcond_parse_first
     bl _parse_condition_value
     cbz x0, Lcond_fail
-    cmp x1, #0
-    cset x1, eq
+    // x1 = temp var id of the inner condition (0/1). Emit a runtime
+    // "inner == 0" compare into a fresh temp so NOT works at run time.
+    mov x19, x1
+    bl _allocate_temp_var
+    mov x22, x0
+    LOAD_ADDR x9, var_values
+    ldr x10, [x9, x19, lsl #3]
+    cmp x10, #0
+    cset x10, eq
+    str x10, [x9, x22, lsl #3]
+    mov x0, #39 // op cmp imm
+    mov x1, x19 // left var slot
+    mov x2, #0  // right immediate 0
+    mov x3, #0  // operator EQ
+    mov x4, x22 // dest temp var
+    bl _record_operation4
     mov x0, #1
+    mov x1, x22
+    mov x2, #1  // type = var
+    mov x3, #0
     b Lcond_return
 
 Lcond_parse_first:
+    // "( condition )" grouping: only take this path when the lookahead
+    // scanner sees condition-level operators inside the parens; plain
+    // arithmetic groups like "(x + 1) > 2" stay on the atom/expr path.
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, #'('
+    b.ne Lcond_parse_atom_first
+    bl _cond_group_lookahead
+    cbz x0, Lcond_parse_atom_first
+    bl _advance_char              // consume '('
+    bl _parse_condition_value
+    cbz x0, Lcond_fail
+    mov x19, x1
+    mov x20, #1
+    mov x21, #0
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lcond_fail
+    b Lcond_logic_loop
+
+Lcond_parse_atom_first:
     bl _parse_condition_atom
     cbz x0, Lcond_fail
     mov x19, x1
@@ -5313,6 +6708,15 @@ Lcond_logic_loop:
     bl _consume_keyword
     cbnz x0, Lcond_logic_or
 
+    // Also accept the C-style operators "&&" and "||" as aliases for the
+    // "and"/"or" keywords, routing them through the same runtime logic paths.
+    mov w0, #'&'
+    bl _consume_double_char_op
+    cbnz x0, Lcond_logic_and
+    mov w0, #'|'
+    bl _consume_double_char_op
+    cbnz x0, Lcond_logic_or
+
     mov x0, #1
     mov x1, x19
     mov x2, #0 // int
@@ -5322,15 +6726,52 @@ Lcond_logic_loop:
 Lcond_logic_and:
     bl _parse_condition_value
     cbz x0, Lcond_fail
-    and x19, x19, x1
+    // x19 = left condition temp id, x1 = right condition temp id.
+    // Condition atoms always yield 0/1, so a runtime multiply is an exact
+    // logical AND. Record dest = left * right into a fresh temp.
+    mov x20, x1
+    bl _allocate_temp_var
+    mov x22, x0
+    LOAD_ADDR x9, var_values
+    ldr x10, [x9, x19, lsl #3]
+    ldr x11, [x9, x20, lsl #3]
+    cmp x10, #0
+    cset x10, ne
+    cmp x11, #0
+    cset x11, ne
+    and x10, x10, x11
+    str x10, [x9, x22, lsl #3]
+    mov x0, #30 // op 30: target = var * var
+    mov x1, x22
+    mov x2, x19
+    mov x3, x20
+    bl _record_operation3
+    cbnz x0, Lcond_fail
+    mov x19, x22
     b Lcond_logic_loop
 
 Lcond_logic_or:
     bl _parse_condition_value
     cbz x0, Lcond_fail
-    orr x19, x19, x1
-    cmp x19, #0
-    cset x19, ne
+    // Atoms yield 0/1, so runtime addition preserves truthiness for OR
+    // (0, 1 or 2 => branch tests only check non-zero).
+    mov x20, x1
+    bl _allocate_temp_var
+    mov x22, x0
+    LOAD_ADDR x9, var_values
+    ldr x10, [x9, x19, lsl #3]
+    ldr x11, [x9, x20, lsl #3]
+    orr x10, x10, x11
+    cmp x10, #0
+    cset x10, ne
+    str x10, [x9, x22, lsl #3]
+    mov x0, #28 // op 28: target = var + var
+    mov x1, x22
+    mov x2, x19
+    mov x3, x20
+    bl _record_operation3
+    cbnz x0, Lcond_fail
+    mov x19, x22
     b Lcond_logic_loop
 
 Lcond_fail:
@@ -5343,6 +6784,169 @@ Lcond_return:
     ldp x29, x30, [sp], #16
     ret
 
+// _cond_group_lookahead: read-only scan starting at '(' (cursor must point
+// at it after whitespace). Returns x0=1 when the parenthesized text up to
+// the matching ')' contains condition-level operators (==, !=, <, >, &&,
+// ||, " and ", " or "), i.e. it must be parsed as a grouped condition.
+// Skips over string literals. Never moves the cursor.
+_cond_group_lookahead:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    LOAD_ADDR x9, source_ptr
+    ldr x1, [x9]
+    LOAD_ADDR x9, cursor_pos
+    ldr x2, [x9]
+    add x1, x1, x2                // pointer at '('
+    mov x3, #0                    // paren depth
+    mov x0, #0                    // found flag
+Lcgl_loop:
+    ldrb w4, [x1]
+    cbz w4, Lcgl_ret
+    cmp w4, #'"'
+    b.eq Lcgl_string
+    cmp w4, #'('
+    b.eq Lcgl_open
+    cmp w4, #')'
+    b.eq Lcgl_close
+    cmp x3, #1
+    b.lt Lcgl_next                // only inspect text inside the parens
+    cmp w4, #'<'
+    b.eq Lcgl_found
+    cmp w4, #'>'
+    b.eq Lcgl_found
+    ldrb w5, [x1, #1]
+    cmp w4, #'='
+    b.eq Lcgl_eq
+    cmp w4, #'!'
+    b.eq Lcgl_eq
+    cmp w4, #'&'
+    b.eq Lcgl_dbl
+    cmp w4, #'|'
+    b.eq Lcgl_dbl
+    cmp w4, #' '
+    b.eq Lcgl_word
+    b Lcgl_next
+Lcgl_eq:
+    cmp w5, #'='
+    b.eq Lcgl_found
+    b Lcgl_next
+Lcgl_dbl:
+    cmp w5, w4
+    b.eq Lcgl_found
+    b Lcgl_next
+Lcgl_word:
+    // match " and " / " or "
+    ldrb w6, [x1, #2]
+    cmp w5, #'a'
+    b.ne Lcgl_word_or
+    cmp w6, #'n'
+    b.ne Lcgl_next
+    ldrb w6, [x1, #3]
+    cmp w6, #'d'
+    b.ne Lcgl_next
+    ldrb w6, [x1, #4]
+    cmp w6, #' '
+    b.eq Lcgl_found
+    b Lcgl_next
+Lcgl_word_or:
+    cmp w5, #'o'
+    b.ne Lcgl_next
+    cmp w6, #'r'
+    b.ne Lcgl_next
+    ldrb w6, [x1, #3]
+    cmp w6, #' '
+    b.eq Lcgl_found
+    b Lcgl_next
+Lcgl_string:
+    add x1, x1, #1
+Lcgl_str_loop:
+    ldrb w4, [x1]
+    cbz w4, Lcgl_ret
+    cmp w4, #'"'
+    b.eq Lcgl_next
+    add x1, x1, #1
+    b Lcgl_str_loop
+Lcgl_open:
+    add x3, x3, #1
+    b Lcgl_next
+Lcgl_close:
+    subs x3, x3, #1
+    b.le Lcgl_ret                 // reached the matching ')'
+    b Lcgl_next
+Lcgl_next:
+    add x1, x1, #1
+    b Lcgl_loop
+Lcgl_found:
+    mov x0, #1
+Lcgl_ret:
+    ldp x29, x30, [sp], #16
+    ret
+
+// _consume_double_char_op: w0 = a character c. If the next non-whitespace
+// input is exactly "cc" (e.g. "&&" or "||"), consume both characters and
+// return x0=1. Otherwise leave the cursor/line untouched and return x0=0.
+_consume_double_char_op:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+
+    mov w19, w0
+    LOAD_ADDR x9, cursor_pos
+    ldr x20, [x9]
+    LOAD_ADDR x9, current_line
+    ldr x21, [x9]
+
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, w19
+    b.ne Lcdc_restore
+    bl _advance_char
+    bl _peek_char
+    cmp w0, w19
+    b.ne Lcdc_restore
+    bl _advance_char
+    mov x0, #1
+    b Lcdc_ret
+
+Lcdc_restore:
+    LOAD_ADDR x9, cursor_pos
+    str x20, [x9]
+    LOAD_ADDR x9, current_line
+    str x21, [x9]
+    mov x0, #0
+
+Lcdc_ret:
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+// _lookahead_is_lparen: return x0=1 if the next non-whitespace input character
+// is '(', else x0=0. Never consumes input (cursor_pos/current_line restored).
+// Used so call-only builtins (value/address/alloc/cast) are only treated as
+// keywords when actually applied as a call -- otherwise those words are usable
+// as ordinary identifiers (variable / parameter / loop names).
+_lookahead_is_lparen:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    LOAD_ADDR x9, cursor_pos
+    ldr x19, [x9]
+    LOAD_ADDR x9, current_line
+    ldr x20, [x9]
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, #'('
+    cset x0, eq
+    LOAD_ADDR x9, cursor_pos
+    str x19, [x9]
+    LOAD_ADDR x9, current_line
+    str x20, [x9]
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
 _parse_condition_atom:
     stp x29, x30, [sp, #-16]!
     mov x29, sp
@@ -5351,7 +6955,10 @@ _parse_condition_atom:
     stp x23, x24, [sp, #-16]!
     stp x25, x26, [sp, #-16]!
 
-    bl _parse_expr_value
+    // Parse operands via the additive layer, NOT _parse_expr_value: the atom
+    // consumes its own relational operator below, so going through the
+    // comparison-aware wrapper here would double-parse it.
+    bl _parse_addsub_value
     cbz x0, Lcond_atom_fail
     mov x19, x4 // left var slot id (or -1 if immediate)
     mov x20, x1 // left value (for immediate case)
@@ -5414,7 +7021,7 @@ Lcond_le:
     b Lcond_parse_right
 
 Lcond_parse_right:
-    bl _parse_expr_value
+    bl _parse_addsub_value
     cbz x0, Lcond_atom_fail
     mov x22, x4 // right var slot id (or -1 if immediate)
     mov x23, x1 // right value (for immediate case)
@@ -5522,6 +7129,7 @@ _parse_term_value:
     stp x19, x20, [sp, #-16]!
     stp x21, x22, [sp, #-16]!
     stp x23, x24, [sp, #-16]!
+    stp x27, x28, [sp, #-16]!   // runtime math tail clobbers x27/x28
 
     bl _parse_power_value
     cbz x0, Lterm_fail
@@ -5549,11 +7157,20 @@ Lterm_multiply:
     b.eq Lterm_mul_dec
     cmp x2, #6
     b.eq Lterm_type_mismatch
+    cmp x24, #-1
+    b.ne Lterm_mul_runtime_int
+    cmp x4, #-1
+    b.ne Lterm_mul_runtime_int
     mul x19, x19, x1
     mov x20, #0
     mov x21, #0
     mov x24, #-1
     b Lterm_loop
+
+Lterm_mul_runtime_int:
+    mul x27, x19, x1              // compile-time tracking value
+    mov x23, #30                  // op 30: target = var * var
+    b Lterm_math_runtime_common
 
 Lterm_mul_dec:
     cmp x2, #6
@@ -5572,16 +7189,33 @@ Lterm_divide:
     bl _advance_char
     bl _parse_power_value
     cbz x0, Lterm_fail
-    cbz x1, Lterm_divide_zero
     cmp x20, #6
-    b.eq Lterm_div_dec
+    b.eq Lterm_div_dec_check
     cmp x2, #6
     b.eq Lterm_type_mismatch
+    cmp x24, #-1
+    b.ne Lterm_div_runtime_int
+    cmp x4, #-1
+    b.ne Lterm_div_runtime_int
+    cbz x1, Lterm_divide_zero
     udiv x19, x19, x1
     mov x20, #0
     mov x21, #0
     mov x24, #-1
     b Lterm_loop
+
+Lterm_div_dec_check:
+    // decimals still fold at compile time; keep the zero check for them
+    cbz x1, Lterm_divide_zero
+    b Lterm_div_dec
+
+Lterm_div_runtime_int:
+    // Runtime division: the right side's compile-time value may be an
+    // unknown placeholder (often 0), so no compile-time zero error here.
+    // ARM64 udiv/sdiv by zero yields 0, so the tracking fold is safe.
+    udiv x27, x19, x1             // compile-time tracking value
+    mov x23, #31                  // op 31: target = var / var
+    b Lterm_math_runtime_common
 
 Lterm_div_dec:
     cmp x2, #6
@@ -5601,16 +7235,69 @@ Lterm_modulo:
     bl _advance_char
     bl _parse_power_value
     cbz x0, Lterm_fail
-    cbz x1, Lterm_divide_zero
     cmp x20, #6
     b.eq Lterm_unsupported_decimal
     cmp x2, #6
     b.eq Lterm_unsupported_decimal
+    cmp x24, #-1
+    b.ne Lterm_mod_runtime_int
+    cmp x4, #-1
+    b.ne Lterm_mod_runtime_int
+    cbz x1, Lterm_divide_zero
     udiv x9, x19, x1
     msub x19, x9, x1, x19
     mov x20, #0
     mov x21, #0
     mov x24, #-1
+    b Lterm_loop
+
+Lterm_mod_runtime_int:
+    udiv x9, x19, x1              // safe: udiv by 0 yields 0 on ARM64
+    msub x27, x9, x1, x19         // compile-time tracking value
+    mov x23, #32                  // op 32: target = var % var
+    b Lterm_math_runtime_common
+
+// Shared tail for runtime * / % at the term level.
+// In: x23 = op kind (30/31/32), x27 = compile-time folded value,
+//     left value/slot in x19/x24, right value/slot in x1/x4.
+Lterm_math_runtime_common:
+    stp x1, x2, [sp, #-48]!
+    stp x3, x4, [sp, #16]
+    stp x27, x24, [sp, #32]
+    bl _allocate_temp_var
+    mov x28, x0                   // destination slot
+    ldp x1, x2, [sp]
+    ldp x3, x4, [sp, #16]
+    ldp x27, x24, [sp, #32]
+    add sp, sp, #48
+    cmn x24, #1
+    b.ne Lterm_math_rt_left_ok
+    stp x1, x4, [sp, #-16]!
+    mov x0, x19
+    bl _expr_materialize_ct_int
+    mov x24, x0
+    ldp x1, x4, [sp], #16
+    cmn x24, #1
+    b.eq Lterm_fail
+Lterm_math_rt_left_ok:
+    cmn x4, #1
+    b.ne Lterm_math_rt_right_ok
+    mov x0, x1
+    bl _expr_materialize_ct_int
+    mov x4, x0
+    cmn x4, #1
+    b.eq Lterm_fail
+Lterm_math_rt_right_ok:
+    mov x0, x23
+    mov x1, x28
+    mov x2, x24
+    mov x3, x4
+    bl _record_operation3
+    cbnz x0, Lterm_fail
+    mov x19, x27
+    mov x20, #0
+    mov x21, #0
+    mov x24, x28
     b Lterm_loop
 
 Lterm_divide_zero:
@@ -5649,6 +7336,7 @@ Lterm_fail:
     mov x0, #0
 
 Lterm_return:
+    ldp x27, x28, [sp], #16
     ldp x23, x24, [sp], #16
     ldp x21, x22, [sp], #16
     ldp x19, x20, [sp], #16
@@ -5839,7 +7527,12 @@ Lprimary_unary_plus:
     bl _advance_char
     bl _skip_whitespace
     bl _parse_numeric_literal
+    cbnz x0, Lprimary_unary_plus_lit
+    // Not a literal: +expr is just expr (variable, call, paren group).
+    bl _parse_primary_value
     cbz x0, Lprimary_fail
+    b Lprimary_suffix_loop
+Lprimary_unary_plus_lit:
     mov x4, #-1
     b Lprimary_suffix_loop
 
@@ -5847,7 +7540,43 @@ Lprimary_unary_minus:
     bl _advance_char
     bl _skip_whitespace
     bl _parse_numeric_literal
+    cbnz x0, Lprimary_unary_minus_lit
+    // Not a literal: negate a full primary (variable, call, paren group)
+    // by recording dest = 0 - value at runtime.
+    bl _parse_primary_value
     cbz x0, Lprimary_fail
+    cmp x2, #0                    // only int values can be negated
+    b.ne Lprimary_fail
+    cmn x4, #1
+    b.ne Lprimary_unary_minus_rt
+    neg x1, x1                    // folded compile-time value
+    mov x4, #-1
+    b Lprimary_suffix_loop
+Lprimary_unary_minus_rt:
+    mov x19, x1                   // compile-time tracking value
+    mov x20, x4                   // source var slot
+    mov x0, #0
+    bl _expr_materialize_ct_int   // slot holding the constant 0
+    mov x21, x0
+    cmn x21, #1
+    b.eq Lprimary_fail
+    bl _allocate_temp_var
+    mov x22, x0                   // destination slot
+    neg x19, x19
+    LOAD_ADDR x9, var_values
+    str x19, [x9, x22, lsl #3]
+    mov x0, #29                   // op 29: target = var - var
+    mov x1, x22
+    mov x2, x21
+    mov x3, x20
+    bl _record_operation3
+    cbnz x0, Lprimary_fail
+    mov x1, x19
+    mov x2, #0
+    mov x3, #0
+    mov x4, x22
+    b Lprimary_suffix_loop
+Lprimary_unary_minus_lit:
     neg x1, x1
     mov x4, #-1
     b Lprimary_suffix_loop
@@ -5900,6 +7629,8 @@ Lprimary_suffix_loop_start:
     cmp w0, #'['
     b.eq Lprimary_indexing
     
+    mov x0, #1          // success: peek may have returned 0 at EOF, so x0
+                        // must be set explicitly or callers see a false fail
     mov x1, x25
     mov x2, x26
     mov x3, x27
@@ -5907,6 +7638,17 @@ Lprimary_suffix_loop_start:
     b Lprimary_return
 
 Lprimary_member_access:
+    // Snapshot the source operand (value/len/var) BEFORE parsing the member
+    // name and running the _match_cstr_span dispatch chain. This keeps the
+    // string-method source stable regardless of how many dispatch checks run
+    // before the matching handler (the live x25/x27/x28 were being read stale
+    // by the later-checked .upper()/.lower() handlers).
+    LOAD_ADDR x9, member_src_val
+    str x25, [x9]
+    LOAD_ADDR x9, member_src_len
+    str x27, [x9]
+    LOAD_ADDR x9, member_src_var
+    str x28, [x9]
     bl _advance_char
     bl _parse_identifier
     cbz x0, Lprimary_fail
@@ -5960,6 +7702,30 @@ Lprimary_member_access:
     bl _match_cstr_span
     cbnz x0, Lprimary_str_lower
     
+    mov x0, x21
+    mov x1, x22
+    LOAD_ADDR x2, kw_startswith
+    bl _match_cstr_span
+    cbnz x0, Lprimary_str_startswith
+    
+    mov x0, x21
+    mov x1, x22
+    LOAD_ADDR x2, kw_endswith
+    bl _match_cstr_span
+    cbnz x0, Lprimary_str_endswith
+    
+    mov x0, x21
+    mov x1, x22
+    LOAD_ADDR x2, kw_indexof
+    bl _match_cstr_span
+    cbnz x0, Lprimary_str_indexof
+    
+    mov x0, x21
+    mov x1, x22
+    LOAD_ADDR x2, kw_trim
+    bl _match_cstr_span
+    cbnz x0, Lprimary_str_trim
+    
     b Lprimary_fail
 
 Lprimary_member_object:
@@ -5989,25 +7755,15 @@ Lprimary_member_object_method:
     mov x4, x22
     bl _call_object_method
     cbnz x0, Lprimary_fail
-    mov x26, x1
-    mov x27, x2
-    LOAD_ADDR x9, fn_return_value
-    ldr x25, [x9]
-    cmp x26, #2
-    b.eq Lprimary_member_method_len
-    cmp x26, #6
-    b.eq Lprimary_member_method_len
-    cmp x26, #10
-    b.eq Lprimary_member_method_len
-    cmp x26, #11
-    b.eq Lprimary_member_method_len
-    mov x27, #0
-    b Lprimary_member_method_done
-Lprimary_member_method_len:
-    LOAD_ADDR x9, fn_return_length
-    ldr x27, [x9]
-Lprimary_member_method_done:
-    mov x28, #-1
+    // A method returns its value in a RUNTIME result slot (x4), matching the
+    // _call_function convention. Use that slot so an expression like
+    // `print(a.get())` sees THIS instance's computed value, instead of the old
+    // compile-time fn_return_value (which was the shared template's value and
+    // made every method appear to return the template default, e.g. 0).
+    mov x26, x2                 // return type
+    mov x27, x3                 // return length / meta
+    mov x28, x4                 // runtime result slot
+    mov x25, #0                 // compile-time value unused when a slot is present
     b Lprimary_suffix_loop_start
 
 Lprimary_member_length:
@@ -6030,6 +7786,65 @@ Lprimary_member_length_check:
     b Lprimary_fail
 
 Lprimary_list_length_val:
+    // Runtime-count list (e.g. a str.split result): its element count is only
+    // known at run time in list_base_counts[base]. The base is a compile-time
+    // immediate held in x25; materialize it into a slot and emit op 81.
+    LOAD_ADDR x9, list_base_is_runtime
+    ldrb w9, [x9, x25]
+    cbz w9, Lprimary_list_length_check_param
+    mov x0, x25
+    bl _expr_materialize_ct_int
+    cmn x0, #1
+    b.eq Lprimary_fail
+    mov x19, x0                  // slot holding base
+    bl _allocate_temp_var
+    mov x2, x19                  // arg1 = base slot
+    mov x19, x0                  // dest temp
+    mov x1, x19                  // arg0 = dest
+    mov x0, #81                  // op list_length_runtime
+    bl _record_operation
+    cbnz x0, Lprimary_fail
+    mov x25, #0
+    mov x26, #0
+    mov x27, #0
+    mov x28, x19
+    b Lprimary_suffix_loop_start
+Lprimary_list_length_check_param:
+    // If the list source is a function PARAMETER, its element count is only
+    // known at runtime: the param carries the list's pool BASE index as its
+    // runtime value, and list_pool_lengths[base] holds the count. Emit a
+    // runtime length load (op 81). Literals / local lists keep the compile-time
+    // fold, whose count lives in the low 32 bits of x27.
+    cmn x28, #1
+    b.eq Lprimary_list_length_fold
+    LOAD_ADDR x9, current_parse_fn_id
+    ldr x9, [x9]
+    cmn x9, #1
+    b.eq Lprimary_list_length_fold
+    LOAD_ADDR x10, fn_scope_bases
+    ldr x10, [x10, x9, lsl #3]
+    cmp x28, x10
+    b.lt Lprimary_list_length_fold
+    LOAD_ADDR x11, fn_param_counts
+    ldr x11, [x11, x9, lsl #3]
+    add x11, x10, x11
+    cmp x28, x11
+    b.ge Lprimary_list_length_fold
+    // It's a list parameter -> emit runtime length load.
+    mov x19, x28                 // remember base var slot
+    bl _allocate_temp_var
+    mov x2, x19                  // arg1 = base var slot
+    mov x19, x0                  // dest temp
+    mov x1, x19                  // arg0 = dest
+    mov x0, #81                  // op list_length_runtime
+    bl _record_operation
+    cbnz x0, Lprimary_fail
+    mov x25, #0                  // runtime value unknown
+    mov x26, #0                  // type int
+    mov x27, #0
+    mov x28, x19                 // result is in temp slot
+    b Lprimary_suffix_loop_start
+Lprimary_list_length_fold:
     and x25, x27, #0xFFFFFFFF
     mov x26, #0
     mov x27, #0
@@ -6037,6 +7852,26 @@ Lprimary_list_length_val:
     b Lprimary_suffix_loop_start
 
 Lprimary_str_length_val:
+    // If the string lives in a variable/temp slot (x28 != -1) its length is
+    // only known at runtime (str params, concatenation, file_read results,
+    // interpolation, etc.), so emit op 103 to compute strlen at runtime.
+    // A bare string literal (x28 == -1) keeps the compile-time fold in x27.
+    cmn x28, #1
+    b.eq Lprimary_str_length_fold
+    mov x19, x28                 // remember source string var slot
+    bl _allocate_temp_var
+    mov x2, x19                  // arg1 = source string var slot
+    mov x19, x0                  // dest temp
+    mov x1, x19                  // arg0 = dest
+    mov x0, #103                 // op str_length_runtime
+    bl _record_operation
+    cbnz x0, Lprimary_fail
+    mov x25, #0                  // runtime value unknown
+    mov x26, #0                  // type int
+    mov x27, #0
+    mov x28, x19                 // result is in the temp slot
+    b Lprimary_suffix_loop_start
+Lprimary_str_length_fold:
     mov x25, x27
     mov x26, #0
     mov x27, #0
@@ -6163,6 +7998,9 @@ Lprimary_str_contains:
     // str.contains(substr) -> bool
     cmp x26, #2
     b.ne Lprimary_fail
+    // Save/materialize source before helper calls clobber x28.
+    bl _str_method_prepare_source
+    cbnz x0, Lprimary_fail
     bl _skip_whitespace
     mov w0, #'('
     bl _expect_char
@@ -6178,22 +8016,54 @@ Lprimary_str_contains:
     str x1, [x9]
     LOAD_ADDR x9, str_contains_tmp_substr_var
     str x4, [x9]
+    LOAD_ADDR x9, str_method_sub_len
+    str x3, [x9]
     
     bl _skip_whitespace
     mov w0, #')'
     bl _expect_char
     cbz x0, Lprimary_fail
     
+    // Materialize the substring into a temp var if it is a literal (var == -1),
+    // so codegen can load it from a stack slot instead of emitting a bad
+    // `mov x1, #<huge-address>` immediate.
+    LOAD_ADDR x9, str_contains_tmp_substr_var
+    ldr x19, [x9]
+    cmn x19, #1
+    b.ne Lprimary_str_contains_sub_ready
+    LOAD_ADDR x9, str_contains_tmp_substr_val
+    ldr x0, [x9]
+    mov x1, #2
+    LOAD_ADDR x9, str_method_sub_len
+    ldr x2, [x9]
+    bl _record_data_value
+    mov x24, x0
+    bl _allocate_temp_var
+    mov x19, x0
+    mov x0, #72
+    mov x1, x19
+    mov x2, x24
+    bl _record_operation
+    cbnz x0, Lprimary_fail
+    LOAD_ADDR x9, str_contains_tmp_substr_var
+    str x19, [x9]
+Lprimary_str_contains_sub_ready:
+    // Encode substr var into arg2 with bit63 set so codegen loads it from stack.
+    LOAD_ADDR x9, str_contains_tmp_substr_var
+    ldr x20, [x9]
+    mov x9, #1
+    lsl x9, x9, #63
+    orr x20, x20, x9
+    
     // Allocate result variable and record operation
     bl _allocate_temp_var
     mov x23, x0
     mov x0, #97 // op_str_contains
     mov x1, x23 // dest
-    mov x2, x28 // source var
-    LOAD_ADDR x9, str_contains_tmp_substr_val
-    ldr x3, [x9]
-    LOAD_ADDR x9, str_contains_tmp_substr_var
-    ldr x4, [x9]
+    LOAD_ADDR x9, str_method_src_var
+    ldr x2, [x9] // source var (saved)
+    mov x3, x20  // substr var (bit63 tagged) -> arg2
+    mov x4, #0
     bl _record_operation4
     cbnz x0, Lprimary_fail
     
@@ -6207,35 +8077,44 @@ Lprimary_str_replace:
     // str.replace(old, new) -> str
     cmp x26, #2
     b.ne Lprimary_fail
+    // Save/materialize the source before helper calls clobber x28.
+    bl _str_method_prepare_source
+    cbnz x0, Lprimary_fail
     bl _skip_whitespace
     mov w0, #'('
     bl _expect_char
     cbz x0, Lprimary_fail
     
-    // Parse old substring
+    // Parse old substring; materialize into a var (bit63-tagged) so codegen
+    // loads it from a stack slot rather than emitting a bad huge immediate.
     bl _parse_expr_value
     cbz x0, Lprimary_fail
     cmp x2, #2
     b.ne Lprimary_fail
-    LOAD_ADDR x9, str_replace_tmp_old_val
-    str x1, [x9]
+    // x1=val, x3=len, x4=var(-1 if literal)
+    mov x0, x1
+    mov x1, x3
+    mov x2, x4
+    bl _str_method_materialize_arg   // returns x0 = (var|bit63)
     LOAD_ADDR x9, str_replace_tmp_old_var
-    str x4, [x9]
+    str x0, [x9]
     
     bl _skip_whitespace
     mov w0, #','
     bl _expect_char
     cbz x0, Lprimary_fail
     
-    // Parse new substring
+    // Parse new substring (same materialization).
     bl _parse_expr_value
     cbz x0, Lprimary_fail
     cmp x2, #2
     b.ne Lprimary_fail
-    LOAD_ADDR x9, str_replace_tmp_new_val
-    str x1, [x9]
+    mov x0, x1
+    mov x1, x3
+    mov x2, x4
+    bl _str_method_materialize_arg
     LOAD_ADDR x9, str_replace_tmp_new_var
-    str x4, [x9]
+    str x0, [x9]
     
     bl _skip_whitespace
     mov w0, #')'
@@ -6247,12 +8126,13 @@ Lprimary_str_replace:
     mov x23, x0
     mov x0, #98 // op_str_replace
     mov x1, x23 // dest
-    mov x2, x28 // source var
-    LOAD_ADDR x9, str_replace_tmp_old_val
-    ldr x3, [x9]
-    LOAD_ADDR x9, str_replace_tmp_new_val
-    ldr x4, [x9]
-    bl _record_operation5
+    LOAD_ADDR x9, str_method_src_var
+    ldr x2, [x9] // source var (saved)
+    LOAD_ADDR x9, str_replace_tmp_old_var
+    ldr x3, [x9] // old var (bit63 tagged)
+    LOAD_ADDR x9, str_replace_tmp_new_var
+    ldr x4, [x9] // new var (bit63 tagged)
+    bl _record_operation4
     cbnz x0, Lprimary_fail
     
     mov x25, #0
@@ -6262,52 +8142,84 @@ Lprimary_str_replace:
     b Lprimary_suffix_loop_start
 
 Lprimary_str_split:
-    // str.split(sep) -> list<str>
+    // str.split(sep) -> list<str>. The result is a REAL, indexable/iterable list:
+    // a fixed-capacity block is reserved in the compile-time list pool (its base
+    // is a compile-time immediate), and the runtime _str_split fills that block
+    // with malloc'd piece pointers and writes the piece count into
+    // list_base_counts[base]. The base is flagged runtime-count so .length() and
+    // for-in read the count at run time instead of folding the reserved capacity.
     cmp x26, #2
     b.ne Lprimary_fail
+    // Capture/materialize the source string before helper calls clobber x28.
+    bl _str_method_prepare_source
+    cbnz x0, Lprimary_fail
     bl _skip_whitespace
     mov w0, #'('
     bl _expect_char
     cbz x0, Lprimary_fail
-    
-    // Parse separator
+
+    // Parse separator (must be str); materialize into a bit63-tagged var slot so
+    // codegen loads it from the stack rather than as a huge immediate.
     bl _parse_expr_value
     cbz x0, Lprimary_fail
     cmp x2, #2
     b.ne Lprimary_fail
-    LOAD_ADDR x9, str_split_tmp_sep_val
-    str x1, [x9]
+    mov x0, x1
+    mov x1, x3
+    mov x2, x4
+    bl _str_method_materialize_arg
     LOAD_ADDR x9, str_split_tmp_sep_var
-    str x4, [x9]
-    
+    str x0, [x9]
+
     bl _skip_whitespace
     mov w0, #')'
     bl _expect_char
     cbz x0, Lprimary_fail
-    
-    // Allocate result and record operation
-    bl _allocate_temp_var
-    mov x23, x0
-    mov x0, #99 // op_str_split
-    mov x1, x23 // dest
-    mov x2, x28 // source var
-    LOAD_ADDR x9, str_split_tmp_sep_val
-    ldr x3, [x9]
+
+    // Reserve a 64-element block in the list pool; base = current pool count.
+    LOAD_ADDR x9, list_pool_count
+    ldr x23, [x9]              // base
+    add x10, x23, #64          // reserve capacity 64
+    mov x11, #4096             // pool holds 4096 elements
+    cmp x10, x11
+    b.gt Lprimary_fail         // out of pool space
+    str x10, [x9]
+    // Flag this base as a runtime-count list and zero its runtime count.
+    LOAD_ADDR x9, list_base_is_runtime
+    mov w11, #1
+    strb w11, [x9, x23]
+    LOAD_ADDR x9, list_base_counts
+    str xzr, [x9, x23, lsl #3]
+
+    // Record op 99: arg0=base, arg1=source var, arg2=sep var (bit63), arg3=0.
+    mov x0, #99
+    mov x1, x23
+    LOAD_ADDR x9, str_method_src_var
+    ldr x2, [x9]
     LOAD_ADDR x9, str_split_tmp_sep_var
-    ldr x4, [x9]
+    ldr x3, [x9]
+    mov x4, #0
     bl _record_operation4
     cbnz x0, Lprimary_fail
-    
-    mov x25, #0
-    mov x26, #20 // list<str>
-    mov x27, #0
-    mov x28, x23
+
+    // Return the reserved base as a list<str> value: metadata = (2<<32)|64
+    // (element type str=2 in the high 32 bits, reserved capacity in the low 32).
+    mov x25, x23              // value = pool base
+    mov x26, #4               // unified list type ID
+    mov x27, #64             // low 32 = reserved capacity
+    movk x27, #2, lsl #32    // high 32 = element type str (2)
+    mov x28, #-1
     b Lprimary_suffix_loop_start
 
 Lprimary_str_upper:
     // str.upper() -> str
     cmp x26, #2
     b.ne Lprimary_fail
+    // Save (or materialize) the source var BEFORE any helper calls, since
+    // _expect_char/_skip_whitespace/_allocate_temp_var clobber x28. A literal
+    // source (x28 == -1) is materialized into a temp var (op 72), mirroring slice.
+    bl _str_method_prepare_source
+    cbnz x0, Lprimary_fail
     bl _skip_whitespace
     mov w0, #'('
     bl _expect_char
@@ -6322,8 +8234,9 @@ Lprimary_str_upper:
     mov x23, x0
     mov x0, #100 // op_str_upper
     mov x1, x23 // dest
-    mov x2, x28 // source var
-    bl _record_operation2
+    LOAD_ADDR x9, str_method_src_var
+    ldr x2, [x9] // source var (saved)
+    bl _record_operation   // 3-arg: op, arg0=dest, arg1=source (op2 drops arg1!)
     cbnz x0, Lprimary_fail
     
     mov x25, #0
@@ -6336,6 +8249,8 @@ Lprimary_str_lower:
     // str.lower() -> str
     cmp x26, #2
     b.ne Lprimary_fail
+    bl _str_method_prepare_source
+    cbnz x0, Lprimary_fail
     bl _skip_whitespace
     mov w0, #'('
     bl _expect_char
@@ -6350,12 +8265,235 @@ Lprimary_str_lower:
     mov x23, x0
     mov x0, #101 // op_str_lower
     mov x1, x23 // dest
-    mov x2, x28 // source var
-    bl _record_operation2
+    LOAD_ADDR x9, str_method_src_var
+    ldr x2, [x9] // source var (saved)
+    bl _record_operation   // 3-arg: op, arg0=dest, arg1=source (op2 drops arg1!)
     cbnz x0, Lprimary_fail
     
     mov x25, #0
     mov x26, #2
+    mov x27, #0
+    mov x28, x23
+    b Lprimary_suffix_loop_start
+
+// Helper: capture the string-method source operand into str_method_src_var.
+// Uses x25 (val), x27 (len), x28 (var) from the current primary. If the source
+// is a literal (x28 == -1) it is materialized into a temp var via op 72 so the
+// runtime helpers always receive a real stack slot holding the string pointer.
+// Returns x0 = 0 on success, non-zero on failure.
+_str_method_prepare_source:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    // Read the source operand from the snapshot taken at member-access entry.
+    LOAD_ADDR x9, member_src_var
+    ldr x21, [x9]        // source var (or -1 for a literal)
+    cmn x21, #1
+    b.ne Lsmps_have_var
+    LOAD_ADDR x9, member_src_val
+    ldr x0, [x9]         // literal value
+    mov x1, #2           // type str
+    LOAD_ADDR x9, member_src_len
+    ldr x2, [x9]         // length
+    bl _record_data_value
+    mov x20, x0          // data id
+    bl _allocate_temp_var
+    mov x21, x0          // source now materialized in a temp var
+    mov x0, #72
+    mov x1, x21
+    mov x2, x20
+    bl _record_operation
+    cbnz x0, Lsmps_fail
+Lsmps_have_var:
+    LOAD_ADDR x9, str_method_src_var
+    str x21, [x9]
+    mov x0, #0
+    b Lsmps_ret
+Lsmps_fail:
+    mov x0, #1
+Lsmps_ret:
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+// Helper: materialize a string argument into a bit63-tagged var slot so codegen
+// always loads it from a stack slot (never as a huge immediate). Inputs:
+//   x0 = literal value, x1 = length, x2 = source var (-1 if a literal).
+// Returns x0 = (var | bit63). On a literal it records the data (op 72) into a
+// fresh temp var first.
+_str_method_materialize_arg:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    mov x19, x0          // value
+    mov x20, x1          // length
+    mov x21, x2          // var (-1 if literal)
+    cmn x21, #1
+    b.ne Lsmma_have_var
+    mov x0, x19
+    mov x1, #2           // type str
+    mov x2, x20
+    bl _record_data_value
+    mov x22, x0          // data id
+    bl _allocate_temp_var
+    mov x21, x0          // temp var holding the string
+    mov x0, #72
+    mov x1, x21
+    mov x2, x22
+    bl _record_operation
+Lsmma_have_var:
+    mov x9, #1
+    lsl x9, x9, #63
+    orr x0, x21, x9      // (var | bit63)
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+Lprimary_str_startswith:
+    // str.startswith(prefix) -> bool
+    cmp x26, #2
+    b.ne Lprimary_fail
+    bl _str_method_prepare_source
+    cbnz x0, Lprimary_fail
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lprimary_fail
+    bl _parse_expr_value
+    cbz x0, Lprimary_fail
+    cmp x2, #2
+    b.ne Lprimary_fail
+    mov x0, x1
+    mov x1, x3
+    mov x2, x4
+    bl _str_method_materialize_arg
+    mov x20, x0                 // (var | bit63)
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lprimary_fail
+    bl _allocate_temp_var
+    mov x23, x0
+    mov x0, #110
+    mov x1, x23
+    LOAD_ADDR x9, str_method_src_var
+    ldr x2, [x9]
+    mov x3, x20
+    mov x4, #0
+    bl _record_operation4
+    cbnz x0, Lprimary_fail
+    mov x25, #0
+    mov x26, #1                 // bool result
+    mov x27, #0
+    mov x28, x23
+    b Lprimary_suffix_loop_start
+
+Lprimary_str_endswith:
+    // str.endswith(suffix) -> bool
+    cmp x26, #2
+    b.ne Lprimary_fail
+    bl _str_method_prepare_source
+    cbnz x0, Lprimary_fail
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lprimary_fail
+    bl _parse_expr_value
+    cbz x0, Lprimary_fail
+    cmp x2, #2
+    b.ne Lprimary_fail
+    mov x0, x1
+    mov x1, x3
+    mov x2, x4
+    bl _str_method_materialize_arg
+    mov x20, x0
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lprimary_fail
+    bl _allocate_temp_var
+    mov x23, x0
+    mov x0, #111
+    mov x1, x23
+    LOAD_ADDR x9, str_method_src_var
+    ldr x2, [x9]
+    mov x3, x20
+    mov x4, #0
+    bl _record_operation4
+    cbnz x0, Lprimary_fail
+    mov x25, #0
+    mov x26, #1                 // bool result
+    mov x27, #0
+    mov x28, x23
+    b Lprimary_suffix_loop_start
+
+Lprimary_str_indexof:
+    // str.indexof(substr) -> int (first index, or -1 if not found)
+    cmp x26, #2
+    b.ne Lprimary_fail
+    bl _str_method_prepare_source
+    cbnz x0, Lprimary_fail
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lprimary_fail
+    bl _parse_expr_value
+    cbz x0, Lprimary_fail
+    cmp x2, #2
+    b.ne Lprimary_fail
+    mov x0, x1
+    mov x1, x3
+    mov x2, x4
+    bl _str_method_materialize_arg
+    mov x20, x0
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lprimary_fail
+    bl _allocate_temp_var
+    mov x23, x0
+    mov x0, #112
+    mov x1, x23
+    LOAD_ADDR x9, str_method_src_var
+    ldr x2, [x9]
+    mov x3, x20
+    mov x4, #0
+    bl _record_operation4
+    cbnz x0, Lprimary_fail
+    mov x25, #0
+    mov x26, #0                 // int result
+    mov x27, #0
+    mov x28, x23
+    b Lprimary_suffix_loop_start
+
+Lprimary_str_trim:
+    // str.trim() -> str (strips leading/trailing space/tab/newline/CR)
+    cmp x26, #2
+    b.ne Lprimary_fail
+    bl _str_method_prepare_source
+    cbnz x0, Lprimary_fail
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lprimary_fail
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lprimary_fail
+    bl _allocate_temp_var
+    mov x23, x0
+    mov x0, #113
+    mov x1, x23
+    LOAD_ADDR x9, str_method_src_var
+    ldr x2, [x9]
+    bl _record_operation
+    cbnz x0, Lprimary_fail
+    mov x25, #0
+    mov x26, #2                 // str result
     mov x27, #0
     mov x28, x23
     b Lprimary_suffix_loop_start
@@ -6645,12 +8783,16 @@ Lprimary_member_values:
 
 Lprimary_indexing:
     bl _advance_char
+    stp x25, x26, [sp, #-16]!
+    stp x27, x28, [sp, #-16]!
     bl _parse_expr_value
-    cbz x0, Lprimary_fail
+    cbz x0, Lprimary_indexing_fail_restore
     mov x23, x1 // index
     mov x24, x2 // index type
     mov x21, x3 // index metadata/length
     mov x22, x4 // index source var slot
+    ldp x27, x28, [sp], #16
+    ldp x25, x26, [sp], #16
     
     bl _skip_whitespace
     mov w0, #']'
@@ -6659,12 +8801,46 @@ Lprimary_indexing:
     
     cmp x26, #8 // map
     b.eq Lprimary_map_lookup_val
+    cmp x26, #2 // str -> single-char index, lowered to slice(i, i+1)
+    b.eq Lprimary_str_index
     cmp x26, #4 // list
     b.ne Lprimary_fail
     
     // If it's a list, index must be an int
     cmp x24, #0
     b.ne Lprimary_fail
+
+    mov x20, #0 // op80 runtime-base flag
+
+    // Function parameters carry their list pool base at runtime in their
+    // stack slot. Do not fold `param[imm]` against compile-time pool 0.
+    cmn x28, #1
+    b.eq Lprimary_list_index_source_ready
+    LOAD_ADDR x9, current_parse_fn_id
+    ldr x9, [x9]
+    cmn x9, #1
+    b.eq Lprimary_list_index_source_ready
+    LOAD_ADDR x10, fn_scope_bases
+    ldr x10, [x10, x9, lsl #3]
+    cmp x28, x10
+    b.lt Lprimary_list_index_source_ready
+    LOAD_ADDR x11, fn_param_counts
+    ldr x11, [x11, x9, lsl #3]
+    add x11, x10, x11
+    cmp x28, x11
+    b.ge Lprimary_list_index_source_ready
+    mov x20, #4
+    b Lprimary_list_index_runtime
+
+Lprimary_list_index_source_ready:
+
+    // If the local list was runtime-mutated (op 109 store), resolve reads against
+    // runtime memory even for a constant index, so prior element writes are seen.
+    cbnz x20, Lprimary_list_index_rtflag_done
+    LOAD_ADDR x9, list_base_is_runtime
+    ldrb w9, [x9, x25]
+    cbnz w9, Lprimary_list_index_runtime
+Lprimary_list_index_rtflag_done:
 
     // If index expression came from a variable/temp slot, emit runtime load.
     cmn x22, #1
@@ -6693,10 +8869,14 @@ Lprimary_indexing:
     mov x1, x19 // dest
     mov x2, x22 // use index slot id
     mov x3, x25 // base pool index
+    cbz x20, Lprimary_list_index_base_ready
+    mov x3, x28 // runtime list-base slot id
+Lprimary_list_index_base_ready:
 
     lsr x9, x27, #32 // element type
     cmp x9, #2 // str
     cset x4, eq
+    orr x4, x4, x20
 
     cmn x22, #1
     cset x9, eq
@@ -6712,6 +8892,74 @@ Lprimary_list_index_runtime_args:
     lsr x26, x27, #32 // element type
     mov x27, #0 // runtime length unknown
     mov x28, x19 // var index
+    b Lprimary_suffix_loop_start
+
+Lprimary_indexing_fail_restore:
+    ldp x27, x28, [sp], #16
+    ldp x25, x26, [sp], #16
+    b Lprimary_fail
+
+Lprimary_str_index:
+    // str[i] -> a 1-char string, lowered to op 102 (str_char_at). The index
+    // may be an immediate (folded constant) or a runtime variable, so it is
+    // passed like contains' substring: an immediate value, or a var slot with
+    // bit63 set so codegen loads it from the stack at run time (fixes loops).
+    // On entry: x25=val x26=2 x27=len x28=src var(-1 if literal);
+    //           x23=index val, x24=index type, x22=index var slot(-1 if imm).
+    cmp x24, #0
+    b.ne Lprimary_fail          // index must be int
+    LOAD_ADDR x9, str_method_sub_len
+    str x23, [x9]               // stash index immediate value
+    LOAD_ADDR x9, str_contains_tmp_substr_var
+    str x22, [x9]               // stash index var slot (-1 if immediate)
+    cmn x28, #1
+    b.ne Lprimary_str_index_var_src
+    // literal source -> materialize into a temp var (op 72)
+    mov x0, x25
+    mov x1, #2
+    mov x2, x27
+    bl _record_data_value
+    mov x24, x0
+    bl _allocate_temp_var
+    LOAD_ADDR x9, str_method_src_var
+    str x0, [x9]
+    mov x1, x0
+    mov x0, #72
+    mov x2, x24
+    bl _record_operation
+    cbnz x0, Lprimary_fail
+    b Lprimary_str_index_emit
+Lprimary_str_index_var_src:
+    LOAD_ADDR x9, str_method_src_var
+    str x28, [x9]
+Lprimary_str_index_emit:
+    // Encode the index arg: immediate value, or (var slot | bit63).
+    LOAD_ADDR x9, str_contains_tmp_substr_var
+    ldr x20, [x9]               // index var slot
+    cmn x20, #1
+    b.ne Lprimary_str_index_var_arg
+    LOAD_ADDR x9, str_method_sub_len
+    ldr x20, [x9]               // immediate index value
+    b Lprimary_str_index_arg_ready
+Lprimary_str_index_var_arg:
+    mov x9, #1
+    lsl x9, x9, #63
+    orr x20, x20, x9            // (var | bit63)
+Lprimary_str_index_arg_ready:
+    bl _allocate_temp_var
+    mov x23, x0                 // dest
+    mov x0, #102               // op str_char_at(dest, src_var, index)
+    mov x1, x23
+    LOAD_ADDR x9, str_method_src_var
+    ldr x2, [x9]                // src var
+    mov x3, x20                 // index (immediate or var|bit63)
+    mov x4, #0
+    bl _record_operation4
+    cbnz x0, Lprimary_fail
+    mov x25, #0
+    mov x26, #2                 // str
+    mov x27, #0
+    mov x28, x23
     b Lprimary_suffix_loop_start
 
     Lprimary_list_index_load_pool:
@@ -6853,7 +9101,17 @@ Lprimary_identifier:
     bl _peek_char
     cmp w0, #'.'
     b.ne Lprimary_check_keywords
-    
+
+    // A '.' follows. If this identifier names a known variable, the '.' is
+    // MEMBER access (var.length, var.slice(...), obj.field, obj.method()),
+    // which is resolved by the suffix loop after normal variable lookup -- it
+    // must NOT be swallowed by module-qualified-access parsing. Only fall
+    // through to module access when the identifier is not a variable.
+    mov x0, x19
+    mov x1, x20
+    bl _lookup_variable
+    cbnz x0, Lprimary_check_keywords
+
     // Handle module qualified access
     bl _advance_char  // consume '.'
     bl _parse_identifier
@@ -6930,25 +9188,37 @@ Lprimary_check_keywords:
     mov x1, x20
     LOAD_ADDR x2, kw_cast
     bl _match_cstr_span
+    cbz x0, Lprimary_kw_after_cast
+    bl _lookahead_is_lparen
     cbnz x0, Lprimary_cast
+Lprimary_kw_after_cast:
 
     mov x0, x19
     mov x1, x20
     LOAD_ADDR x2, kw_address
     bl _match_cstr_span
+    cbz x0, Lprimary_kw_after_address
+    bl _lookahead_is_lparen
     cbnz x0, Lprimary_address
+Lprimary_kw_after_address:
 
     mov x0, x19
     mov x1, x20
     LOAD_ADDR x2, kw_value
     bl _match_cstr_span
+    cbz x0, Lprimary_kw_after_value
+    bl _lookahead_is_lparen
     cbnz x0, Lprimary_value
+Lprimary_kw_after_value:
 
     mov x0, x19
     mov x1, x20
     LOAD_ADDR x2, kw_alloc
     bl _match_cstr_span
+    cbz x0, Lprimary_kw_after_alloc
+    bl _lookahead_is_lparen
     cbnz x0, Lprimary_alloc
+Lprimary_kw_after_alloc:
 
     mov x0, x19
     mov x1, x20
@@ -6972,6 +9242,13 @@ Lprimary_try_fn_call:
     mov x1, x20
     bl _call_function
     cbnz x0, Lprimary_fail
+    mov x22, x1
+    mov x23, x2
+    mov x24, x3
+    mov x25, x4
+    LOAD_ADDR x9, compilation_mode
+    ldr x9, [x9]
+    cbnz x9, Lprimary_fn_call_compiled_result
     mov x20, x1
     mov x21, x2
     LOAD_ADDR x9, fn_return_value
@@ -7008,6 +9285,14 @@ Lprimary_fn_call_non_str:
     mov x3, #0
 Lprimary_fn_call_done:
     mov x4, #-1
+    b Lprimary_suffix_loop
+
+Lprimary_fn_call_compiled_result:
+    mov x0, #1
+    mov x1, x22
+    mov x2, x23
+    mov x3, x24
+    mov x4, x25
     b Lprimary_suffix_loop
 
 Lprimary_true:
@@ -7053,27 +9338,36 @@ Lprimary_number:
     // x1=value, x2=type, x3=metadata, x4=-1 (no slot yet)
     cmp x4, #-1
     b.ne Lprimary_suffix_loop  // Already has a slot
-    // Save registers
-    stp x1, x2, [sp, #-16]!  // save value and type
-    stp x3, x4, [sp, #-16]!  // save metadata and slot
-    // Allocate a new variable slot for the literal
-    mov x0, x1  // value
-    mov x1, x2  // type
-    mov x2, x3  // metadata
-    mov x3, #0  // not const
-    mov x4, #1  // is temp
+    // Save value/type/metadata across the calls below.
+    stp x1, x2, [sp, #-16]!  // [sp+16]=value, [sp+24]=type (after next push)
+    stp x3, x4, [sp, #-16]!  // [sp]=metadata, [sp+8]=-1
+    // Allocate a temp slot for the literal. _define_variable expects
+    // x0=name_ptr, x1=len, x2=value, x3=const, x4=type, x5=length and
+    // returns the new slot index in x4 (x0=0 on success).
+    // IMPORTANT: the name must be a valid pointer with length 0 so that
+    // _lookup_variable can never match (or dereference) this hidden temp.
+    // Passing the literal value/type here (as before) poisoned the table:
+    // e.g. 1.50 -> name_ptr=150, name_len=6, and any 6-char identifier
+    // lookup then dereferenced address 150 and crashed the compiler.
+    LOAD_ADDR x0, hidden_var_name_storage // valid address, never matched
+    mov x1, #0          // zero-length name: cannot equal any identifier
+    ldr x2, [sp, #16]   // compile-time value
+    mov x3, #0          // not const
+    ldr x4, [sp, #24]   // real type
+    ldr x5, [sp]        // length/scale metadata
     bl _define_variable
-    // Record operation to store the literal
-    mov x21, x0  // save new slot
-    ldp x3, x4, [sp], #16  // restore metadata and slot
-    ldp x1, x2, [sp], #16  // restore value and type
+    mov x21, x4  // real slot index returned by _define_variable
+    // Record the store: kind=1 (store_var), arg0=slot, arg1=literal value.
+    ldr x2, [sp, #16]  // reload the literal value as arg1
     mov x0, #1  // store_var operation
-    mov x1, x21  // dest slot
-    mov x2, x1  // value
+    mov x1, x21  // arg0 = dest slot
     mov x3, #0
     mov x4, #0
     bl _record_operation4
-    mov x4, x21  // set slot index
+    // Restore the real return registers: x1=value, x2=type, x3=metadata.
+    ldp x3, x4, [sp], #16  // x3=metadata, x4=-1
+    ldp x1, x2, [sp], #16  // x1=value, x2=type
+    mov x4, x21  // var index = temp slot
     b Lprimary_suffix_loop
 
 Lprimary_string:
@@ -7551,6 +9845,13 @@ _parse_type_spec:
     mov x29, sp
     stp x19, x20, [sp, #-16]!
 
+    // Alternate array-type syntax `[T]` == `list<T>` (used by the paren-less
+    // dialect, e.g. `fn f(xs: [int])` / `[int] nums = [...]`). Peek for '[';
+    // if present, parse the element type and emit the same list encoding.
+    bl _peek_char
+    cmp w0, #'['
+    b.eq Lparse_type_bracket_list
+
     bl _parse_identifier
     cbz x0, Lparse_type_fail
     mov x19, x0
@@ -7677,7 +9978,23 @@ Lparse_type_list:
     cbz x0, Lparse_type_fail
     mov x0, #1
     mov x1, #4 // base list type
-    mov x2, x19 // store element type in length field
+    lsl x2, x19, #32 // list metadata: element type in upper bits, unknown count=0
+    b Lparse_type_return
+
+Lparse_type_bracket_list:
+    // `[T]` array-type shorthand -> same encoding as `list<T>`.
+    bl _advance_char // consume '['
+    bl _skip_whitespace
+    bl _parse_type_spec // element type (recursion supports nested `[[int]]`)
+    cbz x0, Lparse_type_fail
+    mov x19, x1 // element type
+    bl _skip_whitespace
+    mov w0, #']'
+    bl _expect_char
+    cbz x0, Lparse_type_fail
+    mov x0, #1
+    mov x1, #4 // base list type
+    lsl x2, x19, #32 // element type in upper bits
     b Lparse_type_return
 
 Lparse_type_ref:
@@ -8638,7 +10955,7 @@ Lfn_def_new:
     // Check fn table not full
     LOAD_ADDR x9, fn_count
     ldr x21, [x9]
-    cmp x21, #32
+    cmp x21, #SNC_MAX_FUNCS
     b.ge Lfn_def_full
     mov x26, #0
 
@@ -8674,6 +10991,60 @@ Lfn_def_param_loop:
 Lfn_def_parse_param:
     cmp x22, #4
     b.ge Lfn_def_too_many_params
+
+    // Disambiguate the default `type name` form from the colon dialect
+    // `name: type` (e.g. `xs: [int]`, `target: int`). Save the cursor, read an
+    // identifier, and peek for ':'. A ':' means the identifier is the NAME
+    // (colon form); anything else (`<`, whitespace+ident, etc.) means it was a
+    // TYPE, so restore the cursor and parse the normal `type name` form. This is
+    // unambiguous because `list<int> xs` has `<` after `list`, never ':'.
+    LOAD_ADDR x9, cursor_pos
+    ldr x9, [x9]
+    LOAD_ADDR x10, current_line
+    ldr x10, [x10]
+    stp x9, x10, [sp, #-16]!      // save cursor + line
+    bl _parse_identifier
+    cbz x0, Lfn_def_param_colon_restore
+    stp x0, x1, [sp, #-16]!      // save candidate name ptr/len
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, #':'
+    b.ne Lfn_def_param_colon_pop_restore
+
+    // --- colon form confirmed: `name: type` ---
+    ldp x23, x24, [sp], #16     // x23=name ptr, x24=name len
+    add sp, sp, #16             // discard saved cursor
+    // store the name now (regs fresh, before parsing the type)
+    mov x9, x21
+    lsl x9, x9, #2
+    add x9, x9, x22
+    LOAD_ADDR x10, fn_param_name_ptrs
+    str x23, [x10, x9, lsl #3]
+    LOAD_ADDR x10, fn_param_name_lens
+    str x24, [x10, x9, lsl #3]
+    bl _advance_char            // consume ':'
+    bl _skip_whitespace
+    bl _parse_type_spec
+    cbz x0, Lfn_def_fail
+    mov x25, x1                 // type
+    mov x24, x2                 // type meta
+    mov x9, x21
+    lsl x9, x9, #2
+    add x9, x9, x22
+    LOAD_ADDR x10, fn_param_types
+    str x25, [x10, x9, lsl #3]
+    LOAD_ADDR x10, fn_param_lengths
+    str x24, [x10, x9, lsl #3]
+    b Lfn_def_param_done
+
+Lfn_def_param_colon_pop_restore:
+    add sp, sp, #16             // discard saved name ptr/len
+Lfn_def_param_colon_restore:
+    ldp x9, x10, [sp], #16      // restore cursor + line
+    LOAD_ADDR x11, cursor_pos
+    str x9, [x11]
+    LOAD_ADDR x11, current_line
+    str x10, [x11]
     bl _parse_type_spec
     cbz x0, Lfn_def_fail
     mov x25, x1
@@ -8873,6 +11244,13 @@ Lfn_def_expect_body:
     LOAD_ADDR x9, fn_source_lens
     str x10, [x9, x21, lsl #3]
 
+    // Record the actual fn table index of the fn just defined (x21 is the
+    // fn's own index here, valid whether we reused a preparse stub or added a
+    // new entry). Callers (e.g. blueprint method registration) must use this
+    // instead of fn_count-1, which is wrong when a stub was reused.
+    LOAD_ADDR x9, last_fn_def_index
+    str x21, [x9]
+
     cbnz x26, Lfn_def_skip_count
     LOAD_ADDR x9, fn_count
     add x21, x21, #1
@@ -8986,7 +11364,7 @@ _call_function:
     stp x23, x24, [sp, #-16]!
     stp x25, x26, [sp, #-16]!
     stp x27, x28, [sp, #-16]!
-    sub sp, sp, #32
+    sub sp, sp, #96
 
     mov x19, x0   // name ptr
     mov x20, x1   // name len
@@ -9014,6 +11392,70 @@ _call_function:
     LOAD_ADDR x2, kw_file_write
     bl _match_cstr_span
     cbnz x0, Lfn_call_file_write
+
+    // Built-in: system(cmd) / exec(cmd) — run an external command; returns int status
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_system
+    bl _match_cstr_span
+    cbnz x0, Lfn_call_system
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_exec
+    bl _match_cstr_span
+    cbnz x0, Lfn_call_system
+
+    // Built-in: argc() — number of command-line arguments (int)
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_argc
+    bl _match_cstr_span
+    cbnz x0, Lfn_call_argc
+
+    // Built-in: argv(i) — the i-th command-line argument as a str
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_argv
+    bl _match_cstr_span
+    cbnz x0, Lfn_call_argv
+
+    // Built-in: wait() — join all outstanding spawned threads (returns count)
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_wait
+    bl _match_cstr_span
+    cbnz x0, Lfn_call_wait
+
+    // Built-in: str(x) — convert an int/bool/str value to its string form
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_str
+    bl _match_cstr_span
+    cbnz x0, Lfn_call_str_builtin
+
+    // Built-in: int(x) — convert a str/bool/int value to its integer form
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_int
+    bl _match_cstr_span
+    cbnz x0, Lfn_call_int_builtin
+
+    // Built-in: len(x) — element count of a list / character count of a string
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_len
+    bl _match_cstr_span
+    cbnz x0, Lfn_call_len_builtin
+
+    // Built-in: ord(s) — ASCII code (int) of the first character of a string.
+    // A self-hosting prerequisite: SNlang char indexing s[i] yields a 1-char
+    // string, and there was no way to get its numeric code for classification
+    // (digit/letter/whitespace) — ord() provides it. Returns 0 for "".
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_ord
+    bl _match_cstr_span
+    cbnz x0, Lfn_call_ord
 
     LOAD_ADDR x9, var_scope_base
     ldr x10, [x9]
@@ -9131,6 +11573,8 @@ Lfn_call_check_decimal_arg_len:
 Lfn_call_define_arg_use_decl_len:
     mov x7, x5
 Lfn_call_define_arg_len_ok:
+    str x6, [sp, #64]  // actual argument type across helper calls
+    str x7, [sp, #72]  // actual argument length across helper calls
     mov x0, x25
     mov x1, x26
     mov x2, x28
@@ -9140,26 +11584,78 @@ Lfn_call_define_arg_len_ok:
     bl _define_variable
     cbnz x0, Lfn_call_fail
 
+    // In compilation mode, strip this parameter variable's NAME right after
+    // defining it. The callee reads its arguments from registers at runtime,
+    // so the caller-side parameter name is never needed here -- but if left
+    // in place it becomes a live, higher-index variable in the caller's
+    // scope bearing the callee's parameter name. When a function recurses
+    // (e.g. `f(n-1)+f(n-2)`, callee param also named `n`), that staged `n`
+    // shadowed the caller's real `n` in `_lookup_variable` (high->low scan),
+    // so the second `n` read a leftover arg slot instead of the parameter
+    // (produced wrong/zero results). Zeroing the name makes it a nameless
+    // temp that can never shadow a real variable. Interpret mode still keeps
+    // the name because the re-parsed body looks the parameter up by name.
+    LOAD_ADDR x9, compilation_mode
+    ldr x9, [x9]
+    cbz x9, Lfn_call_param_name_kept
+    LOAD_ADDR x9, var_count
+    ldr x10, [x9]
+    sub x10, x10, #1
+    LOAD_ADDR x11, var_name_lens
+    str xzr, [x11, x10, lsl #3]
+    LOAD_ADDR x11, var_name_ptrs
+    str xzr, [x11, x10, lsl #3]
+Lfn_call_param_name_kept:
+
     // Also emit runtime store for the parameter
     // x22 was var_count before defines. Each param is at x22 + x24.
     LOAD_ADDR x9, var_count
     ldr x0, [x9]
     sub x1, x0, #1 // target var index (the one we just defined)
-    
+    str x1, [sp, #80]
+
+    // Remember this argument's slot for op13 register marshalling
+    add x9, sp, #32
+    str x1, [x9, x24, lsl #3]
+
     ldr x9, [sp, #8]
     cmn x9, #1
     b.eq Lfn_call_emit_imm
+    ldr x10, [sp, #64]
+    cmp x10, #4
+    b.eq Lfn_call_emit_list_base_imm
     // emit op 45 (store_var_var)
     mov x0, #45
-    mov x2, x28 // source var_id
+    mov x2, x9 // source var_id
+    // x1 is already target var index
+    bl _record_operation
+    b Lfn_call_emit_done
+Lfn_call_emit_list_base_imm:
+    mov x0, #1
+    mov x2, x28 // list pool start index
     // x1 is already target var index
     bl _record_operation
     b Lfn_call_emit_done
 Lfn_call_emit_imm:
+    ldr x9, [sp, #64]
+    cmp x9, #2
+    b.eq Lfn_call_emit_str_imm
     // emit op 1 (store_var_imm)
     mov x0, #1
     mov x2, x28 // imm value
     // x1 is already target var index
+    bl _record_operation
+    b Lfn_call_emit_done
+Lfn_call_emit_str_imm:
+    mov x0, x28
+    mov x1, #2
+    ldr x2, [sp, #72]
+    bl _record_data_value
+    cmn x0, #1
+    b.eq Lfn_call_fail
+    mov x2, x0
+    ldr x1, [sp, #80]
+    mov x0, #72
     bl _record_operation
 Lfn_call_emit_done:
     cbnz x0, Lfn_call_fail
@@ -9206,6 +11702,8 @@ Lfn_call_fill_defaults:
 Lfn_call_default_use_decl_len:
     mov x5, x6
 Lfn_call_default_len_ready:
+    str x7, [sp, #64]
+    str x5, [sp, #72]
     mov x0, x25
     mov x1, x26
     mov x2, x28
@@ -9216,9 +11714,31 @@ Lfn_call_default_len_ready:
     LOAD_ADDR x9, var_count
     ldr x0, [x9]
     sub x1, x0, #1
+    str x1, [sp, #80]
+
+    // Remember this default argument's slot for op13 register marshalling
+    add x9, sp, #32
+    str x1, [x9, x24, lsl #3]
+
+    ldr x9, [sp, #64]
+    cmp x9, #2
+    b.eq Lfn_call_default_emit_str
     mov x0, #1
     mov x2, x28
     bl _record_operation
+    b Lfn_call_default_emit_done
+Lfn_call_default_emit_str:
+    mov x0, x28
+    mov x1, #2
+    ldr x2, [sp, #72]
+    bl _record_data_value
+    cmn x0, #1
+    b.eq Lfn_call_fail
+    mov x2, x0
+    ldr x1, [sp, #80]
+    mov x0, #72
+    bl _record_operation
+Lfn_call_default_emit_done:
     cbnz x0, Lfn_call_fail
     add x24, x24, #1
     b Lfn_call_fill_defaults
@@ -9258,11 +11778,44 @@ Lfn_call_args_ready:
     LOAD_ADDR x9, current_line
     str x26, [x9]
 
-    // COMPILATION MODE: record Op 13.
-    mov x0, #13
-    mov x1, x21
+    // COMPILATION MODE: stage the argument values into a contiguous block
+    // of fresh slots (the callee reads them from x0..x3 at runtime), then
+    // record op 13 as (fn, arg block base, arg count, result slot).
+    mov x24, #0
+    mov x28, #-1              // arg block base (-1 = none yet)
+Lfn_call_comp_stage_loop:
+    cmp x24, x23
+    b.ge Lfn_call_comp_stage_done
+    bl _allocate_temp_var     // x0 = fresh staging slot
+    cmn x28, #1
+    csel x28, x0, x28, eq     // remember the first staged slot
+    mov x1, x0                // target: staging slot
+    add x9, sp, #32
+    ldr x2, [x9, x24, lsl #3] // source: this arg's slot
+    mov x0, #45               // op45: store var -> var
     bl _record_operation
+    cbnz x0, Lfn_call_fail
+    add x24, x24, #1
+    b Lfn_call_comp_stage_loop
+Lfn_call_comp_stage_done:
+    // Allocate the result slot and publish it for expression contexts.
+    bl _allocate_temp_var
+    mov x27, x0
+    LOAD_ADDR x9, last_call_result_slot
+    str x27, [x9]
+    mov x0, #13
+    mov x1, x21               // fn index
+    mov x2, x28               // arg block base slot (-1 if no args)
+    mov x3, x23               // arg count
+    mov x4, x27               // result slot
+    bl _record_operation4
+    cbnz x0, Lfn_call_fail
     mov x0, #0
+    mov x1, #0                // value placeholder; actual value is in result slot
+    ldr x2, [sp, #8]          // declared return type
+    LOAD_ADDR x9, fn_return_decl_lengths
+    ldr x3, [x9, x21, lsl #3] // declared return length/subtype
+    mov x4, x27
     b Lfn_call_return
 
 Lfn_call_interpret:
@@ -9424,9 +11977,190 @@ Lfile_read_emit:
     mov x4, x25
     bl _record_operation4
     
+    // Return convention: compilation-mode expression path reads the value's
+    // TYPE from x2 (see the normal-fn return at ~10480: `ldr x2,[sp,#8]` =
+    // declared return type), while the interpreter path reads it from x1.
+    // file_read yields a str whose value lives in the temp var (x4), so report
+    // str(2) in BOTH x1 and x2 — otherwise `str c = file_read(...)` fails the
+    // `cmp x2,#2` check in Lstmt_str.
     mov x0, #0
-    mov x1, #2 // returns str
+    mov x1, #2 // str (interpreter-path type)
+    mov x2, #2 // str (compilation-path type)
+    mov x3, #0 // length unknown at compile time
+    mov x4, x22
+    b Lfn_call_return
+
+// --------------------------------------------------------------------------
+// Built-in: system(cmd) / exec(cmd) — run an external shell command.
+// Mirrors file_read's single-string-argument shape, but yields an INT (the
+// command's exit status; 0 == success) rather than a str. Op 114.
+// --------------------------------------------------------------------------
+Lfn_call_system:
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+    bl _parse_expr_value
+    cbz x0, Lfn_call_fail
+    cmp x2, #2 // str
+    b.ne Lstmt_type_mismatch
+
+    mov x19, x1 // cmd val
+    mov x20, x4 // cmd var_id
+    mov x21, x3 // cmd len
+
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+
+    bl _allocate_temp_var
+    mov x22, x0 // dest var id (int exit status)
+
+    // Record op 114. arg1 must be the DATA-VALUE id (immediate) or the source
+    // SLOT / var_id (runtime variable) — NOT the parsed value in x1. This is the
+    // same convention str_concat uses (see Lexpr_add_str_left_var: `mov x19,x24`);
+    // file_read/file_write got this wrong for the variable path.
+    mov x25, #0
+    cmp x20, #-1
+    b.ne Lsystem_cmd_var
+    // cmd is an immediate string literal -> record it as a data value
+    mov x0, x19
+    mov x1, #2
+    mov x2, x21
+    bl _record_data_value
+    mov x19, x0 // data value id
+    mov x25, #1 // is_imm
+    b Lsystem_emit
+Lsystem_cmd_var:
+    mov x19, x20 // arg1 = runtime source slot (var_id)
+
+Lsystem_emit:
+    mov x0, #114
+    mov x1, x22
+    mov x2, x19
+    mov x3, #0
+    mov x4, x25
+    bl _record_operation4
+
+    // Returns an int (the command exit status) that lives in the temp var.
+    mov x0, #0
+    mov x1, #0 // int (interpreter-path type)
+    mov x2, #0 // int (compilation-path type)
+    mov x3, #0
+    mov x4, x22
+    b Lfn_call_return
+
+// --------------------------------------------------------------------------
+// Built-in: argc() — number of command-line arguments (argv[0] included).
+// Returns an int. Op 115.
+// --------------------------------------------------------------------------
+Lfn_call_argc:
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+
+    bl _allocate_temp_var
+    mov x22, x0 // dest var id
+    mov x0, #115
+    mov x1, x22
     mov x2, #0
+    bl _record_operation
+    cbnz x0, Lfn_call_fail
+
+    mov x0, #0
+    mov x1, #0 // int
+    mov x2, #0 // int
+    mov x3, #0
+    mov x4, x22
+    b Lfn_call_return
+
+// --------------------------------------------------------------------------
+// Built-in: wait() — block until every outstanding spawned thread finishes.
+// Threads are recorded (not detached) at spawn time; this joins them all in
+// order, so their output is no longer lost when main would otherwise exit
+// first. Returns an int: the number of threads joined. Op 117.
+// --------------------------------------------------------------------------
+Lfn_call_wait:
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+
+    // Flag wait() usage so codegen always emits the _snc_spawn_wait runtime,
+    // even if the program contains no spawn (then it just joins zero threads).
+    LOAD_ADDR x9, spawn_wait_used
+    mov x10, #1
+    str x10, [x9]
+
+    bl _allocate_temp_var
+    mov x22, x0 // dest var id (int: count of threads joined)
+    mov x0, #117
+    mov x1, x22
+    mov x2, #0
+    bl _record_operation
+    cbnz x0, Lfn_call_fail
+
+    mov x0, #0
+    mov x1, #0 // int
+    mov x2, #0 // int
+    mov x3, #0
+    mov x4, x22
+    b Lfn_call_return
+
+// --------------------------------------------------------------------------
+// Built-in: argv(i) — the i-th command-line argument as a str (0-based;
+// argv(0) is the program name). Returns a str. Op 116.
+// --------------------------------------------------------------------------
+Lfn_call_argv:
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+    bl _parse_expr_value
+    cbz x0, Lfn_call_fail
+    cmp x2, #0 // int index
+    b.ne Lstmt_type_mismatch
+    mov x19, x1 // index val
+    mov x20, x4 // index var_id (-1 if immediate)
+
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+
+    // Ensure the index lives in a runtime slot (materialize an immediate).
+    cmn x20, #1
+    b.ne Largv_idx_slot
+    mov x0, x19
+    bl _expr_materialize_ct_int
+    cmn x0, #1
+    b.eq Lfn_call_fail
+    mov x20, x0
+Largv_idx_slot:
+    mov x23, x20 // index slot
+
+    bl _allocate_temp_var
+    mov x22, x0 // dest var id
+    mov x0, #116
+    mov x1, x22
+    mov x2, x23
+    bl _record_operation
+    cbnz x0, Lfn_call_fail
+
+    mov x0, #0
+    mov x1, #2 // str
+    mov x2, #2 // str
+    mov x3, #0
     mov x4, x22
     b Lfn_call_return
 
@@ -9513,6 +12247,490 @@ Lfile_write_emit:
     mov x4, x28
     b Lfn_call_return
 
+// --------------------------------------------------------------------------
+// _str_list_to_data — compile-time formatter for a CONSTANT int list literal.
+//   x0 = pool base index, x1 = element count.
+// Renders "[e0, e1, ...]" into the persistent list_str_arena (bump-allocated so
+// the bytes outlive parsing — _record_data_value stores the pointer, not a copy)
+// and registers it as a str data value. Returns x0 = data id (-1 on overflow),
+// x1 = string length. Valid only for a compile-time-constant int list (values
+// read from list_pool_values); callers must exclude runtime-mutated lists.
+// --------------------------------------------------------------------------
+_str_list_to_data:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+    stp x25, x26, [sp, #-16]!
+
+    mov x19, x0                     // base
+    mov x20, x1                     // count
+
+    LOAD_ADDR x26, list_str_arena_pos
+    ldr x25, [x26]                  // current arena offset
+    LOAD_ADDR x21, list_str_arena
+    add x21, x21, x25               // dest pointer
+    // overflow guard: need at most count*24 + 8 bytes
+    mov x9, #24
+    mul x9, x20, x9
+    add x9, x9, #8
+    add x9, x9, x25
+    mov x10, #65536
+    cmp x9, x10
+    b.gt Lsltd_overflow
+
+    mov x22, #0                     // write offset within dest
+    LOAD_ADDR x23, list_pool_values
+
+    mov w9, #'['
+    strb w9, [x21, x22]
+    add x22, x22, #1
+
+    mov x24, #0                     // i
+Lsltd_loop:
+    cmp x24, x20
+    b.ge Lsltd_close
+    cbz x24, Lsltd_no_sep
+    mov w9, #','
+    strb w9, [x21, x22]
+    add x22, x22, #1
+    mov w9, #' '
+    strb w9, [x21, x22]
+    add x22, x22, #1
+Lsltd_no_sep:
+    add x9, x19, x24
+    ldr x10, [x23, x9, lsl #3]      // element value (signed)
+    cmp x10, #0
+    b.ge Lsltd_pos
+    mov w9, #'-'
+    strb w9, [x21, x22]
+    add x22, x22, #1
+    neg x10, x10
+Lsltd_pos:
+    // itoa(x10) into number_buffer, written back-to-front
+    LOAD_ADDR x9, number_buffer
+    add x11, x9, #31
+    mov x12, #0                     // digit count
+    mov x13, #10
+    cbnz x10, Lsltd_digits
+    mov w14, #'0'
+    strb w14, [x11]
+    mov x12, #1
+    b Lsltd_copy
+Lsltd_digits:
+    mov x15, x10
+Lsltd_digit_loop:
+    udiv x14, x15, x13
+    msub x16, x14, x13, x15
+    add w16, w16, #'0'
+    strb w16, [x11]
+    sub x11, x11, #1
+    add x12, x12, #1
+    mov x15, x14
+    cbnz x15, Lsltd_digit_loop
+    add x11, x11, #1               // -> first digit
+Lsltd_copy:
+    mov x13, #0
+Lsltd_copy_loop:
+    cmp x13, x12
+    b.ge Lsltd_copy_done
+    ldrb w14, [x11, x13]
+    strb w14, [x21, x22]
+    add x22, x22, #1
+    add x13, x13, #1
+    b Lsltd_copy_loop
+Lsltd_copy_done:
+    add x24, x24, #1
+    b Lsltd_loop
+
+Lsltd_close:
+    mov w9, #']'
+    strb w9, [x21, x22]
+    add x22, x22, #1
+    strb wzr, [x21, x22]           // null-terminate (not counted in length)
+
+    // advance the arena past this string (len + 1 for the terminator)
+    add x9, x25, x22
+    add x9, x9, #1
+    str x9, [x26]
+
+    mov x0, x21                     // ptr
+    mov x1, #2                      // str type
+    mov x2, x22                     // length
+    bl _record_data_value
+    mov x1, x22                     // return length (x0 = data id)
+    b Lsltd_return
+
+Lsltd_overflow:
+    mov x0, #-1
+    mov x1, #0
+Lsltd_return:
+    ldp x25, x26, [sp], #16
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+// --------------------------------------------------------------------------
+// Built-in: str(x) — convert a value to its string form.
+//   int / bool  -> reuse the interpolation int->str path (op 73 via
+//                  _emit_cast_op); the result string lives in a temp slot.
+//   str         -> returned unchanged (pass-through).
+//   list<int>   -> constant list rendered "[e0, e1, ...]" at compile time
+//                  (materialized into a temp slot via op 72).
+// Returns like file_read: x2 = str type, x4 = result slot (-1 for a literal
+// pass-through, in which case x1 = the literal value).
+// --------------------------------------------------------------------------
+Lfn_call_str_builtin:
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+    bl _parse_expr_value
+    cbz x0, Lfn_call_fail
+    mov x19, x1                 // value (data id / ptr for a str literal)
+    mov x20, x2                 // type
+    mov x21, x3                 // length / meta
+    mov x22, x4                 // source slot (-1 = immediate / literal)
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+
+    cmp x20, #2                 // already a string?
+    b.eq Lfn_call_str_passthrough
+    cmp x20, #0                 // int
+    b.eq Lfn_call_str_from_num
+    cmp x20, #1                 // bool (rendered as its 0/1 integer value)
+    b.eq Lfn_call_str_from_num
+    cmp x20, #4                 // list
+    b.eq Lfn_call_str_from_list
+    b Lstmt_type_mismatch
+
+Lfn_call_str_from_list:
+    // str(list) — render a CONSTANT int list as "[e0, e1, ...]" at compile time.
+    // Requires an int element type and a list that has NOT been runtime-mutated
+    // (so list_pool_values still holds the true values). x19 = pool base, the
+    // authoritative element count is list_base_counts[base].
+    lsr x9, x21, #32            // element type (from the list's metadata)
+    cbnz x9, Lstmt_type_mismatch // only int-element lists supported
+    LOAD_ADDR x9, list_base_is_runtime
+    ldrb w10, [x9, x19]
+    cbnz w10, Lstmt_type_mismatch // runtime-mutated -> not constant-foldable
+    LOAD_ADDR x9, list_base_counts
+    ldr x1, [x9, x19, lsl #3]   // count
+    mov x0, x19                 // base
+    bl _str_list_to_data
+    cmn x0, #1
+    b.eq Lfn_call_fail
+    mov x23, x0                 // data id
+    mov x24, x1                 // length
+    bl _allocate_temp_var
+    mov x25, x0                 // temp slot for the runtime str pointer
+    mov x0, #72                 // op 72: store_str_lit (data id -> slot)
+    mov x1, x25
+    mov x2, x23
+    bl _record_operation
+    cbnz x0, Lfn_call_fail
+    mov x0, #0
+    mov x1, #2                  // interp-path type: str
+    mov x2, #2                  // compile-path type: str
+    mov x3, #0                  // length unknown at compile time (matches str(int);
+                                // a nonzero length routes callers down a literal path)
+    mov x4, x25                 // result slot (runtime str pointer)
+    b Lfn_call_return
+
+Lfn_call_str_from_num:
+    // _emit_cast_op reads the source from a VAR SLOT, so materialize an
+    // immediate into a slot first.
+    cmn x22, #1
+    b.ne Lfn_call_str_have_slot
+    mov x0, x19
+    bl _expr_materialize_ct_int
+    cmn x0, #1
+    b.eq Lfn_call_fail
+    mov x22, x0
+Lfn_call_str_have_slot:
+    mov x0, #0                  // src_type int (bool 0/1 also renders via op 73)
+    mov x1, #2                  // dst str
+    mov x2, #0                  // src_val (unused; the op reads the slot)
+    mov x3, x22                 // src var slot
+    bl _emit_cast_op
+    cmn x0, #1
+    b.eq Lfn_call_fail
+    mov x4, x0                  // result string lives in this temp slot
+    mov x0, #0
+    mov x1, #2                  // interpreter-path type: str
+    mov x2, #2                  // compilation-path type: str
+    mov x3, #0                  // length unknown at compile time
+    b Lfn_call_return
+
+Lfn_call_str_passthrough:
+    mov x0, #0
+    mov x1, x19                 // literal value / ptr (used when slot == -1)
+    mov x2, #2                  // str
+    mov x3, x21                 // length
+    mov x4, x22                 // source slot
+    b Lfn_call_return
+
+// --------------------------------------------------------------------------
+// Built-in: int(x) — convert a value to its integer form.
+//   int / bool  -> returned unchanged as int (bool is 0/1).
+//   str         -> parsed at runtime via op 78 (cast_str_to_int / _cstr_to_int),
+//                  with the source materialized into a plain var slot first.
+// Returns like str(): x2 = int type (0), x4 = result slot (-1 with x1 = value
+// for an int/bool literal pass-through).
+// --------------------------------------------------------------------------
+Lfn_call_int_builtin:
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+    bl _parse_expr_value
+    cbz x0, Lfn_call_fail
+    mov x19, x1                 // value (data id / ptr for a str literal)
+    mov x20, x2                 // type
+    mov x21, x3                 // length / meta
+    mov x22, x4                 // source slot (-1 = immediate / literal)
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+
+    cmp x20, #0                 // already int?
+    b.eq Lfn_call_int_passthrough
+    cmp x20, #1                 // bool (0/1) -> int
+    b.eq Lfn_call_int_passthrough
+    cmp x20, #2                 // str -> parse
+    b.eq Lfn_call_int_from_str
+    b Lstmt_type_mismatch
+
+Lfn_call_int_passthrough:
+    mov x0, #0
+    mov x1, x19                 // literal value (used when slot == -1)
+    mov x2, #0                  // int
+    mov x3, #0
+    mov x4, x22                 // source slot
+    b Lfn_call_return
+
+Lfn_call_int_from_str:
+    // Materialize the source string into a plain (untagged) var slot; op 78
+    // reads arg1 as a straight stack slot holding the char* (not bit63-tagged).
+    mov x0, x19
+    mov x1, x21
+    mov x2, x22
+    bl _str_method_materialize_arg   // returns (var | bit63)
+    mov x9, #1
+    lsl x9, x9, #63
+    bic x23, x0, x9             // strip tag -> plain source var slot
+    bl _allocate_temp_var
+    mov x24, x0                 // dest slot
+    mov x0, #78                 // op cast_str_to_int
+    mov x1, x24
+    mov x2, x23
+    bl _record_operation
+    cbnz x0, Lfn_call_fail
+    mov x0, #0
+    mov x1, #0
+    mov x2, #0                  // int
+    mov x3, #0
+    mov x4, x24                 // result slot
+    b Lfn_call_return
+
+// --------------------------------------------------------------------------
+// Built-in: ord(s) — ASCII code (int) of the first byte of string s.
+// Enables character classification in SNlang (a self-hosting prerequisite):
+// e.g. `int c = ord(line[i])` then compare c to 48..57 for digits, etc. For a
+// runtime string (slot) it emits op 118 (reads the first byte at runtime); for
+// a string literal it folds to the first byte at compile time. "" -> 0.
+// Returns an int: x2 = 0 (int), x4 = result slot (or -1 with x1 = value).
+// --------------------------------------------------------------------------
+Lfn_call_ord:
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+    bl _parse_expr_value
+    cbz x0, Lfn_call_fail
+    mov x19, x1                 // value (data ptr for a str literal)
+    mov x20, x2                 // type
+    mov x21, x3                 // length
+    mov x22, x4                 // source slot (-1 = literal)
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+
+    cmp x20, #2                 // must be a string
+    b.ne Lstmt_type_mismatch
+
+    cmn x22, #1
+    b.eq Lfn_call_ord_fold
+
+    // Runtime string in slot x22 -> op 118 reads its first byte at runtime.
+    mov x23, x22
+    bl _allocate_temp_var
+    mov x24, x0                 // dest
+    mov x0, #118                // op ord
+    mov x1, x24
+    mov x2, x23
+    bl _record_operation
+    cbnz x0, Lfn_call_fail
+    mov x0, #0
+    mov x1, #0
+    mov x2, #0                  // int
+    mov x3, #0
+    mov x4, x24
+    b Lfn_call_return
+
+Lfn_call_ord_fold:
+    // String literal: fold to the first byte at compile time (0 if empty).
+    cbz x21, Lfn_call_ord_fold_zero
+    ldrb w0, [x19]              // first byte of the literal's data
+    mov x1, x0
+    mov x0, #0
+    mov x2, #0                  // int
+    mov x3, #0
+    mov x4, #-1
+    b Lfn_call_return
+Lfn_call_ord_fold_zero:
+    mov x0, #0
+    mov x1, #0
+    mov x2, #0                  // int
+    mov x3, #0
+    mov x4, #-1
+    b Lfn_call_return
+
+// --------------------------------------------------------------------------
+// Built-in: len(x) — number of elements in a list / characters in a string.
+// Mirrors the `.length` member exactly: op 103 for a runtime string, op 81
+// for a runtime list (split result or list PARAMETER), and a compile-time
+// count for a string literal / list literal / local list.
+// Returns an int: x2 = 0 (int), x4 = result slot (or -1 with x1 = count).
+// --------------------------------------------------------------------------
+Lfn_call_len_builtin:
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+    bl _parse_expr_value
+    cbz x0, Lfn_call_fail
+    mov x19, x1                 // value (list base index for lists)
+    mov x20, x2                 // type
+    mov x21, x3                 // length / packed count
+    mov x22, x4                 // source slot (-1 = literal / local fold)
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+
+    cmp x20, #2                 // str
+    b.eq Lfn_call_len_str
+    cmp x20, #4                 // list
+    b.eq Lfn_call_len_list
+    cmp x20, #20                // list?
+    b.eq Lfn_call_len_list
+    b Lstmt_type_mismatch
+
+Lfn_call_len_str:
+    cmn x22, #1
+    b.eq Lfn_call_len_str_fold
+    mov x23, x22                // source string slot
+    bl _allocate_temp_var
+    mov x24, x0                 // dest
+    mov x0, #103                // op str_length_runtime
+    mov x1, x24
+    mov x2, x23
+    bl _record_operation
+    cbnz x0, Lfn_call_fail
+    mov x0, #0
+    mov x1, #0
+    mov x2, #0                  // int
+    mov x3, #0
+    mov x4, x24
+    b Lfn_call_return
+Lfn_call_len_str_fold:
+    mov x0, #0
+    mov x1, x21                 // literal length known at compile time
+    mov x2, #0
+    mov x3, #0
+    mov x4, #-1
+    b Lfn_call_return
+
+Lfn_call_len_list:
+    // A runtime-count list (e.g. a str.split result) is identified by its BASE
+    // index in list_base_is_runtime[base], regardless of whether the value also
+    // lives in a slot. Check that first, exactly like the `.length` member does,
+    // otherwise a split result assigned to a local var reports its reserved
+    // capacity instead of its real element count.
+    LOAD_ADDR x9, list_base_is_runtime
+    ldrb w9, [x9, x19]          // x19 = compile-time base index
+    cbnz w9, Lfn_call_len_list_runtime_base
+    cmn x22, #1
+    b.ne Lfn_call_len_list_slot
+    b Lfn_call_len_list_fold
+
+Lfn_call_len_list_runtime_base:
+    mov x0, x19
+    bl _expr_materialize_ct_int
+    cmn x0, #1
+    b.eq Lfn_call_fail
+    mov x23, x0                 // base slot
+    bl _allocate_temp_var
+    mov x24, x0                 // dest
+    mov x0, #81                 // op list_length_runtime
+    mov x1, x24
+    mov x2, x23
+    bl _record_operation
+    cbnz x0, Lfn_call_fail
+    mov x0, #0
+    mov x1, #0
+    mov x2, #0
+    mov x3, #0
+    mov x4, x24
+    b Lfn_call_return
+
+Lfn_call_len_list_slot:
+    // A slot in the current fn's PARAMETER range is a list parameter whose
+    // count is only known at runtime -> op 81. Any other slot (a local list)
+    // keeps its compile-time count.
+    LOAD_ADDR x9, current_parse_fn_id
+    ldr x9, [x9]
+    cmn x9, #1
+    b.eq Lfn_call_len_list_fold
+    LOAD_ADDR x10, fn_scope_bases
+    ldr x10, [x10, x9, lsl #3]
+    cmp x22, x10
+    b.lt Lfn_call_len_list_fold
+    LOAD_ADDR x11, fn_param_counts
+    ldr x11, [x11, x9, lsl #3]
+    add x11, x10, x11
+    cmp x22, x11
+    b.ge Lfn_call_len_list_fold
+    mov x23, x22                // list parameter slot (carries base at runtime)
+    bl _allocate_temp_var
+    mov x24, x0                 // dest
+    mov x0, #81                 // op list_length_runtime
+    mov x1, x24
+    mov x2, x23
+    bl _record_operation
+    cbnz x0, Lfn_call_fail
+    mov x0, #0
+    mov x1, #0
+    mov x2, #0
+    mov x3, #0
+    mov x4, x24
+    b Lfn_call_return
+Lfn_call_len_list_fold:
+    and x1, x21, #0xFFFFFFFF     // count packed in the low 32 bits
+    mov x0, #0
+    mov x2, #0
+    mov x3, #0
+    mov x4, #-1
+    b Lfn_call_return
+
 Lfn_call_unknown:
     LOAD_ADDR x0, msg_unknown_fn
     bl _report_error_prefix
@@ -9554,7 +12772,7 @@ Lfn_call_fail_restore_vars:
     mov x0, #1
 
 Lfn_call_return:
-    add sp, sp, #32
+    add sp, sp, #96
     ldp x27, x28, [sp], #16
     ldp x25, x26, [sp], #16
     ldp x23, x24, [sp], #16
@@ -9695,7 +12913,7 @@ Lpreparse_bp_check_fn_kw:
     // so _call_function can resolve it during main parse
     LOAD_ADDR x9, fn_count
     ldr x11, [x9]
-    cmp x11, #64
+    cmp x11, #SNC_MAX_FUNCS
     b.ge Lpreparse_bp_scan_loop
     LOAD_ADDR x12, fn_name_ptrs
     str x0, [x12, x11, lsl #3]
@@ -9888,6 +13106,25 @@ Lblueprint_body_loop:
 
 Lblueprint_body_done:
     bl _advance_char // consume '}'
+
+    // Create a DEFINITION-TIME template instance for this blueprint so its
+    // method bodies (emitted standalone as dead-but-must-assemble code) can
+    // resolve `self.field` to valid var slots. Real method calls inline the
+    // body against the caller's actual instance, so this template only needs
+    // to make the standalone emission valid. x23 = blueprint id.
+    mov x0, x23
+    bl _reserve_object_instance
+    cbz x0, Lblueprint_template_skip
+    mov x24, x1                 // template instance id
+    mov x0, x24
+    mov x1, x23
+    bl _instantiate_object_fields
+    cbz x0, Lblueprint_template_skip
+    LOAD_ADDR x9, blueprint_template_instances
+    add x10, x24, #1            // store id+1 (0 = none)
+    str x10, [x9, x23, lsl #3]
+Lblueprint_template_skip:
+
     // Enforce followed contracts: each required method must exist in blueprint.
     LOAD_ADDR x9, blueprint_contract_counts
     ldr x10, [x9, x23, lsl #3]
@@ -10768,13 +14005,30 @@ Lblueprint_member_method:
     ldr x10, [sp]
     add sp, sp, #16
     cbnz x0, Lblueprint_member_fail
-    LOAD_ADDR x9, fn_count
+    // Use the ACTUAL fn index just defined, not fn_count-1: _parse_fn_definition
+    // reuses the preparse stub without bumping fn_count, so fn_count-1 points at
+    // the wrong fn whenever this method isn't the last-registered one.
+    LOAD_ADDR x9, last_fn_def_index
     ldr x23, [x9]
-    sub x23, x23, #1
     
     // Save blueprint ID for this function
     LOAD_ADDR x9, fn_blueprint_ids
     str x21, [x9, x23, lsl #3]
+
+    // The general fn preparse also registers a PLAIN-named stub for this
+    // method (it doesn't know the `fn` sits inside a blueprint), leaving it
+    // with blueprint id -1. That stub's body cursor points at this method's
+    // body, so _parse_function_body would later re-parse `return self.field`
+    // as an ordinary function with no `self` bound and fail (aborting before
+    // `main`). Tag that stub with this blueprint id too, so `self` binds and
+    // its dead-but-must-assemble body resolves self.field correctly.
+    mov x0, x25   // plain method name ptr
+    mov x1, x26   // plain method name len
+    bl _lookup_function
+    cbz x0, Lblueprint_member_stub_done
+    LOAD_ADDR x9, fn_blueprint_ids
+    str x21, [x9, x1, lsl #3]
+Lblueprint_member_stub_done:
 
     LOAD_ADDR x9, blueprint_method_fn_ids
     str x23, [x9, x10, lsl #3]
@@ -10886,7 +14140,7 @@ _define_hidden_var:
 
     LOAD_ADDR x23, var_count
     ldr x24, [x23]
-    cmp x24, #512
+    cmp x24, #SNC_MAX_VARS
     b.ge Lhidden_var_fail
 
     LOAD_ADDR x9, hidden_var_name_storage
@@ -11201,6 +14455,32 @@ _call_object_method:
     LOAD_ADDR x9, current_self_meta
     str x21, [x9]
 
+    // ---- Try per-instance INLINE dispatch (real methods only) ----
+    // Inline the method body here with `self` bound to THIS instance so
+    // `self.field` resolves to the instance's own field slots (per-instance).
+    // The constructor "create" and any un-inlinable case (recursion / nesting
+    // too deep) fall back to the shared template-self body via `bl` below.
+    mov x0, x22
+    mov x1, x23
+    LOAD_ADDR x2, kw_create
+    bl _match_cstr_span
+    cbnz x0, Lcom_use_bl
+    mov x0, x21
+    mov x1, x22
+    mov x2, x23
+    mov x3, #62                 // scratch synth-name slot (distinct from 63)
+    bl _build_method_synth_name
+    bl _lookup_function
+    cbz x0, Lcom_use_bl          // unknown method -> old path (errors there)
+    mov x0, x1                   // mfid
+    bl _inline_object_method
+    cmp x0, #2
+    b.eq Lcom_use_bl             // cannot inline -> shared template-self fallback
+    cbnz x0, Lcall_object_method_fail_restore
+    mov x1, #0                   // value placeholder (result is in x4 slot)
+    b Lcom_after_call
+
+Lcom_use_bl:
     // Build Blueprint__methodname for dispatch
     mov x0, x21   // blueprint id
     mov x1, x22   // method name ptr
@@ -11212,6 +14492,7 @@ _call_object_method:
     bl _call_function
     cbnz x0, Lcall_object_method_fail_restore
 
+Lcom_after_call:
     // Restore self
     LOAD_ADDR x9, current_self_instance
     ldr x10, [sp]
@@ -11341,6 +14622,10 @@ _parse_function_body:
     stp x23, x24, [sp, #-16]!
 
     mov x19, x0 // fn index
+    mov x24, #0 // parse status
+
+    LOAD_ADDR x9, current_parse_fn_id
+    str x19, [x9]
 
     // Save scope base and set new scope base
     LOAD_ADDR x9, var_count
@@ -11349,12 +14634,16 @@ _parse_function_body:
     // Set variable scope base to current count (new scope starts here)
     LOAD_ADDR x9, var_scope_base
     str x21, [x9]
+
+    // Record this function's slot base for scope-relative codegen
+    LOAD_ADDR x9, fn_scope_bases
+    str x21, [x9, x19, lsl #3]
     
     // Check if it is a method
     LOAD_ADDR x9, fn_blueprint_ids
     ldr x20, [x9, x19, lsl #3]
     cmn x20, #1
-    b.eq Lparse_fn_body_params
+    b.eq Lparse_fn_body_not_method
     
     // Define 'self'
     LOAD_ADDR x0, kw_self
@@ -11364,6 +14653,29 @@ _parse_function_body:
     mov x4, #0
     mov x5, #1 // const
     bl _define_variable
+    cbnz x0, Lparse_fn_body_error
+
+    // Bind `self` for this method's standalone (dead-but-must-assemble) body:
+    // meta = blueprint id, type = 10 (object), instance = the blueprint's
+    // definition-time template (id stored as id+1). Real calls re-bind self to
+    // the caller's actual instance during inline reparse (not via this path).
+    LOAD_ADDR x9, current_self_meta
+    str x20, [x9]
+    LOAD_ADDR x9, current_self_type
+    mov x10, #10
+    str x10, [x9]
+    LOAD_ADDR x9, blueprint_template_instances
+    ldr x10, [x9, x20, lsl #3]
+    sub x10, x10, #1            // stored id+1 -> real id (or -1 if none)
+    LOAD_ADDR x9, current_self_instance
+    str x10, [x9]
+    b Lparse_fn_body_params
+
+Lparse_fn_body_not_method:
+    // Ordinary function: make sure no stale `self` binding leaks in from a
+    // previously-compiled method body.
+    LOAD_ADDR x9, current_self_type
+    str xzr, [x9]
 
 Lparse_fn_body_params:
     // Define parameters
@@ -11386,9 +14698,12 @@ Lparse_fn_body_param_loop:
     ldr x2, [x10, x9, lsl #3]
     LOAD_ADDR x10, fn_param_lengths
     ldr x3, [x10, x9, lsl #3]
-    mov x4, #0
-    mov x5, #0
+    mov x5, x3  // metadata/length
+    mov x4, x2  // declared type
+    mov x3, #0  // not const
+    mov x2, #0  // runtime value arrives in x0..x3 and is stored by codegen
     bl _define_variable
+    cbnz x0, Lparse_fn_body_error
     
     add x23, x23, #1
     b Lparse_fn_body_param_loop
@@ -11446,9 +14761,15 @@ Lparse_fn_body_loop:
     cbz w0, Lparse_fn_body_done
     
     bl _parse_statement
-    cbnz x0, Lparse_fn_body_done // EXIT ON ERROR
-    b Lparse_fn_body_loop
+    cbz x0, Lparse_fn_body_loop
+    cmp x0, #4
+    b.eq Lparse_fn_body_loop // return recorded as an op; keep compiling the rest
+    b Lparse_fn_body_error // EXIT ON ERROR
 
+
+Lparse_fn_body_error:
+    mov x24, #1
+    b Lparse_fn_body_done
 
 Lparse_fn_body_done:
     // Record count
@@ -11459,8 +14780,30 @@ Lparse_fn_body_done:
     sub x11, x11, x10
     LOAD_ADDR x9, fn_op_counts
     str x11, [x9, x19, lsl #3]
-    
-    
+
+    // Record runtime frame size: locals+params+TEMPS used by this body.
+    // Use max_var_count (the monotonic PEAK), NOT the end-of-body var_count:
+    // temp slots are recycled during parsing (var_count shrinks back), so the
+    // end value badly undercounts the real peak. The generated code addresses
+    // slot S at [x29,-(S-scope_base+1)*8], and the deepest slot reached equals
+    // (peak-1); an undersized frame lets a callee/recursion overwrite the
+    // caller's live locals (e.g. a recursive solver's helper call clobbered its
+    // loop counters). max_var_count is >= this function's true peak, so the
+    // frame always covers every slot it can address (may slightly over-allocate,
+    // which is harmless). (peak - scope base + slack) * 8, 16-aligned, min 128.
+    LOAD_ADDR x9, max_var_count
+    ldr x10, [x9]
+    sub x10, x10, x21
+    add x10, x10, #6          // slack slots
+    lsl x10, x10, #3          // * 8 bytes
+    add x10, x10, #15
+    and x10, x10, #0xFFFFFFFFFFFFFFF0
+    mov x11, #128
+    cmp x10, x11
+    csel x10, x11, x10, lt    // min 128
+    LOAD_ADDR x9, fn_frame_sizes
+    str x10, [x9, x19, lsl #3]
+
     // Restore scope
     LOAD_ADDR x9, var_count
     str x21, [x9]
@@ -11469,6 +14812,406 @@ Lparse_fn_body_done:
     LOAD_ADDR x9, var_scope_base
     str x21, [x9]
 
+    LOAD_ADDR x9, current_parse_fn_id
+    mov x10, #-1
+    str x10, [x9]
+
+    mov x0, x24
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+
+// ============================================================
+// _record_return_op
+//   Gated recorder for the `return` statement.
+//   x1 = the op-4 argument (runtime result slot when available, else value/-1)
+//   x2 = the TRUE runtime result slot (-1 if the return has none / is void)
+//   Returns x0=0 on success.
+//
+//   When NOT inlining (inline_active == 0) this is byte-identical to the old
+//   `mov x0,#4 ... _record_operation4`, so every normal function/recursion path
+//   is unchanged. When inlining a method body at a call site, a `return <v>`
+//   must NOT emit a function epilogue+ret (that would tear down / return from the
+//   ENCLOSING function). Instead it copies its value into the inline result slot
+//   (op 45) and jumps to the inline end label (op 41).
+// ============================================================
+.global _record_return_op
+_record_return_op:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+
+    mov x19, x1    // op-4 arg (slot/value/-1)
+    mov x20, x2    // true runtime slot (-1 if none)
+
+    LOAD_ADDR x9, inline_active
+    ldr x9, [x9]
+    cbz x9, Lrro_normal
+
+    // INLINE: deposit value into inline_result_slot (if any), then jump to end.
+    cmn x20, #1
+    b.eq Lrro_inline_jump          // void / no runtime slot: skip the value copy
+    LOAD_ADDR x9, inline_result_slot
+    ldr x1, [x9]                   // target = inline result slot
+    mov x2, x20                    // source = the return value's runtime slot
+    mov x0, #45                    // op 45: store var -> var (runtime copy)
+    bl _record_operation
+    cbnz x0, Lrro_fail
+Lrro_inline_jump:
+    LOAD_ADDR x9, inline_end_label
+    ldr x1, [x9]                   // label id
+    mov x0, #41                    // op 41: unconditional branch
+    mov x2, #0
+    mov x3, #0
+    mov x4, #0
+    bl _record_operation4
+    cbnz x0, Lrro_fail
+    b Lrro_ok
+
+Lrro_normal:
+    // Unchanged normal `return` op.
+    mov x0, #4
+    mov x1, x19
+    mov x2, #0
+    mov x3, #0
+    mov x4, #0
+    bl _record_operation4
+    cbnz x0, Lrro_fail
+
+Lrro_ok:
+    mov x0, #0
+Lrro_return:
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+Lrro_fail:
+    mov x0, #1
+    b Lrro_return
+
+// ============================================================
+// _inline_object_method
+//   x0 = method fn index (mfid). Precondition: `self` is already bound to the
+//   ACTUAL caller instance (current_self_*), and the cursor sits at the call's
+//   '(' . Consumes the '(...)' argument list, then re-parses the method body
+//   INLINE into the current op stream so that `self.field` resolves to THIS
+//   instance's field slots (per-instance).
+//
+//   Returns:
+//     x0 = 0  success. x2 = return type, x3 = return decl length, x4 = result
+//              slot; last_call_result_slot is set to the result slot.
+//     x0 = 1  hard parse failure.
+//     x0 = 2  cannot inline (recursion or nesting too deep) -> caller uses the
+//              shared template-self `bl` fallback.
+//
+//   Local stack frame (96 bytes):
+//     [sp,#0]  saved cursor_pos (call site)   [sp,#8]  saved current_line
+//     [sp,#16] saved source_ptr               [sp,#24] saved source_len
+//     [sp,#32] saved inline_result_slot        [sp,#40] saved inline_end_label
+//     [sp,#48] param name ptr (per arg)        [sp,#56] param name len (per arg)
+//     [sp,#64] arg value (per arg)             [sp,#72] arg runtime slot (per arg)
+//     [sp,#80] param declared type (per arg)
+// ============================================================
+.global _inline_object_method
+_inline_object_method:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+    stp x25, x26, [sp, #-16]!
+    stp x27, x28, [sp, #-16]!
+    sub sp, sp, #96
+
+    mov x19, x0                    // mfid
+
+    // ---- recursion / depth guard ----
+    LOAD_ADDR x9, inline_active
+    ldr x26, [x9]                  // current depth
+    cmp x26, #16
+    b.ge Linline_cannot
+    mov x27, #0
+Linline_guard_loop:
+    cmp x27, x26
+    b.ge Linline_guard_ok
+    LOAD_ADDR x9, inline_fn_stack
+    ldr x28, [x9, x27, lsl #3]
+    cmp x28, x19
+    b.eq Linline_cannot            // this method is already inlining -> recursion
+    add x27, x27, #1
+    b Linline_guard_loop
+Linline_guard_ok:
+
+    // ---- save call-site cursor/source/line ----
+    LOAD_ADDR x9, cursor_pos
+    ldr x10, [x9]
+    str x10, [sp, #0]
+    LOAD_ADDR x9, current_line
+    ldr x10, [x9]
+    str x10, [sp, #8]
+    LOAD_ADDR x9, source_ptr
+    ldr x10, [x9]
+    str x10, [sp, #16]
+    LOAD_ADDR x9, source_len
+    ldr x10, [x9]
+    str x10, [sp, #24]
+
+    // ---- save var scope ----
+    LOAD_ADDR x9, var_count
+    ldr x24, [x9]                  // Vsave
+    LOAD_ADDR x9, var_scope_base
+    ldr x25, [x9]                  // Bsave
+
+    // ---- allocate result slot FIRST (lowest; survives reclamation) ----
+    bl _allocate_temp_var
+    mov x20, x0                    // Rslot
+
+    // ---- open a fresh block scope for params/body locals ----
+    LOAD_ADDR x9, var_count
+    ldr x10, [x9]
+    LOAD_ADDR x9, var_scope_base
+    str x10, [x9]                  // scope_base = current var_count
+
+    // Define `self` as a variable in the inline scope. The primary parser only
+    // treats `ident.member` as MEMBER access when `ident` is a known variable
+    // (otherwise it attempts module-qualified access `module.func` and fails).
+    // The standalone method body defines `self` the same way; the inline path
+    // must too, or `self.field` is misparsed as module access on `self`.
+    LOAD_ADDR x0, kw_self
+    mov x1, #4
+    mov x2, #10
+    LOAD_ADDR x9, fn_blueprint_ids
+    ldr x3, [x9, x19, lsl #3]      // blueprint id of this method
+    mov x4, #0
+    mov x5, #1
+    bl _define_variable
+    cbnz x0, Linline_fail
+
+    // ---- parse '(' args ')' and bind each param ----
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Linline_fail
+    LOAD_ADDR x9, fn_param_counts
+    ldr x22, [x9, x19, lsl #3]     // paramCount
+    mov x23, #0                    // arg index
+Linline_arg_loop:
+    cmp x23, x22
+    b.ge Linline_args_done
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, #')'
+    b.eq Linline_args_done
+    cbz x23, Linline_arg_parse
+    mov w0, #','
+    bl _expect_char
+    cbz x0, Linline_fail
+    bl _skip_whitespace
+Linline_arg_parse:
+    mov x9, x19
+    lsl x9, x9, #2
+    add x9, x9, x23
+    LOAD_ADDR x10, fn_param_name_ptrs
+    ldr x11, [x10, x9, lsl #3]
+    str x11, [sp, #48]
+    LOAD_ADDR x10, fn_param_name_lens
+    ldr x11, [x10, x9, lsl #3]
+    str x11, [sp, #56]
+    LOAD_ADDR x10, fn_param_types
+    ldr x11, [x10, x9, lsl #3]
+    str x11, [sp, #80]
+    bl _parse_expr_value
+    cbz x0, Linline_fail
+    str x1, [sp, #64]              // arg value
+    str x4, [sp, #72]              // arg runtime slot (-1 if immediate)
+    // define the param variable in the inner scope
+    ldr x0, [sp, #48]
+    ldr x1, [sp, #56]
+    ldr x2, [sp, #64]
+    mov x3, #0
+    ldr x4, [sp, #80]
+    bl _define_variable
+    cbnz x0, Linline_fail
+    LOAD_ADDR x9, var_count
+    ldr x10, [x9]
+    sub x10, x10, #1              // new param slot
+    ldr x11, [sp, #72]
+    cmn x11, #1
+    b.eq Linline_arg_imm
+    mov x1, x10                  // target = param slot
+    mov x2, x11                  // source = arg slot
+    mov x0, #45
+    bl _record_operation
+    cbnz x0, Linline_fail
+    b Linline_arg_next
+Linline_arg_imm:
+    mov x1, x10                  // target = param slot
+    ldr x2, [sp, #64]            // immediate value
+    mov x0, #1
+    bl _record_operation
+    cbnz x0, Linline_fail
+Linline_arg_next:
+    add x23, x23, #1
+    b Linline_arg_loop
+
+Linline_args_done:
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Linline_fail
+
+    // ---- save the RESUME point: cursor/line AFTER the call's ')'. The
+    // entry-time save pointed at '(' -- restoring to it would re-parse the arg
+    // list. source_ptr/len were saved at entry and are unchanged here.
+    LOAD_ADDR x9, cursor_pos
+    ldr x10, [x9]
+    str x10, [sp, #0]
+    LOAD_ADDR x9, current_line
+    ldr x10, [x9]
+    str x10, [sp, #8]
+
+    // ---- save outer inline state, install ours ----
+    LOAD_ADDR x9, inline_result_slot
+    ldr x10, [x9]
+    str x10, [sp, #32]
+    LOAD_ADDR x9, inline_end_label
+    ldr x10, [x9]
+    str x10, [sp, #40]
+
+    bl _get_next_label
+    mov x21, x0                   // end label
+    LOAD_ADDR x9, inline_result_slot
+    str x20, [x9]
+    LOAD_ADDR x9, inline_end_label
+    str x21, [x9]
+
+    LOAD_ADDR x9, inline_fn_stack
+    str x19, [x9, x26, lsl #3]    // push mfid
+    add x27, x26, #1
+    LOAD_ADDR x9, inline_active
+    str x27, [x9]                 // depth++
+
+    // ---- seek to the method body ----
+    LOAD_ADDR x9, fn_body_cursors
+    ldr x10, [x9, x19, lsl #3]
+    LOAD_ADDR x9, cursor_pos
+    str x10, [x9]
+    LOAD_ADDR x9, fn_body_lines
+    ldr x10, [x9, x19, lsl #3]
+    LOAD_ADDR x9, current_line
+    str x10, [x9]
+    LOAD_ADDR x9, fn_source_ptrs
+    ldr x10, [x9, x19, lsl #3]
+    LOAD_ADDR x9, source_ptr
+    str x10, [x9]
+    LOAD_ADDR x9, fn_source_lens
+    ldr x10, [x9, x19, lsl #3]
+    LOAD_ADDR x9, source_len
+    str x10, [x9]
+
+    // ---- parse body statements ----
+Linline_body_loop:
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, #'}'
+    b.eq Linline_body_done
+    cbz w0, Linline_body_done
+    bl _parse_statement
+    cbz x0, Linline_body_loop
+    cmp x0, #4
+    b.eq Linline_body_loop         // return recorded (gated) -> keep parsing
+    b Linline_body_fail
+
+Linline_body_done:
+    // place the inline end label
+    mov x0, #35
+    mov x1, x21
+    mov x2, #0
+    mov x3, #0
+    mov x4, #0
+    bl _record_operation4
+
+    // ---- pop inline state ----
+    LOAD_ADDR x9, inline_active
+    str x26, [x9]
+    LOAD_ADDR x9, inline_result_slot
+    ldr x10, [sp, #32]
+    str x10, [x9]
+    LOAD_ADDR x9, inline_end_label
+    ldr x10, [sp, #40]
+    str x10, [x9]
+
+    // ---- restore cursor/source/line to the call site ----
+    LOAD_ADDR x9, source_ptr
+    ldr x10, [sp, #16]
+    str x10, [x9]
+    LOAD_ADDR x9, source_len
+    ldr x10, [sp, #24]
+    str x10, [x9]
+    LOAD_ADDR x9, cursor_pos
+    ldr x10, [sp, #0]
+    str x10, [x9]
+    LOAD_ADDR x9, current_line
+    ldr x10, [sp, #8]
+    str x10, [x9]
+
+    // ---- restore scope: keep the result slot, reclaim params/body locals ----
+    add x10, x20, #1
+    LOAD_ADDR x9, var_count
+    str x10, [x9]
+    LOAD_ADDR x9, var_scope_base
+    str x25, [x9]
+
+    // ---- publish result (same convention as _call_function) ----
+    LOAD_ADDR x9, last_call_result_slot
+    str x20, [x9]
+    LOAD_ADDR x9, fn_return_types
+    ldr x2, [x9, x19, lsl #3]
+    LOAD_ADDR x9, fn_return_decl_lengths
+    ldr x3, [x9, x19, lsl #3]
+    mov x4, x20
+    mov x1, #0
+    mov x0, #0
+    b Linline_return
+
+Linline_body_fail:
+    LOAD_ADDR x9, inline_active
+    str x26, [x9]
+    LOAD_ADDR x9, inline_result_slot
+    ldr x10, [sp, #32]
+    str x10, [x9]
+    LOAD_ADDR x9, inline_end_label
+    ldr x10, [sp, #40]
+    str x10, [x9]
+    LOAD_ADDR x9, source_ptr
+    ldr x10, [sp, #16]
+    str x10, [x9]
+    LOAD_ADDR x9, source_len
+    ldr x10, [sp, #24]
+    str x10, [x9]
+    LOAD_ADDR x9, cursor_pos
+    ldr x10, [sp, #0]
+    str x10, [x9]
+    LOAD_ADDR x9, current_line
+    ldr x10, [sp, #8]
+    str x10, [x9]
+    LOAD_ADDR x9, var_scope_base
+    str x25, [x9]
+Linline_fail:
+    LOAD_ADDR x9, var_scope_base
+    str x25, [x9]
+    mov x0, #1
+    b Linline_return
+
+Linline_cannot:
+    mov x0, #2
+
+Linline_return:
+    add sp, sp, #96
+    ldp x27, x28, [sp], #16
+    ldp x25, x26, [sp], #16
     ldp x23, x24, [sp], #16
     ldp x21, x22, [sp], #16
     ldp x19, x20, [sp], #16

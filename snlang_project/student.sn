@@ -1,0 +1,63 @@
+// models/student.sn
+// Student model - workarounds for compiler limits (max 4 params, no bool return, no division)
+
+fn student_highest(int s1, int s2, int s3, int s4) -> int {
+    int best = s1
+    if (s2 > best) {
+        best = s2
+    }
+    if (s3 > best) {
+        best = s3
+    }
+    if (s4 > best) {
+        best = s4
+    }
+    return best
+}
+
+fn student_highest5(int best4, int s5) -> int {
+    int best = best4
+    if (s5 > best) {
+        best = s5
+    }
+    return best
+}
+
+fn student_lowest(int s1, int s2, int s3, int s4) -> int {
+    int worst = s1
+    if (s2 < worst) {
+        worst = s2
+    }
+    if (s3 < worst) {
+        worst = s3
+    }
+    if (s4 < worst) {
+        worst = s4
+    }
+    return worst
+}
+
+fn student_lowest5(int worst4, int s5) -> int {
+    int worst = worst4
+    if (s5 < worst) {
+        worst = s5
+    }
+    return worst
+}
+
+// Returns 1 if all 4 scores pass, 0 otherwise
+fn student_passed_all(int s1, int s2, int s3, int s4) -> int {
+    int ok = 1
+    if (s1 < 60) { ok = 0 }
+    if (s2 < 60) { ok = 0 }
+    if (s3 < 60) { ok = 0 }
+    if (s4 < 60) { ok = 0 }
+    return ok
+}
+
+// Checks 5th score against existing pass result (1/0)
+fn student_passed5(int ok4, int s5) -> int {
+    int ok = ok4
+    if (s5 < 60) { ok = 0 }
+    return ok
+}

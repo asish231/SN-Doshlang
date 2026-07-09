@@ -1,0 +1,8 @@
+use grade
+use student
+fn main() {
+    str g = letter_grade(85)
+    int h = student_highest(10, 20, 30, 40)
+    print(g)
+    print(h)
+}

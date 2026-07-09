@@ -1,0 +1,9 @@
+fn myadd(int a, int b) -> int {
+    int r = a + b
+    return r
+}
+
+fn main() {
+    int x = myadd(10, 20)
+    print(x)
+}

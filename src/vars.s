@@ -33,7 +33,7 @@ _define_variable:
 
     LOAD_ADDR x22, var_count
     ldr x23, [x22]
-    cmp x23, #512
+    cmp x23, #SNC_MAX_VARS
     b.ge Ldefine_full
 
     LOAD_ADDR x24, var_scope_base
@@ -42,9 +42,9 @@ _define_variable:
     b.eq Ldefine_store
     sub x28, x23, #1
 
-// Skip duplicate check for now - go directly to store
-    // TODO: Fix duplicate check logic properly
-    b Ldefine_store
+    cmp x20, #0
+    b.eq Ldefine_store
+    b Ldefine_dup_loop
 
 Ldefine_dup_loop:
     cmp x28, x24
@@ -384,17 +384,32 @@ _record_print_value:
     mov x22, x2 // length
     LOAD_ADDR x20, print_count
     ldr x9, [x20]
-    cmp x9, #2048
-    b.ge Lrecord_print_full
+    // Grow the malloc-backed print/data tables on demand instead of failing at
+    // a fixed cap. x3 (the noline flag) is caller-saved, so save it across the
+    // grow call; x20 (&print_count) is callee-saved and survives.
+    LOAD_ADDR x10, print_capacity
+    ldr x10, [x10]
+    cmp x9, x10
+    b.lt Lrecord_pv_have_space
+    str x3, [sp, #-16]!
+    bl _snc_grow_prints
+    ldr x3, [sp], #16
+    ldr x9, [x20]
+Lrecord_pv_have_space:
 
+    // print_* are now POINTERS to heap buffers, so deref before indexing.
     LOAD_ADDR x10, print_values
+    ldr x10, [x10]
     str x19, [x10, x9, lsl #3]
     LOAD_ADDR x10, print_types
+    ldr x10, [x10]
     str x21, [x10, x9, lsl #3]
     LOAD_ADDR x10, print_lengths
+    ldr x10, [x10]
     str x22, [x10, x9, lsl #3]
     // Store noline flag (x3) - use strb for single byte
     LOAD_ADDR x10, print_noline
+    ldr x10, [x10]
     strb w3, [x10, x9]
     mov x19, x9
     add x9, x9, #1
@@ -417,14 +432,25 @@ _record_data_value:
     mov x22, x2 // length
     LOAD_ADDR x20, print_count
     ldr x9, [x20]
-    cmp x9, #2048
-    b.ge Lrecord_data_full
+    // Grow the malloc-backed print/data tables on demand instead of failing at
+    // a fixed cap (x20 = &print_count is callee-saved and survives the grow).
+    LOAD_ADDR x10, print_capacity
+    ldr x10, [x10]
+    cmp x9, x10
+    b.lt Lrecord_dv_have_space
+    bl _snc_grow_prints
+    ldr x9, [x20]
+Lrecord_dv_have_space:
 
+    // print_* are now POINTERS to heap buffers, so deref before indexing.
     LOAD_ADDR x10, print_values
+    ldr x10, [x10]
     str x19, [x10, x9, lsl #3]
     LOAD_ADDR x10, print_types
+    ldr x10, [x10]
     str x21, [x10, x9, lsl #3]
     LOAD_ADDR x10, print_lengths
+    ldr x10, [x10]
     str x22, [x10, x9, lsl #3]
     mov x0, x9
     add x9, x9, #1
@@ -507,6 +533,8 @@ _record_operation:
     stp x19, x20, [sp, #-16]!
     stp x21, x22, [sp, #-16]!
     stp x23, x24, [sp, #-16]!
+    stp x25, x26, [sp, #-16]!   // preserve x25/x26 (x25 is op arg4 AND callers'
+                                // callee-saved state, e.g. for-in loop-var name len)
 
     mov x19, x0
     mov x20, x1
@@ -522,6 +550,7 @@ _record_operation2:
     stp x19, x20, [sp, #-16]!
     stp x21, x22, [sp, #-16]!
     stp x23, x24, [sp, #-16]!
+    stp x25, x26, [sp, #-16]!
     
     mov x19, x0
     mov x20, x1
@@ -537,6 +566,7 @@ _record_operation4:
     stp x19, x20, [sp, #-16]!
     stp x21, x22, [sp, #-16]!
     stp x23, x24, [sp, #-16]!
+    stp x25, x26, [sp, #-16]!
     
     mov x19, x0
     mov x20, x1
@@ -551,6 +581,7 @@ _record_operation5:
     stp x19, x20, [sp, #-16]!
     stp x21, x22, [sp, #-16]!
     stp x23, x24, [sp, #-16]!
+    stp x25, x26, [sp, #-16]!
     
     mov x19, x0
     mov x20, x1
@@ -566,6 +597,7 @@ _record_operation3:
     stp x19, x20, [sp, #-16]!
     stp x21, x22, [sp, #-16]!
     stp x23, x24, [sp, #-16]!
+    stp x25, x26, [sp, #-16]!
 
     mov x19, x0
     mov x20, x1
@@ -575,38 +607,50 @@ _record_operation3:
 
 Lrecord_operation_common:
 #ifndef _WIN32
-    LOAD_ADDR x26, spawn_capture_fn_id
-    ldr x26, [x26]
-    cmn x26, #1
-    b.eq Lrecord_spawn_op
+    // NOTE: use a scratch register (x15) for the spawn id. This used to
+    // load into x26 WITHOUT saving it, silently clobbering callers'
+    // callee-saved state (e.g. the for-in unroll index) on every recorded
+    // op -- which made for-in loops re-iterate forever at compile time.
+    LOAD_ADDR x15, spawn_capture_fn_id
+    ldr x15, [x15]
+    // spawn_capture_fn_id == -1 means "not capturing" (normal recording).
+    // A non-negative value means we are capturing a spawned function body,
+    // so ONLY then should the op be routed to the spawn tables.
+    cmn x15, #1
+    b.ne Lrecord_spawn_op
 #endif
     LOAD_ADDR x23, op_count
     ldr x9, [x23]
-    cmp x9, #4096
-    b.ge Lrecord_op_full
+    // Grow the malloc-backed op tables on demand instead of hard-failing at a
+    // fixed cap. When op_count reaches the current capacity, _snc_grow_ops
+    // realloc-doubles all six parallel arrays (it preserves x19-x25 and x23,
+    // the op being recorded plus &op_count), then we reload the count.
+    LOAD_ADDR x10, op_capacity
+    ldr x10, [x10]
+    cmp x9, x10
+    b.lt Lrecord_op_have_space
+    bl _snc_grow_ops
+    ldr x9, [x23]
+Lrecord_op_have_space:
 
-    // Debug: print operation being recorded
-    // stp x19, x20, [sp, #-16]!
-    // LOAD_ADDR x0, msg_debug_fn
-    // mov x1, #2
-    // bl _write_cstr_fd
-    // mov x0, x9
-    // mov x1, #2
-    // bl _write_i64_fd
-    // bl _write_newline_stdout
-    // ldp x19, x20, [sp], #16
-
+    // op_kinds/op_arg* are now POINTERS to heap buffers, so deref before index.
     LOAD_ADDR x10, op_kinds
+    ldr x10, [x10]
     str x19, [x10, x9, lsl #3]
     LOAD_ADDR x10, op_arg0
+    ldr x10, [x10]
     str x20, [x10, x9, lsl #3]
     LOAD_ADDR x10, op_arg1
+    ldr x10, [x10]
     str x21, [x10, x9, lsl #3]
     LOAD_ADDR x10, op_arg2
+    ldr x10, [x10]
     str x22, [x10, x9, lsl #3]
     LOAD_ADDR x10, op_arg3
+    ldr x10, [x10]
     str x24, [x10, x9, lsl #3]
     LOAD_ADDR x10, op_arg4
+    ldr x10, [x10]
     str x25, [x10, x9, lsl #3]
     add x9, x9, #1
     str x9, [x23]
@@ -614,6 +658,7 @@ Lrecord_operation_common:
     b Lrecord_op_return
 
 Lrecord_op_return:
+    ldp x25, x26, [sp], #16
     ldp x23, x24, [sp], #16
     ldp x21, x22, [sp], #16
     ldp x19, x20, [sp], #16
@@ -631,11 +676,11 @@ Lrecord_op_full:
 #ifndef _WIN32
 Lrecord_spawn_op:
     LOAD_ADDR x8, spawn_fn_op_counts
-    ldr x9, [x8, x26, lsl #3]
+    ldr x9, [x8, x15, lsl #3]
     cmp x9, #256
     b.ge Lrecord_spawn_op_full
     mov x11, #256
-    mul x11, x26, x11
+    mul x11, x15, x11
     add x11, x11, x9
     LOAD_ADDR x10, spawn_fn_op_kinds
     str x19, [x10, x11, lsl #3]
@@ -650,7 +695,7 @@ Lrecord_spawn_op:
     LOAD_ADDR x10, spawn_fn_op_arg4
     str x25, [x10, x11, lsl #3]
     add x9, x9, #1
-    str x9, [x8, x26, lsl #3]
+    str x9, [x8, x15, lsl #3]
     mov x0, #0
     b Lrecord_op_return
 
@@ -663,10 +708,171 @@ Lrecord_spawn_op_full:
     ret
 #endif
 
+.global _snc_grow_ops
+// --------------------------------------------------------------------------
+// Grow the malloc-backed op tables (op_kinds + op_arg0..op_arg4). Doubles the
+// current capacity, or allocates the initial SNC_MAX_OPS entries when capacity
+// is 0, preserving existing contents via realloc. All six parallel arrays grow
+// together and op_capacity is updated. This replaces the old fixed "too many
+// operations" cap so the recorded op stream grows on demand.
+//
+// Register contract: _record_operation calls this while holding the op being
+// recorded live in x19,x20,x21,x22,x24,x25 and &op_count in x23. This routine
+// saves/restores x19-x24 and never touches x25, and libc _realloc preserves
+// callee-saved registers, so all of the caller's live state survives. On
+// allocation failure it prints "too many operations" and exits (the same fatal
+// outcome the old fixed cap had, but now only if the machine is truly out of
+// memory).
+// --------------------------------------------------------------------------
+_snc_grow_ops:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+
+    LOAD_ADDR x19, op_capacity
+    ldr x20, [x19]              // old capacity (entries)
+    lsl x21, x20, #1           // new capacity = old * 2
+    cbnz x20, Lgrow_ops_have_cap
+    mov x21, #SNC_MAX_OPS       // first allocation: initial capacity
+Lgrow_ops_have_cap:
+    lsl x22, x21, #3           // new size in bytes = new_cap * 8
+
+    LOAD_ADDR x23, op_kinds
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_ops_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, op_arg0
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_ops_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, op_arg1
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_ops_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, op_arg2
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_ops_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, op_arg3
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_ops_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, op_arg4
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_ops_fail
+    str x0, [x23]
+
+    str x21, [x19]             // op_capacity = new_cap
+
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+Lgrow_ops_fail:
+    LOAD_ADDR x0, msg_too_many_ops
+    mov x1, #2
+    bl _write_cstr_fd
+    mov x0, #1
+    bl _exit
+
+.global _snc_grow_prints
+// --------------------------------------------------------------------------
+// Grow the malloc-backed print/data tables. print_values/print_lengths/
+// print_types are 8 bytes/entry; print_noline is 1 byte/entry. Doubles the
+// current capacity (or allocates the initial SNC_MAX_PRINTS entries when 0),
+// preserving contents via realloc. Uses only its own saved registers (x19-x24)
+// and libc _realloc preserves callee-saved registers, so callers' live values
+// survive. On failure it prints "too many print statements" and exits.
+// --------------------------------------------------------------------------
+_snc_grow_prints:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+
+    LOAD_ADDR x19, print_capacity
+    ldr x20, [x19]             // old capacity (entries)
+    lsl x21, x20, #1           // new capacity = old * 2
+    cbnz x20, Lgrow_pr_have_cap
+    mov x21, #SNC_MAX_PRINTS    // first allocation: initial capacity
+Lgrow_pr_have_cap:
+    lsl x22, x21, #3           // 8-byte arrays: bytes = new_cap * 8
+
+    LOAD_ADDR x23, print_values
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_pr_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, print_lengths
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_pr_fail
+    str x0, [x23]
+
+    LOAD_ADDR x23, print_types
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_pr_fail
+    str x0, [x23]
+
+    // print_noline: 1 byte per entry (bytes = new_cap * 1)
+    LOAD_ADDR x23, print_noline
+    ldr x0, [x23]
+    mov x1, x21
+    bl _realloc
+    cbz x0, Lgrow_pr_fail
+    str x0, [x23]
+
+    str x21, [x19]             // print_capacity = new_cap
+
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+Lgrow_pr_fail:
+    LOAD_ADDR x0, msg_too_many_prints
+    mov x1, #2
+    bl _write_cstr_fd
+    mov x0, #1
+    bl _exit
+
 .global _allocate_temp_var
 _allocate_temp_var:
     LOAD_ADDR x9, var_count
     ldr x0, [x9]
+    // Hard cap: without this check the zero-stores below silently write
+    // past the 512-entry tables into adjacent storage (corrupting e.g.
+    // var_name_ptrs), causing wild pointer crashes much later.
+    cmp x0, #SNC_MAX_VARS
+    b.ge Lalloc_temp_full
     add x1, x0, #1
     str x1, [x9]
 
@@ -683,4 +889,27 @@ Lalloc_temp_meta:
     
     LOAD_ADDR x10, var_lengths
     str xzr, [x10, x0, lsl #3]
+
+    // CRITICAL: also clear this temp's NAME length and pointer. Previously
+    // only var_types/var_lengths were zeroed, leaving var_name_lens/
+    // var_name_ptrs holding stale garbage for the reused slot. When
+    // _lookup_variable later scans every variable, a temp whose garbage
+    // name length happened to equal the query length made it call
+    // _match_span_span on a garbage name pointer -> intermittent SIGSEGV
+    // (the "match_span_span" crashes seen in the example sweep). Zeroing
+    // the name length makes a temp never match a real (non-empty) name
+    // lookup, and _match_span_span never dereferences a zero-length span.
+    LOAD_ADDR x10, var_name_lens
+    str xzr, [x10, x0, lsl #3]
+    LOAD_ADDR x10, var_name_ptrs
+    str xzr, [x10, x0, lsl #3]
     ret
+
+Lalloc_temp_full:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    LOAD_ADDR x0, msg_too_many_vars
+    mov x1, #2
+    bl _write_cstr_fd
+    mov x0, #1
+    bl _exit

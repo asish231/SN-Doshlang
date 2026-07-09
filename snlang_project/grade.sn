@@ -1,0 +1,32 @@
+// models/grade.sn
+// Grade model - converts numeric score to letter grade
+
+fn letter_grade(int score) -> str {
+    if (score >= 90) {
+        str g = "A"
+        return g
+    }
+    if (score >= 80) {
+        str g = "B"
+        return g
+    }
+    if (score >= 70) {
+        str g = "C"
+        return g
+    }
+    if (score >= 60) {
+        str g = "D"
+        return g
+    }
+    str g = "F"
+    return g
+}
+
+// Returns 1 if passing, 0 if not (bool return type is buggy in compiler)
+fn is_passing(int score) -> int {
+    int passing = 0
+    if (score >= 60) {
+        passing = 1
+    }
+    return passing
+}

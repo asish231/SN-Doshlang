@@ -1,0 +1,48 @@
+// logic/report.sn
+// Report generation - prints formatted student report cards
+
+fn print_divider() {
+    str line = "--------------------------------"
+    print(line)
+}
+
+fn print_subject_score(str subject, int score) {
+    str label = "{subject}: {score}"
+    print(label)
+}
+
+fn print_report_header(str name, int student_id) {
+    str header = "REPORT CARD"
+    print(header)
+    str id_line = "Student  : {name}"
+    print(id_line)
+    str id_num = "ID       : {student_id}"
+    print(id_num)
+}
+
+fn print_summary(int avg, str grade, int promoted) {
+    str avg_line = "Average  : {avg}"
+    print(avg_line)
+    str grade_line = "Grade    : {grade}"
+    print(grade_line)
+    if (promoted) {
+        str status = "Status   : PROMOTED"
+        print(status)
+    } else {
+        str status = "Status   : HELD BACK"
+        print(status)
+    }
+}
+
+fn print_class_summary(int total_students, int passed, int failed) {
+    str sep = "================================"
+    print(sep)
+    str title = "CLASS SUMMARY"
+    print(title)
+    str t = "Total Students : {total_students}"
+    print(t)
+    str p = "Passed         : {passed}"
+    print(p)
+    str f = "Failed         : {failed}"
+    print(f)
+}

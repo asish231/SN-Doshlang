@@ -1,0 +1,7 @@
+use math_utils
+
+fn main() {
+    int total = 450
+    str g = letter_grade(avg_of5(total))
+    print(g)
+}

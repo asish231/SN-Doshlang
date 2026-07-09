@@ -1,0 +1,53 @@
+// models/grade.sn
+// Grade model - converts numeric score to letter grade and GPA points
+
+fn letter_grade(int score) -> str {
+    if (score >= 90) {
+        str g = "A"
+        return g
+    }
+    if (score >= 80) {
+        str g = "B"
+        return g
+    }
+    if (score >= 70) {
+        str g = "C"
+        return g
+    }
+    if (score >= 60) {
+        str g = "D"
+        return g
+    }
+    str g = "F"
+    return g
+}
+
+fn gpa_points(int score) -> int {
+    // Returns GPA * 10 to avoid decimals (e.g. 40 = 4.0, 35 = 3.5)
+    if (score >= 90) {
+        int pts = 40
+        return pts
+    }
+    if (score >= 80) {
+        int pts = 30
+        return pts
+    }
+    if (score >= 70) {
+        int pts = 20
+        return pts
+    }
+    if (score >= 60) {
+        int pts = 10
+        return pts
+    }
+    int pts = 0
+    return pts
+}
+
+fn is_passing(int score) -> bool {
+    bool passing = false
+    if (score >= 60) {
+        passing = true
+    }
+    return passing
+}

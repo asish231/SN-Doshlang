@@ -27,6 +27,24 @@ clean:
 run: $(SNC)
 	./$(SNC) examples/math.sn
 
+# Real, output-asserting regression tests. Unlike `test` (which only checks
+# exit codes and is therefore a "false green"), `assert` compiles + runs small
+# programs and diffs their stdout against expected values. See
+# tests/assert_suite.sh.
+.PHONY: assert
+assert: $(SNC)
+	./tests/assert_suite.sh
+
+# Self-hosting stage 1 (roadmap M3): build the SNlang-written tokenizer
+# (selfhost/lexer.sn) WITH the current assembly compiler, then run it on a
+# sample .sn source to dump its tokens. This is the first real self-hosting
+# component -- see selfhost/README.md and SELF_HOSTING_ROADMAP.md.
+.PHONY: selfhost
+selfhost: $(SNC)
+	./$(SNC) selfhost/lexer.sn > $(OUTDIR)/snc_selfhost_lexer.s
+	$(CC) $(OUTDIR)/snc_selfhost_lexer.s -o $(OUTDIR)/snc_selfhost_lexer$(EXEEXT)
+	$(OUTDIR)/snc_selfhost_lexer$(EXEEXT) selfhost/sample.sn
+
 example: $(SNC)
 	./$(SNC) examples/math.sn > $(OUTDIR)/snc_example.s
 	$(CC) $(OUTDIR)/snc_example.s -o $(OUTDIR)/snc_example$(EXEEXT)

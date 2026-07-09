@@ -1,0 +1,79 @@
+// utils/math_utils.sn
+// Math helpers - division is buggy in compiler so average uses range lookup
+
+fn max_of(int a, int b) -> int {
+    if (a > b) {
+        return a
+    }
+    return b
+}
+
+fn min_of(int a, int b) -> int {
+    if (a < b) {
+        return a
+    }
+    return b
+}
+
+// Approximate avg of 5 scores (total/5) via range lookup
+// Covers typical score totals from 200-500
+fn avg_of5(int total) -> int {
+    int result = 0
+    if (total >= 495) { result = 99 }
+    if (total >= 490 and total < 495) { result = 98 }
+    if (total >= 485 and total < 490) { result = 97 }
+    if (total >= 480 and total < 485) { result = 96 }
+    if (total >= 475 and total < 480) { result = 95 }
+    if (total >= 470 and total < 475) { result = 94 }
+    if (total >= 465 and total < 470) { result = 93 }
+    if (total >= 460 and total < 465) { result = 92 }
+    if (total >= 455 and total < 460) { result = 91 }
+    if (total >= 450 and total < 455) { result = 90 }
+    if (total >= 445 and total < 450) { result = 89 }
+    if (total >= 440 and total < 445) { result = 88 }
+    if (total >= 435 and total < 440) { result = 87 }
+    if (total >= 430 and total < 435) { result = 86 }
+    if (total >= 425 and total < 430) { result = 85 }
+    if (total >= 420 and total < 425) { result = 84 }
+    if (total >= 415 and total < 420) { result = 83 }
+    if (total >= 410 and total < 415) { result = 82 }
+    if (total >= 405 and total < 410) { result = 81 }
+    if (total >= 400 and total < 405) { result = 80 }
+    if (total >= 395 and total < 400) { result = 79 }
+    if (total >= 390 and total < 395) { result = 78 }
+    if (total >= 385 and total < 390) { result = 77 }
+    if (total >= 380 and total < 385) { result = 76 }
+    if (total >= 375 and total < 380) { result = 75 }
+    if (total >= 370 and total < 375) { result = 74 }
+    if (total >= 365 and total < 370) { result = 73 }
+    if (total >= 360 and total < 365) { result = 72 }
+    if (total >= 355 and total < 360) { result = 71 }
+    if (total >= 350 and total < 355) { result = 70 }
+    if (total >= 345 and total < 350) { result = 69 }
+    if (total >= 340 and total < 345) { result = 68 }
+    if (total >= 335 and total < 340) { result = 67 }
+    if (total >= 330 and total < 335) { result = 66 }
+    if (total >= 325 and total < 330) { result = 65 }
+    if (total >= 320 and total < 325) { result = 64 }
+    if (total >= 315 and total < 320) { result = 63 }
+    if (total >= 310 and total < 315) { result = 62 }
+    if (total >= 305 and total < 310) { result = 61 }
+    if (total >= 300 and total < 305) { result = 60 }
+    if (total >= 295 and total < 300) { result = 59 }
+    if (total >= 290 and total < 295) { result = 58 }
+    if (total >= 285 and total < 290) { result = 57 }
+    if (total >= 280 and total < 285) { result = 56 }
+    if (total >= 275 and total < 280) { result = 55 }
+    if (total >= 270 and total < 275) { result = 54 }
+    if (total >= 265 and total < 270) { result = 53 }
+    if (total >= 260 and total < 265) { result = 52 }
+    if (total >= 255 and total < 260) { result = 51 }
+    if (total >= 250 and total < 255) { result = 50 }
+    if (total >= 245 and total < 250) { result = 49 }
+    if (total >= 240 and total < 245) { result = 48 }
+    if (total >= 235 and total < 240) { result = 47 }
+    if (total >= 230 and total < 235) { result = 46 }
+    if (total >= 225 and total < 230) { result = 45 }
+    if (total < 225) { result = 44 }
+    return result
+}

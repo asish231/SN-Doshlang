@@ -1,0 +1,26 @@
+// spawn + wait(): start background threads, then block until they all finish.
+//
+// `spawn fn()` runs fn on a background OS thread. Previously threads were
+// detached (fire-and-forget), so a worker's output was routinely lost when
+// main reached the end first. `wait()` now joins every outstanding spawned
+// thread and returns how many were joined, making the output deterministic.
+
+fn worker_one() {
+    print("worker one done")
+}
+
+fn worker_two() {
+    print("worker two done")
+}
+
+fn main() {
+    spawn worker_one()
+    spawn worker_two()
+
+    // Block here until both background threads have finished. Without this,
+    // "all done" could print before (or instead of) the workers' output.
+    int joined = wait()
+
+    print("all done")
+    print(joined)
+}
