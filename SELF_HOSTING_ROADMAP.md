@@ -2,7 +2,7 @@
 
 #### Executive summary
 
-`snc` is already a substantial real compiler written in hand-written ARM64 assembly. Per the verified current state, it builds cleanly, passes `make assert` (`236/236`), and compiles/links/runs `156/163` examples, where the remaining `7` are deliberate negative tests.
+`snc` is already a substantial real compiler written in hand-written ARM64 assembly. Per the verified current state, it builds cleanly and passes `make assert` (`254/254`). Typed pthread-backed `task<T>` / `async` / `await` is available for zero-argument functions returning `int`, `bool`, or `str`, with task states/errors, timed waits, cooperative cancellation, and structured task scopes.
 
 That means the main self-hosting blocker is no longer “the language is too small.” The verified feature set covers the essentials for a compiler implementation, and the driver plumbing, dynamic compiler/runtime pools, managed phase arena, and growable StringBuilder are implemented. The remaining work is the SNlang-level vector/dict convenience layer, then the self-hosted parser, code generator, and fixed-point bootstrap proof.
 

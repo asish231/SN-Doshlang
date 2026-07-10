@@ -1,0 +1,29 @@
+fn cancellable() -> int {
+    while (not cancel_requested()) {}
+    return 7
+}
+
+fn broken() -> int {
+    throw("task failed")
+    return 0
+}
+
+fn main() {
+    scope {
+        task<int> work = async cancellable()
+        if (not task_wait(work, 0)) {
+            print("timed out")
+            print(cancel(work))
+        }
+        print(task_wait(work, 1000))
+        print(task_state(work))
+        print(await(work))
+    }
+
+    scope {
+        task<int> failed = async broken()
+        print(task_wait(failed, 1000))
+        print(task_state(failed))
+        print(task_error(failed))
+    }
+}

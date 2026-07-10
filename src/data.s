@@ -21,6 +21,7 @@
 .global msg_unknown_var
 .global msg_duplicate_var
 .global msg_loop_control
+.global msg_scope_control
 .global msg_divide_zero
 .global msg_const_assign
 .global msg_expected_type
@@ -103,6 +104,15 @@
 .global kw_builder_clear
 .global kw_builder_length
 .global kw_chan
+.global kw_task
+.global kw_async
+.global kw_await
+.global kw_task_state
+.global kw_task_error
+.global kw_task_wait
+.global kw_cancel
+.global kw_cancel_requested
+.global kw_scope
 .global kw_send
 .global kw_receive
 .global kw_close
@@ -186,6 +196,8 @@
 .global spawn_capture_fn_id
 .global spawn_wait_used
 .global channel_count
+.global task_runtime_used
+.global task_scope_depth
 .global primary_module_name
 .global primary_module_name_len
 .global forced_call_fn_id_plus1
@@ -269,6 +281,19 @@
 .global asm_call_chan_receive
 .global asm_call_chan_close
 .global asm_channel_init
+.global asm_task_runtime
+.global asm_task_runtime_v2
+.global asm_call_task_go
+.global asm_call_task_await
+.global asm_call_task_wait_all
+.global asm_call_task_state
+.global asm_call_task_error
+.global asm_call_task_wait
+.global asm_call_task_cancel
+.global asm_call_task_cancel_requested
+.global asm_call_task_scope_begin
+.global asm_call_task_scope_end
+.global asm_call_task_fail_current
 #ifdef _WIN32
 #else
 .global asm_spawn_thread_runtime
@@ -611,6 +636,7 @@ msg_unknown_stmt:  .asciz "error: unknown statement on "
 msg_unknown_var:   .asciz "error: unknown variable on "
 msg_duplicate_var: .asciz "error: duplicate variable on "
 msg_loop_control:  .asciz "error: loop control outside loop on "
+msg_scope_control: .asciz "error: control flow exits task scope on "
 msg_divide_zero:   .asciz "error: division by zero on "
 msg_const_assign:  .asciz "error: cannot assign to const on "
 msg_expected_type: .asciz "error: expected type on "
@@ -693,6 +719,15 @@ kw_builder_string: .asciz "builder_string"
 kw_builder_clear:  .asciz "builder_clear"
 kw_builder_length: .asciz "builder_length"
 kw_chan:           .asciz "chan"
+kw_task:           .asciz "task"
+kw_async:          .asciz "async"
+kw_await:          .asciz "await"
+kw_task_state:     .asciz "task_state"
+kw_task_error:     .asciz "task_error"
+kw_task_wait:      .asciz "task_wait"
+kw_cancel:         .asciz "cancel"
+kw_cancel_requested: .asciz "cancel_requested"
+kw_scope:          .asciz "scope"
 kw_send:           .asciz "send"
 kw_receive:        .asciz "receive"
 kw_close:          .asciz "close"
@@ -777,7 +812,7 @@ asm_header:
 #ifdef _WIN32
     .asciz ".global main\n.align 4\n.extern printf\n.extern read\n.extern write\n.extern malloc\n.extern free\n.extern open\n.extern close\n.extern lseek\n.extern str_concat\n.extern int_to_cstr\n.extern file_read\n.extern file_write\n\n.data\n.align 3\nsnc_argc: .quad 0\nsnc_argv: .quad 0\n\n.text\nmain:\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    adrp x9, snc_argc\n    add x9, x9, :lo12:snc_argc\n    str x0, [x9]\n    adrp x9, snc_argv\n    add x9, x9, :lo12:snc_argv\n    str x1, [x9]\n"
 #else
-    .asciz ".global _main\n.align 4\n.extern _printf\n.extern _read\n.extern _write\n.extern _malloc\n.extern _free\n.extern _open\n.extern _close\n.extern _lseek\n.extern _str_concat\n.extern _int_to_cstr\n.extern _file_read\n.extern _file_write\n.extern _pthread_create\n.extern _pthread_join\n\n.data\n.align 3\n_snc_argc: .quad 0\n_snc_argv: .quad 0\n\n.text\n_main:\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    adrp x9, _snc_argc@PAGE\n    add x9, x9, _snc_argc@PAGEOFF\n    str x0, [x9]\n    adrp x9, _snc_argv@PAGE\n    add x9, x9, _snc_argv@PAGEOFF\n    str x1, [x9]\n"
+    .asciz ".global _main\n.align 4\n.extern _printf\n.extern _read\n.extern _write\n.extern _malloc\n.extern _free\n.extern _open\n.extern _close\n.extern _lseek\n.extern _str_concat\n.extern _int_to_cstr\n.extern _file_read\n.extern _file_write\n.extern _pthread_create\n.extern _pthread_join\n.extern _pthread_self\n.extern _pthread_exit\n.extern _nanosleep\n\n.data\n.align 3\n_snc_argc: .quad 0\n_snc_argv: .quad 0\n\n.text\n_main:\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    adrp x9, _snc_argc@PAGE\n    add x9, x9, _snc_argc@PAGEOFF\n    str x0, [x9]\n    adrp x9, _snc_argv@PAGE\n    add x9, x9, _snc_argv@PAGEOFF\n    str x1, [x9]\n"
 #endif
 
 // Managed runtime heap used by values created by SNlang's string/file helpers
@@ -1225,6 +1260,101 @@ asm_channel_init:
     .asciz "    adrp x9, snc_chan_heads\n    add x9, x9, :lo12:snc_chan_heads\n    str xzr, [x9, x0, lsl #3]\n    adrp x9, snc_chan_tails\n    add x9, x9, :lo12:snc_chan_tails\n    str xzr, [x9, x0, lsl #3]\n    adrp x9, snc_chan_counts\n    add x9, x9, :lo12:snc_chan_counts\n    str xzr, [x9, x0, lsl #3]\n    adrp x9, snc_chan_closed\n    add x9, x9, :lo12:snc_chan_closed\n    str xzr, [x9, x0, lsl #3]\n"
 #else
     .asciz "    adrp x9, _snc_chan_heads@PAGE\n    add x9, x9, _snc_chan_heads@PAGEOFF\n    str xzr, [x9, x0, lsl #3]\n    adrp x9, _snc_chan_tails@PAGE\n    add x9, x9, _snc_chan_tails@PAGEOFF\n    str xzr, [x9, x0, lsl #3]\n    adrp x9, _snc_chan_counts@PAGE\n    add x9, x9, _snc_chan_counts@PAGEOFF\n    str xzr, [x9, x0, lsl #3]\n    adrp x9, _snc_chan_closed@PAGE\n    add x9, x9, _snc_chan_closed@PAGEOFF\n    str xzr, [x9, x0, lsl #3]\n"
+#endif
+asm_call_task_go:
+#ifdef _WIN32
+    .asciz "    mov x0, #0\n"
+#else
+    .asciz "    bl _snc_task_reap_stale_tids\n    bl _snc_task_go\n"
+#endif
+asm_call_task_await:
+#ifdef _WIN32
+    .asciz "    mov x0, #0\n"
+#else
+    .asciz "    bl _snc_task_await\n"
+#endif
+asm_call_task_wait_all:
+#ifdef _WIN32
+    .asciz ""
+#else
+    .asciz "    bl _snc_task_wait_all\n"
+#endif
+asm_call_task_state:
+#ifdef _WIN32
+    .asciz "    mov x0, #0\n"
+#else
+    .asciz "    bl _snc_task_state\n"
+#endif
+asm_call_task_error:
+#ifdef _WIN32
+    .asciz "    mov x0, #0\n"
+#else
+    .asciz "    bl _snc_task_error\n"
+#endif
+asm_call_task_wait:
+#ifdef _WIN32
+    .asciz "    mov x0, #0\n"
+#else
+    .asciz "    bl _snc_task_wait\n"
+#endif
+asm_call_task_cancel:
+#ifdef _WIN32
+    .asciz "    mov x0, #0\n"
+#else
+    .asciz "    bl _snc_task_cancel\n"
+#endif
+asm_call_task_cancel_requested:
+#ifdef _WIN32
+    .asciz "    mov x0, #0\n"
+#else
+    .asciz "    bl _snc_task_cancel_requested\n"
+#endif
+asm_call_task_scope_begin:
+#ifdef _WIN32
+    .asciz "    mov x0, #0\n"
+#else
+    .asciz "    bl _snc_task_scope_begin\n"
+#endif
+asm_call_task_scope_end:
+#ifdef _WIN32
+    .asciz ""
+#else
+    .asciz "    bl _snc_task_scope_end\n"
+#endif
+asm_call_task_fail_current:
+#ifdef _WIN32
+    .asciz ""
+#else
+    .asciz "    bl _snc_task_fail_current\n"
+#endif
+// Result-bearing tasks use their own pthread registry, separate from raw
+// spawn/wait tids. Handles are index+1, and repeated await reads the cache.
+asm_task_runtime:
+#ifdef _WIN32
+    .asciz ""
+#else
+    .asciz "\n.text\n.align 4\n.global _snc_task_trampoline\n_snc_task_trampoline:\n    stp x29, x30, [sp, #-48]!\n    mov x29, sp\n    stp x19, x20, [sp, #16]\n    str x21, [sp, #32]\n    mov x19, x0\n    mov w0, w19\n    bl _snc_spawn_dispatch\n    mov x20, x0\n    lsr x21, x19, #32\n    adrp x9, _snc_task_results@PAGE\n    add x9, x9, _snc_task_results@PAGEOFF\n    str x20, [x9, x21, lsl #3]\n    mov x0, xzr\n    ldr x21, [sp, #32]\n    ldp x19, x20, [sp, #16]\n    ldp x29, x30, [sp], #48\n    ret\n\n.align 4\n.global _snc_task_go\n_snc_task_go:\n    stp x29, x30, [sp, #-64]!\n    mov x29, sp\n    stp x19, x20, [sp, #16]\n    stp x21, x22, [sp, #32]\n    mov x19, x0\n    adrp x20, _snc_task_count@PAGE\n    add x20, x20, _snc_task_count@PAGEOFF\n    ldr x21, [x20]\n    cmp x21, #256\n    b.ge L_snc_tg_fail\n    adrp x9, _snc_task_results@PAGE\n    add x9, x9, _snc_task_results@PAGEOFF\n    str xzr, [x9, x21, lsl #3]\n    adrp x9, _snc_task_joined@PAGE\n    add x9, x9, _snc_task_joined@PAGEOFF\n    str xzr, [x9, x21, lsl #3]\n    lsl x22, x21, #32\n    orr x22, x22, x19\n    adrp x9, _snc_task_tids@PAGE\n    add x9, x9, _snc_task_tids@PAGEOFF\n    add x0, x9, x21, lsl #3\n    mov x1, xzr\n    adrp x2, _snc_task_trampoline@PAGE\n    add x2, x2, _snc_task_trampoline@PAGEOFF\n    mov x3, x22\n    bl _pthread_create\n    cbnz w0, L_snc_tg_fail\n    add x9, x21, #1\n    str x9, [x20]\n    mov x0, x9\n    b L_snc_tg_done\nL_snc_tg_fail:\n    mov x0, xzr\nL_snc_tg_done:\n    ldp x21, x22, [sp, #32]\n    ldp x19, x20, [sp, #16]\n    ldp x29, x30, [sp], #64\n    ret\n\n.align 4\n.global _snc_task_await\n_snc_task_await:\n    stp x29, x30, [sp, #-48]!\n    mov x29, sp\n    stp x19, x20, [sp, #16]\n    str x21, [sp, #32]\n    cbz x0, L_snc_ta_zero\n    sub x19, x0, #1\n    adrp x9, _snc_task_count@PAGE\n    add x9, x9, _snc_task_count@PAGEOFF\n    ldr x10, [x9]\n    cmp x19, x10\n    b.hs L_snc_ta_zero\n    adrp x20, _snc_task_joined@PAGE\n    add x20, x20, _snc_task_joined@PAGEOFF\n    ldr x9, [x20, x19, lsl #3]\n    cbnz x9, L_snc_ta_result\n    adrp x9, _snc_task_tids@PAGE\n    add x9, x9, _snc_task_tids@PAGEOFF\n    ldr x0, [x9, x19, lsl #3]\n    mov x1, xzr\n    bl _pthread_join\n    mov x9, #1\n    str x9, [x20, x19, lsl #3]\nL_snc_ta_result:\n    adrp x9, _snc_task_results@PAGE\n    add x9, x9, _snc_task_results@PAGEOFF\n    ldr x0, [x9, x19, lsl #3]\n    b L_snc_ta_done\nL_snc_ta_zero:\n    mov x0, xzr\nL_snc_ta_done:\n    ldr x21, [sp, #32]\n    ldp x19, x20, [sp, #16]\n    ldp x29, x30, [sp], #48\n    ret\n\n.align 4\n.global _snc_task_wait_all\n_snc_task_wait_all:\n    stp x29, x30, [sp, #-48]!\n    mov x29, sp\n    stp x19, x20, [sp, #16]\n    str x21, [sp, #32]\n    adrp x9, _snc_task_count@PAGE\n    add x9, x9, _snc_task_count@PAGEOFF\n    ldr x19, [x9]\n    mov x20, #0\nL_snc_twa_loop:\n    cmp x20, x19\n    b.ge L_snc_twa_done\n    adrp x21, _snc_task_joined@PAGE\n    add x21, x21, _snc_task_joined@PAGEOFF\n    ldr x9, [x21, x20, lsl #3]\n    cbnz x9, L_snc_twa_next\n    adrp x9, _snc_task_tids@PAGE\n    add x9, x9, _snc_task_tids@PAGEOFF\n    ldr x0, [x9, x20, lsl #3]\n    mov x1, xzr\n    bl _pthread_join\n    mov x9, #1\n    str x9, [x21, x20, lsl #3]\nL_snc_twa_next:\n    add x20, x20, #1\n    b L_snc_twa_loop\nL_snc_twa_done:\n    ldr x21, [sp, #32]\n    ldp x19, x20, [sp, #16]\n    ldp x29, x30, [sp], #48\n    ret\n\n.data\n.align 3\n_snc_task_count:\n    .quad 0\n_snc_task_tids:\n    .space 2048\n_snc_task_results:\n    .space 2048\n_snc_task_joined:\n    .space 2048\n"
+#endif
+// Task runtime v2 adds observable states, task-local errors, bounded waits,
+// cooperative cancellation, and structured scope joins. It supersedes the
+// v1 string above without changing task handles or the await ABI.
+asm_task_runtime_v2:
+#ifdef _WIN32
+    .asciz ""
+#else
+    .ascii "\n.text\n.align 4\n.global _snc_task_lock_acquire\n_snc_task_lock_acquire:\n    adrp x9, _snc_task_lock@PAGE\n    add x9, x9, _snc_task_lock@PAGEOFF\nL_snc_tlock_loop:\n    ldaxr x10, [x9]\n    cbnz x10, L_snc_tlock_loop\n    mov x10, #1\n    stlxr w11, x10, [x9]\n    cbnz w11, L_snc_tlock_loop\n    ret\n\n.align 4\n.global _snc_task_lock_release\n_snc_task_lock_release:\n    adrp x9, _snc_task_lock@PAGE\n    add x9, x9, _snc_task_lock@PAGEOFF\n    stlr xzr, [x9]\n    ret\n"
+    .ascii "\n.align 4\n.global _snc_task_trampoline\n_snc_task_trampoline:\n    stp x29, x30, [sp, #-48]!\n    mov x29, sp\n    stp x19, x20, [sp, #16]\n    str x21, [sp, #32]\n    mov x19, x0\n    mov w0, w19\n    bl _snc_spawn_dispatch\n    mov x20, x0\n    lsr x21, x19, #32\n    adrp x9, _snc_task_results@PAGE\n    add x9, x9, _snc_task_results@PAGEOFF\n    str x20, [x9, x21, lsl #3]\n    adrp x9, _snc_task_states@PAGE\n    add x9, x9, _snc_task_states@PAGEOFF\n    add x9, x9, x21, lsl #3\n    ldar x10, [x9]\n    cmp x10, #3\n    b.ne L_snc_tt_complete\n    mov x10, #4\n    b L_snc_tt_publish\nL_snc_tt_complete:\n    cmp x10, #5\n    b.eq L_snc_tt_return\n    mov x10, #2\nL_snc_tt_publish:\n    stlr x10, [x9]\nL_snc_tt_return:\n    mov x0, xzr\n    ldr x21, [sp, #32]\n    ldp x19, x20, [sp, #16]\n    ldp x29, x30, [sp], #48\n    ret\n"
+    .ascii "\n.align 4\n.global _snc_task_go\n_snc_task_go:\n    stp x29, x30, [sp, #-80]!\n    mov x29, sp\n    stp x19, x20, [sp, #16]\n    stp x21, x22, [sp, #32]\n    stp x23, x24, [sp, #48]\n    mov x19, x0\n    bl _snc_task_lock_acquire\n    adrp x20, _snc_task_count@PAGE\n    add x20, x20, _snc_task_count@PAGEOFF\n    ldr x21, [x20]\n    cmp x21, #256\n    b.ge L_snc_tg_full\n    add x22, x21, #1\n    str x22, [x20]\n    adrp x9, _snc_task_results@PAGE\n    add x9, x9, _snc_task_results@PAGEOFF\n    str xzr, [x9, x21, lsl #3]\n    adrp x9, _snc_task_joined@PAGE\n    add x9, x9, _snc_task_joined@PAGEOFF\n    str xzr, [x9, x21, lsl #3]\n    adrp x9, _snc_task_states@PAGE\n    add x9, x9, _snc_task_states@PAGEOFF\n    mov x10, #1\n    str x10, [x9, x21, lsl #3]\n    adrp x9, _snc_task_errors@PAGE\n    add x9, x9, _snc_task_errors@PAGEOFF\n    adrp x10, _snc_task_empty_error@PAGE\n    add x10, x10, _snc_task_empty_error@PAGEOFF\n    str x10, [x9, x21, lsl #3]\n    bl _snc_task_lock_release\n    lsl x23, x21, #32\n    orr x23, x23, x19\n    adrp x9, _snc_task_tids@PAGE\n    add x9, x9, _snc_task_tids@PAGEOFF\n    add x0, x9, x21, lsl #3\n    mov x1, xzr\n    adrp x2, _snc_task_trampoline@PAGE\n    add x2, x2, _snc_task_trampoline@PAGEOFF\n    mov x3, x23\n    bl _pthread_create\n    cbz w0, L_snc_tg_ok\n    mov x24, x0\n    adrp x9, _snc_task_errors@PAGE\n    add x9, x9, _snc_task_errors@PAGEOFF\n    adrp x10, _snc_task_launch_error@PAGE\n    add x10, x10, _snc_task_launch_error@PAGEOFF\n    str x10, [x9, x21, lsl #3]\n    adrp x9, _snc_task_states@PAGE\n    add x9, x9, _snc_task_states@PAGEOFF\n    add x9, x9, x21, lsl #3\n    mov x10, #5\n    stlr x10, [x9]\n    adrp x9, _snc_task_joined@PAGE\n    add x9, x9, _snc_task_joined@PAGEOFF\n    mov x10, #1\n    str x10, [x9, x21, lsl #3]\nL_snc_tg_ok:\n    add x0, x21, #1\n    b L_snc_tg_done\nL_snc_tg_full:\n    bl _snc_task_lock_release\n    mov x0, xzr\nL_snc_tg_done:\n    ldp x23, x24, [sp, #48]\n    ldp x21, x22, [sp, #32]\n    ldp x19, x20, [sp, #16]\n    ldp x29, x30, [sp], #80\n    ret\n"
+    .ascii "\n.align 4\n.global _snc_task_state\n_snc_task_state:\n    cbz x0, L_snc_ts_invalid\n    sub x9, x0, #1\n    adrp x10, _snc_task_count@PAGE\n    add x10, x10, _snc_task_count@PAGEOFF\n    ldr x10, [x10]\n    cmp x9, x10\n    b.hs L_snc_ts_invalid\n    adrp x10, _snc_task_states@PAGE\n    add x10, x10, _snc_task_states@PAGEOFF\n    add x10, x10, x9, lsl #3\n    ldar x0, [x10]\n    ret\nL_snc_ts_invalid:\n    mov x0, xzr\n    ret\n\n.align 4\n.global _snc_task_error\n_snc_task_error:\n    cbz x0, L_snc_te_invalid\n    sub x9, x0, #1\n    adrp x10, _snc_task_count@PAGE\n    add x10, x10, _snc_task_count@PAGEOFF\n    ldr x10, [x10]\n    cmp x9, x10\n    b.hs L_snc_te_invalid\n    adrp x10, _snc_task_errors@PAGE\n    add x10, x10, _snc_task_errors@PAGEOFF\n    ldr x0, [x10, x9, lsl #3]\n    ret\nL_snc_te_invalid:\n    adrp x0, _snc_task_invalid_error@PAGE\n    add x0, x0, _snc_task_invalid_error@PAGEOFF\n    ret\n"
+    .ascii "\n.align 4\n.global _snc_task_cancel\n_snc_task_cancel:\n    cbz x0, L_snc_tc_fail\n    sub x9, x0, #1\n    adrp x10, _snc_task_count@PAGE\n    add x10, x10, _snc_task_count@PAGEOFF\n    ldr x10, [x10]\n    cmp x9, x10\n    b.hs L_snc_tc_fail\n    adrp x10, _snc_task_states@PAGE\n    add x10, x10, _snc_task_states@PAGEOFF\n    add x10, x10, x9, lsl #3\nL_snc_tc_retry:\n    ldaxr x11, [x10]\n    cmp x11, #1\n    b.ne L_snc_tc_not_running\n    mov x11, #3\n    stlxr w12, x11, [x10]\n    cbnz w12, L_snc_tc_retry\n    mov x0, #1\n    ret\nL_snc_tc_not_running:\n    clrex\nL_snc_tc_fail:\n    mov x0, xzr\n    ret\n"
+    .ascii "\n.align 4\n.global _snc_task_cancel_requested\n_snc_task_cancel_requested:\n    stp x29, x30, [sp, #-48]!\n    mov x29, sp\n    stp x19, x20, [sp, #16]\n    str x21, [sp, #32]\n    bl _pthread_self\n    mov x19, x0\n    adrp x9, _snc_task_count@PAGE\n    add x9, x9, _snc_task_count@PAGEOFF\n    ldr x20, [x9]\n    mov x21, #0\nL_snc_tcr_scan:\n    cmp x21, x20\n    b.ge L_snc_tcr_no\n    adrp x9, _snc_task_tids@PAGE\n    add x9, x9, _snc_task_tids@PAGEOFF\n    ldr x10, [x9, x21, lsl #3]\n    cmp x10, x19\n    b.eq L_snc_tcr_found\n    add x21, x21, #1\n    b L_snc_tcr_scan\nL_snc_tcr_found:\n    adrp x9, _snc_task_states@PAGE\n    add x9, x9, _snc_task_states@PAGEOFF\n    add x9, x9, x21, lsl #3\n    ldar x10, [x9]\n    cmp x10, #3\n    cset x0, eq\n    b L_snc_tcr_done\nL_snc_tcr_no:\n    mov x0, xzr\nL_snc_tcr_done:\n    ldr x21, [sp, #32]\n    ldp x19, x20, [sp, #16]\n    ldp x29, x30, [sp], #48\n    ret\n"
+    .ascii "\n.align 4\n.global _snc_task_fail_current\n_snc_task_fail_current:\n    stp x29, x30, [sp, #-64]!\n    mov x29, sp\n    stp x19, x20, [sp, #16]\n    stp x21, x22, [sp, #32]\n    mov x19, x0\n    bl _pthread_self\n    mov x20, x0\n    adrp x9, _snc_task_count@PAGE\n    add x9, x9, _snc_task_count@PAGEOFF\n    ldr x21, [x9]\n    mov x22, #0\nL_snc_tfc_scan:\n    cmp x22, x21\n    b.ge L_snc_tfc_not_task\n    adrp x9, _snc_task_tids@PAGE\n    add x9, x9, _snc_task_tids@PAGEOFF\n    ldr x10, [x9, x22, lsl #3]\n    cmp x10, x20\n    b.eq L_snc_tfc_found\n    add x22, x22, #1\n    b L_snc_tfc_scan\nL_snc_tfc_found:\n    adrp x9, _snc_task_errors@PAGE\n    add x9, x9, _snc_task_errors@PAGEOFF\n    str x19, [x9, x22, lsl #3]\n    adrp x9, _snc_task_states@PAGE\n    add x9, x9, _snc_task_states@PAGEOFF\n    add x9, x9, x22, lsl #3\n    mov x10, #5\n    stlr x10, [x9]\n    mov x0, xzr\n    bl _pthread_exit\nL_snc_tfc_not_task:\n    mov x0, xzr\n    ldp x21, x22, [sp, #32]\n    ldp x19, x20, [sp, #16]\n    ldp x29, x30, [sp], #64\n    ret\n"
+    .ascii "\n.align 4\n.global _snc_task_await\n_snc_task_await:\n    stp x29, x30, [sp, #-64]!\n    mov x29, sp\n    stp x19, x20, [sp, #16]\n    stp x21, x22, [sp, #32]\n    cbz x0, L_snc_ta_zero\n    sub x19, x0, #1\n    adrp x9, _snc_task_count@PAGE\n    add x9, x9, _snc_task_count@PAGEOFF\n    ldr x10, [x9]\n    cmp x19, x10\n    b.hs L_snc_ta_zero\n    adrp x20, _snc_task_joined@PAGE\n    add x20, x20, _snc_task_joined@PAGEOFF\n    add x20, x20, x19, lsl #3\nL_snc_ta_claim:\n    ldaxr x9, [x20]\n    cbz x9, L_snc_ta_try_claim\n    cmp x9, #1\n    b.eq L_snc_ta_already\n    clrex\n    b L_snc_ta_claim\nL_snc_ta_already:\n    clrex\n    b L_snc_ta_result\nL_snc_ta_try_claim:\n    mov x9, #2\n    stlxr w10, x9, [x20]\n    cbnz w10, L_snc_ta_claim\n    adrp x9, _snc_task_tids@PAGE\n    add x9, x9, _snc_task_tids@PAGEOFF\n    ldr x0, [x9, x19, lsl #3]\n    cbz x0, L_snc_ta_mark_joined\n    mov x1, xzr\n    bl _pthread_join\n    cbz w0, L_snc_ta_mark_joined\n    adrp x9, _snc_task_errors@PAGE\n    add x9, x9, _snc_task_errors@PAGEOFF\n    adrp x10, _snc_task_join_error@PAGE\n    add x10, x10, _snc_task_join_error@PAGEOFF\n    str x10, [x9, x19, lsl #3]\n    adrp x9, _snc_task_states@PAGE\n    add x9, x9, _snc_task_states@PAGEOFF\n    add x9, x9, x19, lsl #3\n    mov x10, #5\n    stlr x10, [x9]\nL_snc_ta_mark_joined:\n    mov x9, #1\n    stlr x9, [x20]\nL_snc_ta_result:\n    adrp x9, _snc_task_results@PAGE\n    add x9, x9, _snc_task_results@PAGEOFF\n    ldr x0, [x9, x19, lsl #3]\n    b L_snc_ta_done\nL_snc_ta_zero:\n    mov x0, xzr\nL_snc_ta_done:\n    ldp x21, x22, [sp, #32]\n    ldp x19, x20, [sp, #16]\n    ldp x29, x30, [sp], #64\n    ret\n"
+    .ascii "\n.align 4\n.global _snc_task_wait\n_snc_task_wait:\n    stp x29, x30, [sp, #-80]!\n    mov x29, sp\n    stp x19, x20, [sp, #16]\n    stp x21, x22, [sp, #32]\n    mov x19, x0\n    mov x20, x1\n    str xzr, [sp, #48]\n    movz x9, #16960\n    movk x9, #15, lsl #16\n    str x9, [sp, #56]\nL_snc_tw_check:\n    mov x0, x19\n    bl _snc_task_state\n    cbz x0, L_snc_tw_timeout\n    cmp x0, #2\n    b.eq L_snc_tw_ready\n    cmp x0, #4\n    b.eq L_snc_tw_ready\n    cmp x0, #5\n    b.eq L_snc_tw_ready\n    cmp x20, #0\n    b.le L_snc_tw_timeout\n    add x0, sp, #48\n    mov x1, xzr\n    bl _nanosleep\n    sub x20, x20, #1\n    b L_snc_tw_check\nL_snc_tw_ready:\n    mov x0, x19\n    bl _snc_task_await\n    mov x0, #1\n    b L_snc_tw_done\nL_snc_tw_timeout:\n    mov x0, xzr\nL_snc_tw_done:\n    ldp x21, x22, [sp, #32]\n    ldp x19, x20, [sp, #16]\n    ldp x29, x30, [sp], #80\n    ret\n"
+    .ascii "\n.align 4\n.global _snc_task_scope_begin\n_snc_task_scope_begin:\n    adrp x9, _snc_task_count@PAGE\n    add x9, x9, _snc_task_count@PAGEOFF\n    ldr x0, [x9]\n    ret\n\n.align 4\n.global _snc_task_scope_end\n_snc_task_scope_end:\n    stp x29, x30, [sp, #-64]!\n    mov x29, sp\n    stp x19, x20, [sp, #16]\n    stp x21, x22, [sp, #32]\n    mov x19, x0\n    mov x21, #0\nL_snc_tse_loop:\n    adrp x9, _snc_task_count@PAGE\n    add x9, x9, _snc_task_count@PAGEOFF\n    ldr x20, [x9]\n    cmp x19, x20\n    b.ge L_snc_tse_done\n    add x0, x19, #1\n    bl _snc_task_await\n    add x19, x19, #1\n    add x21, x21, #1\n    b L_snc_tse_loop\nL_snc_tse_done:\n    mov x0, x21\n    ldp x21, x22, [sp, #32]\n    ldp x19, x20, [sp, #16]\n    ldp x29, x30, [sp], #64\n    ret\n\n.align 4\n.global _snc_task_wait_all\n_snc_task_wait_all:\n    mov x0, xzr\n    b _snc_task_scope_end\n"
+    .ascii "\n.align 4\n.global _snc_task_reap_stale_tids\n_snc_task_reap_stale_tids:\n    adrp x9, _snc_task_count@PAGE\n    add x9, x9, _snc_task_count@PAGEOFF\n    ldr x10, [x9]\n    mov x11, #0\nL_snc_trst_loop:\n    cmp x11, x10\n    b.ge L_snc_trst_done\n    adrp x12, _snc_task_joined@PAGE\n    add x12, x12, _snc_task_joined@PAGEOFF\n    ldr x13, [x12, x11, lsl #3]\n    cmp x13, #1\n    b.ne L_snc_trst_next\n    adrp x12, _snc_task_tids@PAGE\n    add x12, x12, _snc_task_tids@PAGEOFF\n    str xzr, [x12, x11, lsl #3]\nL_snc_trst_next:\n    add x11, x11, #1\n    b L_snc_trst_loop\nL_snc_trst_done:\n    ret\n"
+    .ascii "\n.data\n.align 3\n_snc_task_empty_error:\n    .asciz \"\"\n_snc_task_invalid_error:\n    .asciz \"invalid task\"\n_snc_task_launch_error:\n    .asciz \"task launch failed\"\n_snc_task_join_error:\n    .asciz \"task join failed\"\n.align 3\n_snc_task_lock:\n    .quad 0\n_snc_task_count:\n    .quad 0\n_snc_task_tids:\n    .space 2048\n_snc_task_results:\n    .space 2048\n_snc_task_joined:\n    .space 2048\n_snc_task_states:\n    .space 2048\n_snc_task_errors:\n    .space 2048\n"
+    .byte 0
 #endif
 asm_ret:
     .asciz "    ret\n"
@@ -1958,6 +2088,8 @@ hidden_var_name_storage: .quad 0     // malloc-backed; grows with the var tables
 spawn_capture_fn_id:   .space 8
 spawn_wait_used:       .space 8           // 1 if wait() builtin used -> emit _snc_spawn_wait
 channel_count:         .space 8           // compile-time channel ids; emitted runtime supports 64
+task_runtime_used:     .space 8           // any task-control syntax requires the emitted task runtime
+task_scope_depth:      .space 8           // lexical scope nesting; forbids exits that bypass joins
 spawn_fn_op_counts:    .space 256         // 32 functions * 8 (op counts for spawn bodies)
 spawn_fn_op_kinds:    .space 65536       // 32 * 256 * 8
 spawn_fn_op_arg0:      .space 65536

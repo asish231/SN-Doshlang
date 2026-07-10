@@ -10,8 +10,8 @@ binaries, and comparing their printed output to the expected values.
 
 > **Update (2026-07-09) — self-hosting prerequisites landed.** Several items the
 > status paragraph below lists as "still blocks self-hosting" are now **done**,
-> verified by `make assert` = **236/236 must-pass** and the examples sweep =
-> **156/163 run OK** (the other 7 are deliberate negative tests):
+> verified by `make assert` = **254/254 must-pass** and the examples sweep =
+> **159/166 run OK** (the other 7 are deliberate negative tests):
 >
 > - **`system(cmd)` / `exec(cmd)` builtin** (op 114) — runs an external command and
 >   returns its exit code (`0` = success); works for literal *and* dynamically-built
@@ -75,7 +75,7 @@ binaries, and comparing their printed output to the expected values.
 > a broad set of programs — integers, variables, arithmetic with correct precedence,
 > comparisons, `if`/`else` branch selection, `while` loops, `for`-in loops over lists,
 > strings and string interpolation, lists, **and functions with integer arguments, return
-> values and recursion** (see sections 3–4, and run `make assert` → **236 must-pass**). An
+> values and recursion** (see sections 3–4, and run `make assert` → **254 must-pass**). An
 > intermittent compiler crash was also found and fixed (section 2.1), and the former
 > **±256 stack-offset limit** for verified large function frames is now fixed (section 6).
 > The language now runs real multi-function programs (e.g. recursive
@@ -938,6 +938,51 @@ Regression coverage includes computed strings, file reads, raw-pointer isolation
 growth/clear/type checks, invalid and stale handles, 1000 collection cycles, and concurrent
 allocation by spawned workers. Verified: **`make assert` = 236/236**, 0 known-broken.
 
+### 2.28 DONE — typed asynchronous tasks and `await`
+
+SNlang now supports result-bearing asynchronous work with explicit typed handles:
+
+```sn
+fn answer() -> int { return 42 }
+fn main() {
+    task<int> work = async answer()
+    int result = await(work)
+    print(result)
+}
+```
+
+The first version accepts zero-argument functions returning `int`, `bool`, or `str`.
+Each launch creates a pthread-backed task; `await(task)` joins only that task and returns
+its cached result, so repeated awaits are safe and independently launched tasks can be
+awaited in any order. Handles are immutable and checked against the function's declared
+return type. Unawaited tasks are joined automatically before managed-memory cleanup.
+
+Implementation uses task type ID 13, operations 132/133, and a task registry separate
+from raw `spawn`/`wait()` thread ids. Verified by `make assert` = **244/244**, including
+all three result types, reverse-order and repeated awaits, type misuse, and shutdown join.
+
+### 2.29 DONE — reliable task states, errors, timeouts, cancellation, and scopes
+
+The typed task runtime now exposes a complete first safety layer:
+
+- `task_state(task)` returns `0 invalid`, `1 running`, `2 completed`,
+  `3 cancel-requested`, `4 cancelled`, or `5 error`;
+- `task_error(task)` returns the task-local uncaught `throw` message (or an empty string);
+- `task_wait(task, milliseconds)` returns `true` and joins when the task reaches a terminal
+  state, or returns `false` on timeout without consuming the task;
+- `cancel(task)` atomically requests cooperative cancellation, and task code observes it
+  through `cancel_requested()`;
+- `scope { ... }` joins all tasks launched in that lexical scope, including tasks launched
+  by child tasks, before normal block exit. To prevent skipped cleanup in this first form,
+  `return`, uncaught `throw`, `stop`, and `skip` are rejected while a task scope is active.
+
+Uncaught `throw` inside an async worker no longer exits or hangs the process: it records
+state `5`, preserves the message for `task_error`, and terminates only that pthread.
+The join path is single-owner and repeated `await` remains safe. Operations 134–140 and a
+stateful pthread runtime implement these controls. Verified by `make assert` = **254/254**,
+including timeout, cancellation, completed-task cancellation, worker failure, reused thread
+IDs, nested scopes, query-only programs, misuse diagnostics, and a clean compiler-crash scan.
+
 ---
 
 ## 3. Now verified WORKING (real stdout — run `make assert`)
@@ -997,7 +1042,7 @@ allocation by spawned workers. Verified: **`make assert` = 236/236**, 0 known-br
 | `str([1,3,5])` | `[1, 3, 5]` (list-to-string) |
 | full binary search (`binary_search.sn`) | `4` / `-1` / `7` (correct) |
 
-All **200 must-pass** assertions in `tests/assert_suite.sh` pass, including the
+All **254 must-pass** assertions in `tests/assert_suite.sh` pass, including the
 trailing-declaration-at-EOF regression (2.2), the section-2.3 additions
 (comparisons-as-values, `value` as an ordinary identifier, variable member access), the
 section-2.4 string methods (`.upper()`/`.lower()`/`.contains()`) and char indexing `s[i]`,
@@ -1166,8 +1211,8 @@ Deleted in this change because they misrepresented the project's state:
 "✅ SELF-HOSTING READY" / "Self-Hosting Status" sections, the "829ms / 100M iterations"
 benchmark, the comparative marketing claims, and the phantom `build.ps1` reference were
 removed; the actual license terms were preserved. The concurrency section now describes
-joinable `spawn fn()` / `wait()` and typed channels accurately; `spawn {}`, `lock`, and
-`async`/`await` remain planned.
+joinable `spawn fn()` / `wait()`, typed channels, and typed tasks accurately; `spawn {}` and
+language-level `lock` remain planned.
 
 ---
 
@@ -1250,8 +1295,8 @@ then syscalls/FFI.
 12. ~~Give `spawn` a join/sync primitive~~ **DONE (2026-07-09)** — threads are recorded (not
     detached) and the new `wait()` builtin joins them all, returning how many were joined, so
     worker output is no longer lost (section 2.23). `spawn obj.method()` now reports a clear
-    error instead of an empty one. Typed channels have since landed; `lock` and
-    `async`/`await` remain open.
+    error instead of an empty one. Typed channels and typed async tasks have since landed;
+    language-level `lock` remains open.
 13. ~~Make the op/print tables truly `malloc`-grown, add `ord()`, and start the self-hosted
     compiler~~ **DONE (2026-07-09)** — the operation and print/data tables now `malloc`/
     `realloc`-grow on demand (no more `too many operations` / `too many print statements`); a
@@ -1266,6 +1311,8 @@ then syscalls/FFI.
     a 200000-element list in a 1.42 MB source. See section 2.25.
 15. ~~Implement selective imports, dotted module calls, and typed channels~~ **DONE
     (2026-07-10)** — see section 2.26; covered by 15 module cases and nine channel cases.
-16. Only then: build out `stdlib`, add syscalls/FFI, then `net` → `http`, and continue the
+16. ~~Add typed async safety: task errors/states, timeouts, cancellation, and structured
+    scopes~~ **DONE (2026-07-10)** — see sections 2.28–2.29; `make assert` is **254/254**.
+17. Only then: build out `stdlib`, add syscalls/FFI, then `net` → `http`, and continue the
     self-hosting components (parser → codegen in SNlang) toward the stage1≡stage2 bootstrap
     proof. See `SELF_HOSTING_ROADMAP.md` for the staged plan.

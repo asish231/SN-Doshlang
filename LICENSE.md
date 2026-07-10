@@ -195,7 +195,8 @@ blueprint Dog from Animal {
 
 ## SNlang Concurrency
 
-Current concurrency support includes `spawn fn()`, `wait()`, and typed bounded channels.
+Current concurrency support includes `spawn fn()`, `wait()`, typed bounded channels, and
+typed pthread-backed tasks.
 `wait()` joins all outstanding workers and returns the number joined. Channels support
 `int`, `bool`, `byte`, and `str` payloads through `.send()`, `.receive()`, and `.close()`.
 
@@ -214,8 +215,29 @@ fn main() {
 }
 ```
 
+Typed tasks use `task<int|bool|str> t = async function()` and `await(t)`. The task API also
+provides `task_state(t)`, `task_error(t)`, `task_wait(t, milliseconds)`, `cancel(t)`, and
+worker-side `cancel_requested()`. A `scope { ... }` block joins all child tasks before
+normal exit. The initial task form accepts zero-argument functions; cancellation is
+cooperative, and cleanup-bypassing control flow is rejected inside a task scope.
+
+```sn
+fn worker() -> int {
+    while (not cancel_requested()) {}
+    return 7
+}
+
+fn main() {
+    scope {
+        task<int> work = async worker()
+        if (not task_wait(work, 1)) { cancel(work) }
+        print(await(work))
+    }
+}
+```
+
 The following forms are planned / not yet implemented: `spawn { ... }` blocks,
-`spawn obj.method()`, `lock`-based synchronization, and `async` / `await`.
+`spawn obj.method()`, and general language-level `lock` syntax.
 
 ### Joinable `spawn` example
 

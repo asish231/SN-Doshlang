@@ -494,6 +494,32 @@ expect "managed threaded string" 'fn worker(){ str s="thread".upper() }\nfn main
 expect "managed collection loop" 'fn main(){ int i=0 while(i<1000){ str s=str(i) mem_collect() i++ } print(mem_live()) }' "0"
 expect "managed thread stress" 'fn worker(){ int i=0 while(i<100){ str s=str(i) i++ } }\nfn main(){ spawn worker() spawn worker() print(wait()) print(mem_live()) print(mem_collect()) print(mem_live()) }' "2 200 200 0"
 expect_compile_fail "builder append type" 'fn main(){ ref<byte> b=builder_new() builder_append(b,123) }' "error:"
+
+# Typed asynchronous tasks. `async function()` starts one zero-argument function and
+# returns a task<T>; await(task) joins that task only and yields its typed result.
+expect "async int result"      'fn answer()->int{return 42}\nfn main(){task<int> t=async answer() int n=await(t) print(n)}' "42"
+expect "async bool result"     'fn ready()->bool{return true}\nfn main(){task<bool> t=async ready() bool ok=await(t) print(ok)}' "1"
+expect "async string result"   'fn word()->str{return "done"}\nfn main(){task<str> t=async word() str s=await(t) print(s)}' "done"
+expect "async independent"     'fn one()->int{return 1}\nfn two()->int{return 2}\nfn main(){task<int> a=async one() task<int> b=async two() print(await(b)) print(await(a))}' "2 1"
+expect "async await twice"     'fn value()->int{return 9}\nfn main(){task<int> t=async value() print(await(t)) print(await(t))}' "9 9"
+expect "async shutdown join"   'fn worker()->int{print("done") return 1}\nfn main(){task<int> t=async worker() print("main")}' "main done"
+expect_compile_fail "async result mismatch" 'fn word()->str{return "x"}\nfn main(){task<int> t=async word()}' "error:"
+expect_compile_fail "await requires task" 'fn main(){int n=3 print(await(n))}' "error:"
+
+# Reliable task control. States are: 0 invalid, 1 running, 2 completed,
+# 3 cancel-requested, 4 cancelled, 5 error. task_wait(t, ms) joins only when
+# the task reaches a terminal state; timeout leaves it running. Cancellation is
+# cooperative: task code observes cancel_requested() and returns normally.
+expect "async completed state" 'fn answer()->int{return 42}\nfn main(){task<int> t=async answer() int n=await(t) str e=task_error(t) print(n) print(task_state(t)) print(len(e))}' "42 2 0"
+expect "async timeout cancel" 'fn worker()->int{while(not cancel_requested()){} return 7}\nfn main(){task<int> t=async worker() print(task_wait(t,0)) print(cancel(t)) print(task_wait(t,1000)) print(task_state(t)) print(await(t))}' "0 1 1 4 7"
+expect "async cancel outside" 'fn main(){print(cancel_requested())}' "0"
+expect "async cancel completed" 'fn value()->int{return 9}\nfn main(){task<int> t=async value() print(await(t)) print(cancel(t)) print(task_state(t))}' "9 0 2"
+expect "async worker error" 'fn boom()->int{throw("boom") return 0}\nfn main(){task<int> t=async boom() print(task_wait(t,1000)) print(task_state(t)) print(task_error(t))}' "1 5 boom"
+expect "async reused tid error" 'fn ok()->int{return 1}\nfn boom()->int{throw("second") return 0}\nfn main(){scope{task<int> a=async ok()} scope{task<int> b=async boom() print(task_wait(b,1000)) print(task_state(b)) print(task_error(b))}}' "1 5 second"
+expect "async scope joins" 'fn worker()->int{print("worker") return 1}\nfn main(){scope{task<int> t=async worker()} print("after")}' "worker after"
+expect "async nested scopes" 'fn one()->int{return 1}\nfn two()->int{return 2}\nfn main(){scope{task<int> a=async one() scope{task<int> b=async two()} print(await(a))} print("done")}' "1 done"
+expect_compile_fail "async wait requires task" 'fn main(){int n=3 print(task_wait(n,1))}' "error:"
+expect_compile_fail "async scope return rejected" 'fn f()->int{scope{return 1} return 2}\nfn main(){print(f())}' "error:"
 # `spawn obj.method()` (spawning a blueprint method) is not yet supported and now
 # fails with a CLEAR diagnostic instead of the former confusing empty "line N:"
 # error (its capture path clobbered the object-name registers and used an

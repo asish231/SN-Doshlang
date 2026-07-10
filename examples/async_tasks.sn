@@ -1,0 +1,15 @@
+fn answer() -> int {
+    return 42
+}
+
+fn greeting() -> str {
+    return "hello from async"
+}
+
+fn main() {
+    task<int> numberTask = async answer()
+    task<str> textTask = async greeting()
+
+    print(await(textTask))
+    print(await(numberTask))
+}

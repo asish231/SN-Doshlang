@@ -111,6 +111,11 @@ Lemit_main_cleanup_spawn_scan:
     add x11, x11, #1
     b Lemit_main_cleanup_spawn_scan
 Lemit_main_cleanup_spawn_wait:
+    // Task workers share the generated dispatch wrappers but keep a separate
+    // tid registry. Join abandoned tasks before reclaiming managed memory.
+    LOAD_ADDR x0, asm_call_task_wait_all
+    mov x1, #1
+    bl _write_cstr_fd
     LOAD_ADDR x0, asm_call_spawn_wait
     mov x1, #1
     bl _write_cstr_fd
@@ -474,8 +479,16 @@ Lemit_mstr_next_fn:
     add x21, x21, #1
     b Lemit_mstr_scan
 Lemit_mstr_have:
-    cbz x22, Lemit_mstr_done
+    cbz x22, Lemit_mstr_task_check
     LOAD_ADDR x0, asm_spawn_thread_runtime
+    mov x1, #1
+    bl _write_cstr_fd
+Lemit_mstr_task_check:
+    LOAD_ADDR x9, task_runtime_used
+    ldr x9, [x9]
+    orr x9, x9, x22
+    cbz x9, Lemit_mstr_done
+    LOAD_ADDR x0, asm_task_runtime_v2
     mov x1, #1
     bl _write_cstr_fd
 Lemit_mstr_done:
@@ -540,7 +553,11 @@ Lssp_any_scan_next:
     add x21, x21, #1
     b Lssp_any_scan_loop
 Lssp_any_scan_done:
-    cbz x28, Lemit_spawn_worker_functions_exit
+    cbnz x28, Lssp_emit_dispatch
+    LOAD_ADDR x9, task_runtime_used
+    ldr x9, [x9]
+    cbz x9, Lemit_spawn_worker_functions_exit
+Lssp_emit_dispatch:
 
     LOAD_ADDR x0, asm_spawn_dispatch_head
     mov x1, #1
@@ -1168,6 +1185,24 @@ _emit_operation:
     b.eq Lemit_op_builder_clear
     cmp x21, #131
     b.eq Lemit_op_builder_length
+    cmp x21, #132
+    b.eq Lemit_op_task_start
+    cmp x21, #133
+    b.eq Lemit_op_task_await
+    cmp x21, #134
+    b.eq Lemit_op_task_state
+    cmp x21, #135
+    b.eq Lemit_op_task_error
+    cmp x21, #136
+    b.eq Lemit_op_task_wait
+    cmp x21, #137
+    b.eq Lemit_op_task_cancel
+    cmp x21, #138
+    b.eq Lemit_op_task_cancel_requested
+    cmp x21, #139
+    b.eq Lemit_op_task_scope_begin
+    cmp x21, #140
+    b.eq Lemit_op_task_scope_end
 
     b Lemit_op_done
 
@@ -1287,6 +1322,102 @@ Lemit_op_spawn_wait:
     mov x1, x0
     mov x0, #0
     bl _emit_stack_store_reg_fd
+    b Lemit_op_done
+
+Lemit_op_task_start:
+    // arg0=task destination slot, arg1=function/worker id.
+    LOAD_ADDR x0, asm_mov_x0_imm_prefix
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_newline
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x0, asm_call_task_go
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_op_task_store
+
+Lemit_op_task_await:
+    // arg0=result destination slot, arg1=task handle source slot.
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
+    ldr x1, [x20, x19, lsl #3]
+    mov x0, #0
+    bl _emit_stack_load_reg_fd
+    LOAD_ADDR x0, asm_call_task_await
+    mov x1, #1
+    bl _write_cstr_fd
+Lemit_op_task_store:
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, x0
+    mov x0, #0
+    bl _emit_stack_store_reg_fd
+    b Lemit_op_done
+
+Lemit_op_task_state:
+    LOAD_ADDR x23, asm_call_task_state
+    b Lemit_op_task_unary
+Lemit_op_task_error:
+    LOAD_ADDR x23, asm_call_task_error
+    b Lemit_op_task_unary
+Lemit_op_task_cancel:
+    LOAD_ADDR x23, asm_call_task_cancel
+Lemit_op_task_unary:
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
+    ldr x1, [x20, x19, lsl #3]
+    mov x0, #0
+    bl _emit_stack_load_reg_fd
+    mov x0, x23
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_op_task_store
+
+Lemit_op_task_wait:
+    // arg0=result slot, arg1=task slot, arg2=timeout-ms slot.
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
+    ldr x1, [x20, x19, lsl #3]
+    mov x0, #0
+    bl _emit_stack_load_reg_fd
+    LOAD_ADDR x20, emit_tbl_arg2
+    ldr x20, [x20]
+    ldr x1, [x20, x19, lsl #3]
+    mov x0, #1
+    bl _emit_stack_load_reg_fd
+    LOAD_ADDR x0, asm_call_task_wait
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_op_task_store
+
+Lemit_op_task_cancel_requested:
+    LOAD_ADDR x0, asm_call_task_cancel_requested
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_op_task_store
+
+Lemit_op_task_scope_begin:
+    LOAD_ADDR x0, asm_call_task_scope_begin
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_op_task_store
+
+Lemit_op_task_scope_end:
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
+    ldr x1, [x20, x19, lsl #3]
+    mov x0, #0
+    bl _emit_stack_load_reg_fd
+    LOAD_ADDR x0, asm_call_task_scope_end
+    mov x1, #1
+    bl _write_cstr_fd
     b Lemit_op_done
 
 Lemit_op_channel_send:
@@ -3805,11 +3936,10 @@ Lemit_op_str_trim:
     b Lemit_op_done
 
 Lemit_op_throw:
-    // arg0 = error message pointer (string literal addr)
+    // arg0 = error message data-value id
     // arg1 = string length
-    // Emit: mov x0, #error_msg_addr
-    //       bl _print_error_and_exit
-    LOAD_ADDR x0, asm_mov_x0_imm_prefix
+    // Materialize the actual string pointer, matching throw-with-catch.
+    LOAD_ADDR x0, asm_load_x0_print_val_prefix
     mov x1, #1
     bl _write_cstr_fd
     LOAD_ADDR x20, emit_tbl_arg0
@@ -3817,10 +3947,29 @@ Lemit_op_throw:
     ldr x0, [x20, x19, lsl #3]
     mov x1, #1
     bl _write_u64_fd
-    LOAD_ADDR x0, asm_newline
+    LOAD_ADDR x0, asm_load_x0_print_val_middle
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_load_x0_print_val_suffix
     mov x1, #1
     bl _write_cstr_fd
 
+    // In a task worker this records state=error and exits only that pthread.
+    // In main or a raw spawn worker it returns and preserves the old process
+    // terminating behavior below.
+    LOAD_ADDR x9, task_runtime_used
+    ldr x9, [x9]
+    cbz x9, Lemit_op_throw_store_global
+    LOAD_ADDR x0, asm_call_task_fail_current
+    mov x1, #1
+    bl _write_cstr_fd
+
+Lemit_op_throw_store_global:
     // Store error message in error_value global
     LOAD_ADDR x0, asm_adrp_error_value
     mov x1, #1

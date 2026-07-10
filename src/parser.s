@@ -270,6 +270,18 @@ _parse_statement:
 
     mov x0, x19
     mov x1, x20
+    LOAD_ADDR x2, kw_task
+    bl _match_cstr_span
+    cbnz x0, Lstmt_task
+
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_scope
+    bl _match_cstr_span
+    cbnz x0, Lstmt_scope
+
+    mov x0, x19
+    mov x1, x20
     LOAD_ADDR x2, kw_ref
     bl _match_cstr_span
     cbnz x0, Lstmt_ref
@@ -614,6 +626,15 @@ Lstmt_free:
     b Lstmt_return
 
 Lstmt_throw:
+    // An uncaught throw would bypass the scope-end join. Throws caught by an
+    // enclosing try remain valid because control stays inside the scope.
+    LOAD_ADDR x9, task_scope_depth
+    ldr x10, [x9]
+    cbz x10, Lstmt_throw_scope_ok
+    LOAD_ADDR x9, current_catch_label
+    ldr x10, [x9]
+    cbz x10, Lstmt_scope_control_fail
+Lstmt_throw_scope_ok:
     bl _skip_whitespace
     mov w0, #'('
     bl _expect_char
@@ -1655,6 +1676,178 @@ Lstmt_chan_define:
     mov x0, #0
     b Lstmt_return
 
+// `task<T> name = async function()` starts one zero-argument function and
+// stores a typed task handle. The existing spawn worker wrapper is reused;
+// op 132 starts the result-bearing task at runtime.
+Lstmt_task:
+    LOAD_ADDR x9, task_runtime_used
+    mov x10, #1
+    str x10, [x9]
+    bl _skip_whitespace
+    mov w0, #'<'
+    bl _expect_char
+    cbz x0, Lstmt_fail
+    bl _parse_type_spec
+    cbz x0, Lstmt_fail
+    mov x23, x1                 // task result type
+    cmp x23, #0
+    b.eq Lstmt_task_type_ok
+    cmp x23, #1
+    b.eq Lstmt_task_type_ok
+    cmp x23, #2
+    b.ne Lstmt_type_mismatch
+Lstmt_task_type_ok:
+    bl _skip_whitespace
+    mov w0, #'>'
+    bl _expect_char
+    cbz x0, Lstmt_fail
+    bl _parse_identifier
+    cbz x0, Lstmt_need_name
+    mov x19, x0
+    mov x20, x1
+    bl _skip_whitespace
+    mov w0, #'='
+    bl _expect_char
+    cbz x0, Lstmt_fail
+    bl _parse_identifier
+    cbz x0, Lstmt_fail
+    mov x21, x0
+    mov x22, x1
+    mov x0, x21
+    mov x1, x22
+    LOAD_ADDR x2, kw_async
+    bl _match_cstr_span
+    cbz x0, Lstmt_fail
+    bl _parse_identifier
+    cbz x0, Lstmt_fail
+    mov x21, x0
+    mov x22, x1
+    mov x0, x21
+    mov x1, x22
+    bl _lookup_callable_function
+    cbz x0, Lstmt_fail
+    mov x24, x1                 // function id
+    cmp x24, #32                // current worker wrapper table size
+    b.ge Lstmt_fail
+    LOAD_TBL x9, fn_param_counts
+    ldr x10, [x9, x24, lsl #3]
+    cbnz x10, Lstmt_fail
+    LOAD_TBL x9, fn_return_types
+    ldr x10, [x9, x24, lsl #3]
+    cmp x10, x23
+    b.ne Lstmt_type_mismatch
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lstmt_fail
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lstmt_fail
+
+    mov x0, x19
+    mov x1, x20
+    mov x2, #0
+    mov x3, #1                  // task handles are immutable
+    mov x4, #13                 // task type id
+    mov x5, x23                 // result type metadata
+    bl _define_variable
+    cbnz x0, Lstmt_fail
+    mov x0, x19
+    mov x1, x20
+    bl _lookup_variable
+    cbz x0, Lstmt_fail
+    mov x25, x4                 // destination task slot
+
+    // Register the function with the existing worker dispatcher.
+    LOAD_ADDR x9, spawn_fn_op_counts
+    str xzr, [x9, x24, lsl #3]
+    LOAD_ADDR x9, spawn_capture_fn_id
+    str x24, [x9]
+    mov x0, #13
+    mov x1, x24
+    bl _record_operation
+    LOAD_ADDR x9, spawn_capture_fn_id
+    mov x10, #-1
+    str x10, [x9]
+
+    mov x0, #132
+    mov x1, x25
+    mov x2, x24
+    bl _record_operation
+    cbnz x0, Lstmt_fail
+    bl _consume_optional_semicolon
+    mov x0, #0
+    b Lstmt_return
+
+// `scope { ... }` records the current task-count marker and joins every task
+// created after it before normal block exit. Early exits are rejected while a
+// scope is active so cleanup cannot be bypassed in this first structured form.
+Lstmt_scope:
+    LOAD_ADDR x9, task_runtime_used
+    mov x10, #1
+    str x10, [x9]
+    bl _skip_whitespace
+    mov w0, #'{'
+    bl _expect_char
+    cbz x0, Lstmt_fail
+    bl _allocate_temp_var
+    mov x19, x0
+    cmn x19, #1
+    b.eq Lstmt_fail
+    mov x0, #139
+    mov x1, x19
+    mov x2, #0
+    bl _record_operation
+    cbnz x0, Lstmt_fail
+    LOAD_ADDR x9, task_scope_depth
+    ldr x20, [x9]
+    add x10, x20, #1
+    str x10, [x9]
+
+Lstmt_scope_body:
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, #'}'
+    b.eq Lstmt_scope_done
+    cbz w0, Lstmt_scope_unclosed
+    bl _parse_statement
+    cbz x0, Lstmt_scope_body
+    mov x21, x0
+    b Lstmt_scope_fail_restore
+
+Lstmt_scope_done:
+    bl _advance_char
+    LOAD_ADDR x9, task_scope_depth
+    str x20, [x9]
+    mov x0, #140
+    mov x1, x19
+    mov x2, #0
+    bl _record_operation
+    cbnz x0, Lstmt_fail
+    bl _consume_optional_semicolon
+    mov x0, #0
+    b Lstmt_return
+
+Lstmt_scope_unclosed:
+    LOAD_ADDR x0, msg_expected_char
+    bl _report_error_prefix
+    LOAD_ADDR x0, close_brace_char
+    mov x1, #1
+    mov x2, #2
+    bl _write_buffer_fd
+    bl _write_newline_stderr
+    mov x21, #5
+Lstmt_scope_fail_restore:
+    LOAD_ADDR x9, task_scope_depth
+    str x20, [x9]
+    cmp x21, #5
+    b.eq Lstmt_scope_fail_reported
+    b Lstmt_fail
+Lstmt_scope_fail_reported:
+    mov x0, #5
+    b Lstmt_return
+
 Lstmt_list:
     bl _skip_whitespace
     mov w0, #'<'
@@ -2216,6 +2409,9 @@ Lstmt_for_ok:
     b Lstmt_return
 
 Lstmt_stop:
+    LOAD_ADDR x9, task_scope_depth
+    ldr x10, [x9]
+    cbnz x10, Lstmt_scope_control_fail
     bl _consume_optional_semicolon
     LOAD_ADDR x9, loop_context_depth
     ldr x10, [x9]
@@ -2244,6 +2440,9 @@ Lstmt_stop_outside_loop:
     b Lstmt_return
 
 Lstmt_skip:
+    LOAD_ADDR x9, task_scope_depth
+    ldr x10, [x9]
+    cbnz x10, Lstmt_scope_control_fail
     bl _consume_optional_semicolon
     LOAD_ADDR x9, loop_context_depth
     ldr x10, [x9]
@@ -2292,6 +2491,9 @@ Lstmt_use:
     b Lstmt_return
 
 Lstmt_return_val:
+    LOAD_ADDR x9, task_scope_depth
+    ldr x10, [x9]
+    cbnz x10, Lstmt_scope_control_fail
     bl _skip_whitespace
     bl _peek_char
     // Check for tuple return: return (a, b)
@@ -4062,6 +4264,13 @@ Lstmt_need_keyword:
     b.eq Lstmt_list_literal
     
     LOAD_ADDR x0, msg_expected_stmt
+    bl _report_error_prefix
+    bl _write_newline_stderr
+    mov x0, #5
+    b Lstmt_return
+
+Lstmt_scope_control_fail:
+    LOAD_ADDR x0, msg_scope_control
     bl _report_error_prefix
     bl _write_newline_stderr
     mov x0, #5
@@ -11945,6 +12154,43 @@ _call_function:
     bl _match_cstr_span
     cbnz x0, Lfn_call_wait
 
+    // Built-in: await(task) — join one typed task and return its result.
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_await
+    bl _match_cstr_span
+    cbnz x0, Lfn_call_await
+
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_task_state
+    bl _match_cstr_span
+    cbnz x0, Lfn_call_task_state
+
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_task_error
+    bl _match_cstr_span
+    cbnz x0, Lfn_call_task_error
+
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_task_wait
+    bl _match_cstr_span
+    cbnz x0, Lfn_call_task_wait
+
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_cancel
+    bl _match_cstr_span
+    cbnz x0, Lfn_call_task_cancel
+
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_cancel_requested
+    bl _match_cstr_span
+    cbnz x0, Lfn_call_cancel_requested
+
     // Built-in: str(x) — convert an int/bool/str value to its string form
     mov x0, x19
     mov x1, x20
@@ -12692,6 +12938,173 @@ Lfn_call_wait:
     mov x3, #0
     mov x4, x22
     b Lfn_call_return
+
+// await(task<T>) -> T. Op 133 stores the selected task's cached result.
+Lfn_call_await:
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+    bl _parse_expr_value
+    cbz x0, Lfn_call_fail
+    cmp x2, #13
+    b.ne Lfn_call_task_type_mismatch
+    mov x19, x3                 // result type metadata
+    mov x20, x4                 // task handle source slot
+    cmn x20, #1
+    b.eq Lfn_call_fail
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+    bl _allocate_temp_var
+    mov x22, x0
+    mov x0, #133
+    mov x1, x22
+    mov x2, x20
+    bl _record_operation
+    cbnz x0, Lfn_call_fail
+    mov x0, #0
+    mov x1, #0
+    mov x2, x19
+    mov x3, #0
+    mov x4, x22
+    b Lfn_call_return
+
+// task_state(task<T>) -> int, task_error(task<T>) -> str, and
+// cancel(task<T>) -> bool share the same typed one-argument parser.
+Lfn_call_task_state:
+    mov x23, #134
+    mov x24, #0
+    b Lfn_call_task_unary
+Lfn_call_task_error:
+    mov x23, #135
+    mov x24, #2
+    b Lfn_call_task_unary
+Lfn_call_task_cancel:
+    mov x23, #137
+    mov x24, #1
+Lfn_call_task_unary:
+    LOAD_ADDR x9, task_runtime_used
+    mov x10, #1
+    str x10, [x9]
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+    bl _parse_expr_value
+    cbz x0, Lfn_call_fail
+    cmp x2, #13
+    b.ne Lfn_call_task_type_mismatch
+    mov x21, x4
+    cmn x21, #1
+    b.eq Lfn_call_fail
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+    bl _allocate_temp_var
+    mov x22, x0
+    mov x0, x23
+    mov x1, x22
+    mov x2, x21
+    bl _record_operation
+    cbnz x0, Lfn_call_fail
+    mov x0, #0
+    mov x1, #0
+    mov x2, x24
+    mov x3, #0
+    mov x4, x22
+    b Lfn_call_return
+
+// task_wait(task<T>, milliseconds) -> bool. A false result is a timeout; the
+// task remains valid and can later be cancelled or awaited.
+Lfn_call_task_wait:
+    LOAD_ADDR x9, task_runtime_used
+    mov x10, #1
+    str x10, [x9]
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+    bl _parse_expr_value
+    cbz x0, Lfn_call_fail
+    cmp x2, #13
+    b.ne Lfn_call_task_type_mismatch
+    mov x21, x4
+    cmn x21, #1
+    b.eq Lfn_call_fail
+    bl _skip_whitespace
+    mov w0, #','
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+    bl _parse_expr_value
+    cbz x0, Lfn_call_fail
+    cmp x2, #0
+    b.ne Lfn_call_task_type_mismatch
+    mov x22, x1
+    mov x23, x4
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+    cmn x23, #1
+    b.ne Lfn_call_task_wait_have_slot
+    mov x0, x22
+    bl _expr_materialize_ct_int
+    cmn x0, #1
+    b.eq Lfn_call_fail
+    mov x23, x0
+Lfn_call_task_wait_have_slot:
+    bl _allocate_temp_var
+    mov x24, x0
+    mov x0, #136
+    mov x1, x24
+    mov x2, x21
+    mov x3, x23
+    mov x4, #0
+    bl _record_operation4
+    cbnz x0, Lfn_call_fail
+    mov x0, #0
+    mov x1, #0
+    mov x2, #1
+    mov x3, #0
+    mov x4, x24
+    b Lfn_call_return
+
+// cancel_requested() -> bool, true only inside a task whose handle has received
+// a cooperative cancellation request.
+Lfn_call_cancel_requested:
+    LOAD_ADDR x9, task_runtime_used
+    mov x10, #1
+    str x10, [x9]
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+    bl _allocate_temp_var
+    mov x22, x0
+    mov x0, #138
+    mov x1, x22
+    mov x2, #0
+    bl _record_operation
+    cbnz x0, Lfn_call_fail
+    mov x0, #0
+    mov x1, #0
+    mov x2, #1
+    mov x3, #0
+    mov x4, x22
+    b Lfn_call_return
+
+Lfn_call_task_type_mismatch:
+    LOAD_ADDR x0, msg_type_mismatch
+    bl _report_error_prefix
+    bl _write_newline_stderr
+    b Lfn_call_fail
 
 // --------------------------------------------------------------------------
 // Built-in: argv(i) — the i-th command-line argument as a str (0-based;
