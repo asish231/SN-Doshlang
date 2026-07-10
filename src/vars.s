@@ -14,6 +14,10 @@
 .global _record_operation3
 .global _record_operation4
 .global _record_operation5
+.global _snc_free_compiler_tables
+.global _snc_compile_alloc
+.global _snc_compile_free
+.global _snc_compile_collect
 
 _define_variable:
     stp x29, x30, [sp, #-16]!
@@ -1565,3 +1569,275 @@ Lalloc_temp_full:
     bl _write_cstr_fd
     mov x0, #1
     bl _exit
+
+// Compiler-lifetime arena for non-table allocations (module source buffers,
+// copied names/search paths, and compile-time generated strings). A 16-byte
+// header links each allocation; individual free removes it from the list, and
+// final collection releases everything that deliberately survived parsing.
+_snc_compile_alloc:
+    stp x29, x30, [sp, #-48]!
+    mov x29, sp
+    stp x19, x20, [sp, #16]
+    str x21, [sp, #32]
+    mov x19, x0
+    cbnz x19, Lcompile_alloc_size_ok
+    mov x19, #1
+Lcompile_alloc_size_ok:
+    adds x0, x19, #16
+    b.cs Lcompile_alloc_fail
+#ifdef _WIN32
+    bl malloc
+#else
+    bl _malloc
+#endif
+    cbz x0, Lcompile_alloc_fail
+    mov x20, x0
+    str x19, [x20, #8]
+    LOAD_ADDR x21, compiler_alloc_head
+    ldr x9, [x21]
+    str x9, [x20]
+    str x20, [x21]
+    add x0, x20, #16
+    b Lcompile_alloc_done
+Lcompile_alloc_fail:
+    mov x0, #0
+Lcompile_alloc_done:
+    ldr x21, [sp, #32]
+    ldp x19, x20, [sp, #16]
+    ldp x29, x30, [sp], #48
+    ret
+
+_snc_compile_free:
+    stp x29, x30, [sp, #-64]!
+    mov x29, sp
+    stp x19, x20, [sp, #16]
+    stp x21, x22, [sp, #32]
+    str x23, [sp, #48]
+    mov x19, x0
+    cbz x19, Lcompile_free_not_found
+    LOAD_ADDR x9, compiler_alloc_head
+    ldr x20, [x9]
+    mov x21, #0
+Lcompile_free_scan:
+    cbz x20, Lcompile_free_not_found
+    add x22, x20, #16
+    cmp x22, x19
+    b.eq Lcompile_free_found
+    mov x21, x20
+    ldr x20, [x20]
+    b Lcompile_free_scan
+Lcompile_free_found:
+    ldr x23, [x20]
+    cbz x21, Lcompile_free_set_head
+    str x23, [x21]
+    b Lcompile_free_unlinked
+Lcompile_free_set_head:
+    str x23, [x9]
+Lcompile_free_unlinked:
+    mov x0, x20
+#ifdef _WIN32
+    bl free
+#else
+    bl _free
+#endif
+    mov x0, #1
+    b Lcompile_free_done
+Lcompile_free_not_found:
+    mov x0, #0
+Lcompile_free_done:
+    ldr x23, [sp, #48]
+    ldp x21, x22, [sp, #32]
+    ldp x19, x20, [sp, #16]
+    ldp x29, x30, [sp], #64
+    ret
+
+_snc_compile_collect:
+    stp x29, x30, [sp, #-48]!
+    mov x29, sp
+    stp x19, x20, [sp, #16]
+    str x21, [sp, #32]
+    LOAD_ADDR x9, compiler_alloc_head
+    ldr x19, [x9]
+    str xzr, [x9]
+    mov x20, #0
+Lcompile_collect_loop:
+    cbz x19, Lcompile_collect_done
+    ldr x21, [x19]
+    mov x0, x19
+#ifdef _WIN32
+    bl free
+#else
+    bl _free
+#endif
+    mov x19, x21
+    add x20, x20, #1
+    b Lcompile_collect_loop
+Lcompile_collect_done:
+    mov x0, x20
+    ldr x21, [sp, #32]
+    ldp x19, x20, [sp, #16]
+    ldp x29, x30, [sp], #48
+    ret
+
+// Release one malloc-backed table whose pointer is stored in the slot at x0.
+// The slot is cleared after free, making the full cleanup routine idempotent.
+Lfree_compiler_ptr_slot:
+    stp x29, x30, [sp, #-32]!
+    mov x29, sp
+    str x19, [sp, #16]
+    mov x19, x0
+    ldr x0, [x19]
+    cbz x0, Lfree_compiler_ptr_done
+#ifdef _WIN32
+    bl free
+#else
+    bl _free
+#endif
+    str xzr, [x19]
+Lfree_compiler_ptr_done:
+    ldr x19, [sp, #16]
+    ldp x29, x30, [sp], #32
+    ret
+
+// Free every growable compiler-owned table/pool and the source buffer. Module
+// parser state and literal arenas are static or already released at their call
+// sites. This runs on normal success and parse/codegen failure before exit.
+_snc_free_compiler_tables:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+
+    LOAD_ADDR x0, buffer
+    bl Lfree_compiler_ptr_slot
+
+    LOAD_ADDR x0, op_kinds
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, op_arg0
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, op_arg1
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, op_arg2
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, op_arg3
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, op_arg4
+    bl Lfree_compiler_ptr_slot
+
+    LOAD_ADDR x0, print_values
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, print_lengths
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, print_types
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, print_noline
+    bl Lfree_compiler_ptr_slot
+
+    LOAD_ADDR x0, var_name_ptrs
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, var_name_lens
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, var_values
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, var_lengths
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, var_const_flags
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, var_types
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, hidden_var_name_storage
+    bl Lfree_compiler_ptr_slot
+
+    LOAD_ADDR x0, fn_name_ptrs
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, fn_name_lens
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, fn_body_cursors
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, fn_body_lines
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, fn_source_ptrs
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, fn_source_lens
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, fn_param_counts
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, fn_return_types
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, fn_op_starts
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, fn_op_counts
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, fn_return_decl_lengths
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, fn_return_extra_types
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, fn_return_extra_decl_lengths
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, fn_blueprint_ids
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, fn_module_ids
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, fn_import_visible
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, fn_scope_bases
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, fn_frame_sizes
+    bl Lfree_compiler_ptr_slot
+
+    LOAD_ADDR x0, fn_param_types
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, fn_param_lengths
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, fn_param_name_ptrs
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, fn_param_name_lens
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, fn_param_default_flags
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, fn_param_default_values
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, fn_param_default_types
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, fn_param_default_lengths
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, method_name_storage
+    bl Lfree_compiler_ptr_slot
+
+    LOAD_ADDR x0, list_pool_values
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, list_pool_lengths
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, list_base_counts
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, list_base_is_runtime
+    bl Lfree_compiler_ptr_slot
+
+    LOAD_ADDR x0, map_pool_keys
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, map_pool_key_lengths
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, map_pool_key_ptrs
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, map_pool_values
+    bl Lfree_compiler_ptr_slot
+    LOAD_ADDR x0, map_pool_lengths
+    bl Lfree_compiler_ptr_slot
+
+    LOAD_ADDR x9, src_buffer_cap
+    str xzr, [x9]
+    LOAD_ADDR x9, op_capacity
+    str xzr, [x9]
+    LOAD_ADDR x9, print_capacity
+    str xzr, [x9]
+    LOAD_ADDR x9, var_capacity
+    str xzr, [x9]
+    LOAD_ADDR x9, fn_capacity
+    str xzr, [x9]
+    LOAD_ADDR x9, list_pool_capacity
+    str xzr, [x9]
+    LOAD_ADDR x9, map_pool_capacity
+    str xzr, [x9]
+
+    bl _snc_compile_collect
+
+    ldp x29, x30, [sp], #16
+    ret

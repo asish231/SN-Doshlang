@@ -27,8 +27,7 @@ _main:
     LOAD_ADDR x0, msg_usage
     mov x1, #2
     bl _write_cstr_fd
-    mov w0, #1
-    bl _exit
+    b Lmain_exit_failure
 
 Lmain_have_input:
     ldr x0, [x20, #8]
@@ -62,8 +61,7 @@ Lprint_version:
     LOAD_ADDR x0, msg_version
     mov x1, #1
     bl _write_cstr_fd
-    mov w0, #0
-    bl _exit
+    b Lmain_exit_success
 
 Lmain_load_file:
     mov x0, x21
@@ -168,6 +166,8 @@ Lmain_parse_fns_done:
 
     bl _emit_program
 
+Lmain_exit_success:
+    bl _snc_free_compiler_tables
     mov w0, #0
     bl _exit
 
@@ -175,6 +175,8 @@ Lmain_no_main_fn:
 
 
 Lmain_fail:
+Lmain_exit_failure:
+    bl _snc_free_compiler_tables
     mov w0, #1
     bl _exit
 

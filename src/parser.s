@@ -11976,6 +11976,53 @@ _call_function:
     bl _match_cstr_span
     cbnz x0, Lfn_call_ord
 
+    // Managed runtime memory and growable StringBuilder built-ins.
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_mem_live
+    bl _match_cstr_span
+    cbnz x0, Lfn_call_mem_live
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_mem_bytes
+    bl _match_cstr_span
+    cbnz x0, Lfn_call_mem_bytes
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_mem_collect
+    bl _match_cstr_span
+    cbnz x0, Lfn_call_mem_collect
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_builder_new
+    bl _match_cstr_span
+    cbnz x0, Lfn_call_builder_new
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_builder_append
+    bl _match_cstr_span
+    cbnz x0, Lfn_call_builder_append
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_builder_append_int
+    bl _match_cstr_span
+    cbnz x0, Lfn_call_builder_append_int
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_builder_string
+    bl _match_cstr_span
+    cbnz x0, Lfn_call_builder_string
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_builder_clear
+    bl _match_cstr_span
+    cbnz x0, Lfn_call_builder_clear
+    mov x0, x19
+    mov x1, x20
+    LOAD_ADDR x2, kw_builder_length
+    bl _match_cstr_span
+    cbnz x0, Lfn_call_builder_length
+
     LOAD_ADDR x9, var_scope_base
     ldr x10, [x9]
     str x10, [sp]
@@ -13130,6 +13177,200 @@ Lfn_call_ord_fold_zero:
     mov x2, #0                  // int
     mov x3, #0
     mov x4, #-1
+    b Lfn_call_return
+
+// --------------------------------------------------------------------------
+// Managed runtime memory controls and StringBuilder.
+// mem_live()/mem_bytes()/mem_collect() return int; builder_new() returns an
+// opaque ref<byte>. The remaining builder calls validate a reference argument
+// and record runtime operations 127..131.
+// --------------------------------------------------------------------------
+Lfn_call_mem_live:
+    mov x23, #123
+    mov x24, #0                 // int
+    mov x25, #0
+    b Lfn_call_managed_noarg
+Lfn_call_mem_bytes:
+    mov x23, #124
+    mov x24, #0                 // int
+    mov x25, #0
+    b Lfn_call_managed_noarg
+Lfn_call_mem_collect:
+    mov x23, #125
+    mov x24, #0                 // int
+    mov x25, #0
+    b Lfn_call_managed_noarg
+Lfn_call_builder_new:
+    mov x23, #126
+    mov x24, #9                 // ref<T>
+    mov x25, #3                 // byte metadata
+Lfn_call_managed_noarg:
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+    bl _allocate_temp_var
+    mov x22, x0
+    mov x0, x23
+    mov x1, x22
+    mov x2, #0
+    bl _record_operation
+    cbnz x0, Lfn_call_fail
+    mov x0, #0
+    mov x1, x24
+    mov x2, x24
+    mov x3, x25
+    mov x4, x22
+    b Lfn_call_return
+
+Lfn_call_builder_string:
+    mov x23, #129
+    mov x24, #2                 // str
+    mov x25, #0
+    b Lfn_call_builder_unary
+Lfn_call_builder_clear:
+    mov x23, #130
+    mov x24, #1                 // bool
+    mov x25, #0
+    b Lfn_call_builder_unary
+Lfn_call_builder_length:
+    mov x23, #131
+    mov x24, #0                 // int
+    mov x25, #0
+Lfn_call_builder_unary:
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+    bl _parse_expr_value
+    cbz x0, Lfn_call_fail
+    cmp x2, #9                  // ref<T>
+    b.ne Lstmt_type_mismatch
+    cmn x4, #1
+    b.eq Lstmt_type_mismatch
+    mov x21, x4                 // builder slot
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+    bl _allocate_temp_var
+    mov x22, x0
+    mov x0, x23
+    mov x1, x22
+    mov x2, x21
+    bl _record_operation
+    cbnz x0, Lfn_call_fail
+    mov x0, #0
+    mov x1, x24
+    mov x2, x24
+    mov x3, x25
+    mov x4, x22
+    b Lfn_call_return
+
+Lfn_call_builder_append:
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+    bl _parse_expr_value
+    cbz x0, Lfn_call_fail
+    cmp x2, #9                  // builder ref
+    b.ne Lstmt_type_mismatch
+    cmn x4, #1
+    b.eq Lstmt_type_mismatch
+    mov x21, x4
+    bl _skip_whitespace
+    mov w0, #','
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+    bl _parse_expr_value
+    cbz x0, Lfn_call_fail
+    cmp x2, #2                  // appended str
+    b.ne Lstmt_type_mismatch
+    mov x22, x1                 // literal pointer/value
+    mov x23, x3                 // literal length
+    mov x24, x4                 // source slot or -1
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+    mov x25, #0                 // runtime-slot source
+    cmn x24, #1
+    b.ne Lfn_call_builder_append_have_source
+    mov x0, x22
+    mov x1, #2
+    mov x2, x23
+    bl _record_data_value
+    mov x24, x0                 // data-value id
+    mov x25, #1                 // immediate source
+Lfn_call_builder_append_have_source:
+    bl _allocate_temp_var
+    mov x26, x0
+    mov x0, #127
+    mov x1, x26
+    mov x2, x21
+    mov x3, x24
+    mov x4, x25
+    bl _record_operation4
+    cbnz x0, Lfn_call_fail
+    mov x0, #0
+    mov x1, #1
+    mov x2, #1                  // bool
+    mov x3, #0
+    mov x4, x26
+    b Lfn_call_return
+
+Lfn_call_builder_append_int:
+    bl _skip_whitespace
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+    bl _parse_expr_value
+    cbz x0, Lfn_call_fail
+    cmp x2, #9                  // builder ref
+    b.ne Lstmt_type_mismatch
+    cmn x4, #1
+    b.eq Lstmt_type_mismatch
+    mov x21, x4
+    bl _skip_whitespace
+    mov w0, #','
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+    bl _parse_expr_value
+    cbz x0, Lfn_call_fail
+    cmp x2, #0                  // appended int
+    b.ne Lstmt_type_mismatch
+    mov x22, x1
+    mov x23, x4
+    bl _skip_whitespace
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lfn_call_fail
+    cmn x23, #1
+    b.ne Lfn_call_builder_append_int_have_slot
+    mov x0, x22
+    bl _expr_materialize_ct_int
+    cmn x0, #1
+    b.eq Lfn_call_fail
+    mov x23, x0
+Lfn_call_builder_append_int_have_slot:
+    bl _allocate_temp_var
+    mov x24, x0
+    mov x0, #128
+    mov x1, x24
+    mov x2, x21
+    mov x3, x23
+    bl _record_operation3
+    cbnz x0, Lfn_call_fail
+    mov x0, #0
+    mov x1, #1
+    mov x2, #1                  // bool
+    mov x3, #0
+    mov x4, x24
     b Lfn_call_return
 
 // --------------------------------------------------------------------------

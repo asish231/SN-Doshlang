@@ -477,6 +477,23 @@ expect "channel spawn"        'chan<int> jobs\nfn worker(){ jobs.send(42) }\nfn 
 expect "channel redeclare"    'fn cycle(){chan<int> c c.send(3) print(c.receive()) c.close()} fn main(){cycle() cycle()}' "3 3"
 expect "channel bounded sync" 'chan<int> jobs\nfn producer(){int i=0 while(i<100){jobs.send(i) i=i+1}}\nfn main(){spawn producer() int sum=0 int n=0 while(n<100){int v=jobs.receive() sum=sum+v n=n+1} print(sum) print(wait()) jobs.close()}' "4950 1"
 expect_compile_fail "channel type mismatch" 'fn main(){ chan<int> c c.send("wrong") }' "error:"
+
+# Managed runtime memory and the growable StringBuilder API. Computed strings
+# are registered by the runtime allocator; mem_collect() releases the current
+# arena deterministically and returns the number of released allocations. Raw
+# alloc()/free() pointers deliberately remain outside the managed arena.
+expect "managed string collect" 'fn main(){ str s="abc".upper() print(mem_live()) print(mem_bytes()) print(mem_collect()) print(mem_live()) }' "1 4 1 0"
+expect "managed file read"      'fn main(){ file_write("/tmp/snc_assert_managed.txt","data") str s=file_read("/tmp/snc_assert_managed.txt") print(mem_live()) print(mem_collect()) print(mem_live()) }' "1 1 0"
+expect "raw alloc stays manual" 'fn main(){ ref<int> p=alloc(16) set(p,7) print(value(p)) print(mem_live()) free(p) print(mem_live()) }' "7 0 0"
+expect "builder basic"          'fn main(){ ref<byte> b=builder_new() print(builder_append(b,"ab")) print(builder_append_int(b,42)) print(builder_length(b)) str s=builder_string(b) print(s) print(mem_live()) print(mem_collect()) print(mem_live()) }' "1 1 4 ab42 3 3 0"
+expect "builder grows"          'fn main(){ ref<byte> b=builder_new() int i=0 while(i<100){ builder_append(b,"xy") i++ } print(builder_length(b)) print(mem_live()) print(mem_collect()) }' "200 2 2"
+expect "builder clear"          'fn main(){ ref<byte> b=builder_new() builder_append(b,"abcdef") print(builder_length(b)) print(builder_clear(b)) print(builder_length(b)) print(mem_collect()) }' "6 1 0 2"
+expect "builder rejects raw ref" 'fn main(){ ref<byte> p=alloc(32) print(builder_append(p,"x")) print(builder_length(p)) print(builder_clear(p)) free(p) }' "0 0 0"
+expect "builder rejects collected ref" 'fn main(){ ref<byte> b=builder_new() print(mem_collect()) print(builder_length(b)) print(builder_append(b,"x")) }' "2 0 0"
+expect "managed threaded string" 'fn worker(){ str s="thread".upper() }\nfn main(){ spawn worker() print(wait()) print(mem_live()) print(mem_collect()) print(mem_live()) }' "1 1 1 0"
+expect "managed collection loop" 'fn main(){ int i=0 while(i<1000){ str s=str(i) mem_collect() i++ } print(mem_live()) }' "0"
+expect "managed thread stress" 'fn worker(){ int i=0 while(i<100){ str s=str(i) i++ } }\nfn main(){ spawn worker() spawn worker() print(wait()) print(mem_live()) print(mem_collect()) print(mem_live()) }' "2 200 200 0"
+expect_compile_fail "builder append type" 'fn main(){ ref<byte> b=builder_new() builder_append(b,123) }' "error:"
 # `spawn obj.method()` (spawning a blueprint method) is not yet supported and now
 # fails with a CLEAR diagnostic instead of the former confusing empty "line N:"
 # error (its capture path clobbered the object-name registers and used an

@@ -348,7 +348,7 @@ _i64_to_cstr:
 
     mov x19, x0
     mov x0, #32
-    bl _malloc
+    bl _snc_compile_alloc
     cbz x0, Li64_to_cstr_fail
     mov x20, x0
     add x21, x20, #31
@@ -454,7 +454,7 @@ Ldec_to_cstr_len_sign_done:
 Ldec_to_cstr_len_done:
 
     add x0, x27, #1 // + nul
-    bl _malloc
+    bl _snc_compile_alloc
     cbz x0, Ldec_to_cstr_fail
     mov x28, x0 // out ptr
 
@@ -575,7 +575,7 @@ _file_read:
 
     // Allocate size + 1
     add x0, x21, #1
-    bl _malloc
+    bl _snc_compile_alloc
     cbz x0, Lfile_read_alloc_fail
     mov x22, x0 // buffer
 
@@ -685,7 +685,7 @@ _str_concat_len:
     // Allocate len1 + len2 + 1
     add x0, x20, x22
     add x0, x0, #1
-    bl _malloc
+    bl _snc_compile_alloc
     cbz x0, Lstr_concat_len_fail
     mov x23, x0 // result ptr
 
@@ -844,7 +844,7 @@ Lmodule_search_loop:
     add x0, x24, #1
     add x0, x0, x20
     add x0, x0, #4
-    bl _malloc
+    bl _snc_compile_alloc
     cbz x0, Lmodule_search_next
     mov x25, x0  // x25 = allocated buffer
 
@@ -901,7 +901,7 @@ Lmodule_add_ext:
 
     // Not found — free and try next search path
     mov x0, x25
-    bl _free
+    bl _snc_compile_free
 
 Lmodule_search_next:
     add x22, x22, #1
@@ -1027,9 +1027,9 @@ _load_module:
 
     add x0, x20, #1
 #ifdef _WIN32
-    bl malloc
+    bl _snc_compile_alloc
 #else
-    bl _malloc
+    bl _snc_compile_alloc
 #endif
     cbz x0, Lload_module_alloc_error
     mov x23, x0
@@ -1110,7 +1110,7 @@ _open_file:
 _free_module_path:
     stp x29, x30, [sp, #-16]!
     mov x29, sp
-    bl _free
+    bl _snc_compile_free
     ldp x29, x30, [sp], #16
     ret
 
@@ -1133,9 +1133,9 @@ _save_parser_state:
     // Allocate state buffer
     mov x0, #64  // 8 * 8 bytes
 #ifdef _WIN32
-    bl malloc
+    bl _snc_compile_alloc
 #else
-    bl _malloc
+    bl _snc_compile_alloc
 #endif
     cbz x0, Lsave_state_fail
     
@@ -1243,9 +1243,9 @@ _restore_parser_state:
     // Free state buffer
     mov x0, x19
 #ifdef _WIN32
-    bl free
+    bl _snc_compile_free
 #else
-    bl _free
+    bl _snc_compile_free
 #endif
     
     ldp x19, x20, [sp], #16
@@ -1350,7 +1350,7 @@ Lparse_module_adjust_done:
 
 Lparse_module_read_error:
     mov x0, x21
-    bl _free
+    bl _snc_compile_free
 
 Lparse_module_file_error:
     mov x0, x20
@@ -1516,9 +1516,9 @@ _add_module_search_path:
     // Allocate memory for path copy
     add x0, x22, #1  // + null terminator
 #ifdef _WIN32
-    bl malloc
+    bl _snc_compile_alloc
 #else
-    bl _malloc
+    bl _snc_compile_alloc
 #endif
     cbz x0, Ladd_search_path_alloc_error
     
@@ -1654,9 +1654,9 @@ _register_imported_function:
     // Allocate memory for function name copy
     add x0, x20, #1  // + null terminator
 #ifdef _WIN32
-    bl malloc
+    bl _snc_compile_alloc
 #else
-    bl _malloc
+    bl _snc_compile_alloc
 #endif
     cbz x0, Lregister_function_alloc_error
     

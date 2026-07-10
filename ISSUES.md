@@ -10,7 +10,7 @@ binaries, and comparing their printed output to the expected values.
 
 > **Update (2026-07-09) — self-hosting prerequisites landed.** Several items the
 > status paragraph below lists as "still blocks self-hosting" are now **done**,
-> verified by `make assert` = **224/224 must-pass** and the examples sweep =
+> verified by `make assert` = **236/236 must-pass** and the examples sweep =
 > **156/163 run OK** (the other 7 are deliberate negative tests):
 >
 > - **`system(cmd)` / `exec(cmd)` builtin** (op 114) — runs an external command and
@@ -59,6 +59,15 @@ binaries, and comparing their printed output to the expected values.
 > over function-derived values were fixed along the way. Verification: **224/224**
 > assertions, **15/15** module tests, `make test`, and `make selfhost` all pass.
 >
+> **Update (2026-07-10, later) — managed runtime memory and StringBuilder are
+> implemented.** Compiler-owned heap data is released on every success/error exit. Emitted
+> programs register computed strings, file buffers, and builder storage in a thread-safe
+> managed arena, automatically release it at program shutdown (after joining workers), and
+> can reset it explicitly with `mem_collect()`. `builder_new` plus append/string/clear/length
+> operations provide growable, non-quadratic output construction. Raw `alloc()` / `free()`
+> remains a separate manual API. Verification: **236/236** assertions, including collection,
+> builder growth, invalid/stale handles, loops, and spawned-thread stress.
+>
 > Still open (see `SELF_HOSTING_ROADMAP.md`): a real standard library, syscalls/FFI, and the
 > compiler-in-SNlang + bootstrap proof.
 
@@ -66,7 +75,7 @@ binaries, and comparing their printed output to the expected values.
 > a broad set of programs — integers, variables, arithmetic with correct precedence,
 > comparisons, `if`/`else` branch selection, `while` loops, `for`-in loops over lists,
 > strings and string interpolation, lists, **and functions with integer arguments, return
-> values and recursion** (see sections 3–4, and run `make assert` → **224 must-pass**). An
+> values and recursion** (see sections 3–4, and run `make assert` → **236 must-pass**). An
 > intermittent compiler crash was also found and fixed (section 2.1), and the former
 > **±256 stack-offset limit** for verified large function frames is now fixed (section 6).
 > The language now runs real multi-function programs (e.g. recursive
@@ -900,6 +909,34 @@ runtime `%` no longer treats a function-derived tracking value as a compile-time
 string interpolation uses the active module `source_ptr` instead of the primary source
 buffer. Verified: **`make assert` = 224/224**, module suite **15/15**, `make test`, and
 `make selfhost` all pass.
+
+### 2.27 DONE — managed phase memory, compiler cleanup, and growable StringBuilder
+
+The seed compiler now releases all malloc-backed tables, pools, source buffers, module
+strings, and tracked temporary allocations on both successful and failed exits. This is
+compiler-lifetime cleanup: individual temporary buffers can still be released early, while
+the final collector safely reclaims everything remaining.
+
+Emitted programs now use a separate thread-safe managed arena for computed strings,
+interpolation/conversion results, string methods, `file_read`, and StringBuilder storage.
+The runtime provides:
+
+- `mem_live()` and `mem_bytes()` for diagnostics;
+- `mem_collect()` to release the current phase arena and return the allocation count;
+- automatic final collection from `main`, after outstanding spawned workers are joined;
+- `builder_new()`, `builder_append()`, `builder_append_int()`, `builder_string()`,
+  `builder_clear()`, and `builder_length()` for amortized growable output construction.
+
+Builder handles carry a checked runtime marker and allocation-size validation, so raw
+`ref<byte>` pointers and handles invalidated by `mem_collect()` are rejected instead of
+being dereferenced. Explicit `alloc()` / `free()` stays outside the managed arena for FFI
+and low-level use. This is deliberately a **phase/process arena**, not reference counting
+or tracing GC: calling `mem_collect()` invalidates all currently managed strings/builders,
+so callers must collect only at a phase boundary after discarding them.
+
+Regression coverage includes computed strings, file reads, raw-pointer isolation, builder
+growth/clear/type checks, invalid and stale handles, 1000 collection cycles, and concurrent
+allocation by spawned workers. Verified: **`make assert` = 236/236**, 0 known-broken.
 
 ---
 

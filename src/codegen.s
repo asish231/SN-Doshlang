@@ -94,6 +94,28 @@ Lemit_no_stack_alloc:
     // execute main's body, then keep falling through into unrelated
     // function code instead of returning to the OS. That was the real
     // cause of "a no-arg function call hangs at runtime".
+#ifndef _WIN32
+    // Managed cleanup must not race a worker that is still allocating. If the
+    // program contains any spawn body, join all recorded workers before the
+    // epilogue calls _snc_memory_cleanup. An explicit wait() remains valid;
+    // this second call then joins zero threads.
+    LOAD_ADDR x9, fn_count
+    ldr x10, [x9]
+    mov x11, #0
+Lemit_main_cleanup_spawn_scan:
+    cmp x11, x10
+    b.ge Lemit_main_cleanup_spawn_done
+    LOAD_ADDR x12, spawn_fn_op_counts
+    ldr x13, [x12, x11, lsl #3]
+    cbnz x13, Lemit_main_cleanup_spawn_wait
+    add x11, x11, #1
+    b Lemit_main_cleanup_spawn_scan
+Lemit_main_cleanup_spawn_wait:
+    LOAD_ADDR x0, asm_call_spawn_wait
+    mov x1, #1
+    bl _write_cstr_fd
+Lemit_main_cleanup_spawn_done:
+#endif
     LOAD_ADDR x0, asm_main_epilogue
     mov x1, #1
     bl _write_cstr_fd
@@ -647,6 +669,12 @@ Lemit_spawn_worker_functions_exit:
 Lemit_emit_runtime_helpers:
     stp x29, x30, [sp, #-16]!
     mov x29, sp
+    // Every emitted program gets the managed allocator because the main
+    // epilogue always calls its cleanup routine, even when no value allocates.
+    LOAD_ADDR x0, asm_memory_runtime
+    mov x1, #1
+    bl _write_cstr_fd
+
     LOAD_ADDR x0, asm_runtime_helpers
     mov x1, #1
     bl _write_cstr_fd
@@ -1122,6 +1150,24 @@ _emit_operation:
     b.eq Lemit_op_channel_close
     cmp x21, #122
     b.eq Lemit_op_channel_init
+    cmp x21, #123
+    b.eq Lemit_op_mem_live
+    cmp x21, #124
+    b.eq Lemit_op_mem_bytes
+    cmp x21, #125
+    b.eq Lemit_op_mem_collect
+    cmp x21, #126
+    b.eq Lemit_op_builder_new
+    cmp x21, #127
+    b.eq Lemit_op_builder_append
+    cmp x21, #128
+    b.eq Lemit_op_builder_append_int
+    cmp x21, #129
+    b.eq Lemit_op_builder_string
+    cmp x21, #130
+    b.eq Lemit_op_builder_clear
+    cmp x21, #131
+    b.eq Lemit_op_builder_length
 
     b Lemit_op_done
 
@@ -1325,6 +1371,137 @@ Lemit_op_channel_init:
     LOAD_ADDR x0, asm_channel_init
     mov x1, #1
     bl _write_cstr_fd
+    b Lemit_op_done
+
+Lemit_op_mem_live:
+    LOAD_ADDR x0, asm_call_mem_live
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_op_managed_store_x0
+
+Lemit_op_mem_bytes:
+    LOAD_ADDR x0, asm_call_mem_bytes
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_op_managed_store_x0
+
+Lemit_op_mem_collect:
+    LOAD_ADDR x0, asm_call_mem_collect
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_op_managed_store_x0
+
+Lemit_op_builder_new:
+    LOAD_ADDR x0, asm_call_builder_new
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_op_managed_store_x0
+
+Lemit_op_builder_append:
+    // arg0=result, arg1=builder ref slot, arg2=str data id/slot,
+    // arg3 bit0=immediate string.
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, x0
+    mov x0, #0
+    bl _emit_stack_load_reg_fd
+
+    LOAD_ADDR x20, emit_tbl_arg3
+    ldr x20, [x20]
+    ldr x22, [x20, x19, lsl #3]
+    tbz x22, #0, Lemit_builder_append_str_slot
+    LOAD_ADDR x0, asm_load_x1_print_val_prefix
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, emit_tbl_arg2
+    ldr x20, [x20]
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_load_x1_print_val_middle
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, emit_tbl_arg2
+    ldr x20, [x20]
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_load_x1_print_val_suffix
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_builder_append_call
+Lemit_builder_append_str_slot:
+    LOAD_ADDR x20, emit_tbl_arg2
+    ldr x20, [x20]
+    ldr x1, [x20, x19, lsl #3]
+    mov x0, #1
+    bl _emit_stack_load_reg_fd
+Lemit_builder_append_call:
+    LOAD_ADDR x0, asm_call_builder_append
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_op_managed_store_x0
+
+Lemit_op_builder_append_int:
+    // Both arguments are materialized runtime slots.
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, x0
+    mov x0, #0
+    bl _emit_stack_load_reg_fd
+    LOAD_ADDR x20, emit_tbl_arg2
+    ldr x20, [x20]
+    ldr x1, [x20, x19, lsl #3]
+    mov x0, #1
+    bl _emit_stack_load_reg_fd
+    LOAD_ADDR x0, asm_call_builder_append_int
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_op_managed_store_x0
+
+Lemit_op_builder_string:
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, x0
+    mov x0, #0
+    bl _emit_stack_load_reg_fd
+    LOAD_ADDR x0, asm_call_builder_string
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_op_managed_store_x0
+
+Lemit_op_builder_clear:
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, x0
+    mov x0, #0
+    bl _emit_stack_load_reg_fd
+    LOAD_ADDR x0, asm_call_builder_clear
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_op_managed_store_x0
+
+Lemit_op_builder_length:
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, x0
+    mov x0, #0
+    bl _emit_stack_load_reg_fd
+    LOAD_ADDR x0, asm_call_builder_length
+    mov x1, #1
+    bl _write_cstr_fd
+
+Lemit_op_managed_store_x0:
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
+    ldr x1, [x20, x19, lsl #3]
+    mov x0, #0
+    bl _emit_stack_store_reg_fd
     b Lemit_op_done
 
 Lemit_op_address:
