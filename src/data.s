@@ -93,6 +93,10 @@
 .global kw_argv
 .global kw_wait
 .global kw_ord
+.global kw_chan
+.global kw_send
+.global kw_receive
+.global kw_close
 .global kw_ref
 .global kw_address
 .global kw_value
@@ -172,8 +176,10 @@
 .global hidden_var_name_storage
 .global spawn_capture_fn_id
 .global spawn_wait_used
+.global channel_count
 .global primary_module_name
 .global primary_module_name_len
+.global forced_call_fn_id_plus1
 .global spawn_fn_op_counts
 .global spawn_fn_op_kinds
 .global spawn_fn_op_arg0
@@ -239,6 +245,11 @@
 .global asm_call_spawn_go
 .global asm_call_spawn_wait
 .global asm_spawn_wait_runtime
+.global asm_channel_runtime
+.global asm_call_chan_send
+.global asm_call_chan_receive
+.global asm_call_chan_close
+.global asm_channel_init
 #ifdef _WIN32
 #else
 .global asm_spawn_thread_runtime
@@ -549,6 +560,8 @@
 .global fn_op_counts
 .global fn_scope_bases
 .global fn_frame_sizes
+.global fn_module_ids
+.global fn_import_visible
 .global cur_scope_base
 .global last_call_result_slot
 .global var_scope_base
@@ -651,6 +664,10 @@ kw_argc:           .asciz "argc"
 kw_argv:           .asciz "argv"
 kw_wait:           .asciz "wait"
 kw_ord:            .asciz "ord"
+kw_chan:           .asciz "chan"
+kw_send:           .asciz "send"
+kw_receive:        .asciz "receive"
+kw_close:          .asciz "close"
 kw_ref:            .asciz "ref"
 kw_address:        .asciz "address"
 kw_value:          .asciz "value"
@@ -1055,6 +1072,40 @@ asm_spawn_wait_runtime:
     .asciz ""
 #else
     .asciz "\n.text\n.align 4\n.global _snc_spawn_wait\n_snc_spawn_wait:\n    stp x29, x30, [sp, #-48]!\n    mov x29, sp\n    stp x19, x20, [sp, #16]\n    stp x21, x22, [sp, #32]\n    adrp x19, _snc_spawn_ntids@PAGE\n    add x19, x19, _snc_spawn_ntids@PAGEOFF\n    adrp x20, _snc_spawn_tids@PAGE\n    add x20, x20, _snc_spawn_tids@PAGEOFF\n    ldr x21, [x19]\n    mov x22, #0\nL_snc_sw_loop:\n    cmp x22, x21\n    b.ge L_snc_sw_done\n    ldr x0, [x20, x22, lsl #3]\n    mov x1, #0\n    bl _pthread_join\n    add x22, x22, #1\n    b L_snc_sw_loop\nL_snc_sw_done:\n    str xzr, [x19]\n    mov x0, x21\n    ldp x21, x22, [sp, #32]\n    ldp x19, x20, [sp, #16]\n    ldp x29, x30, [sp], #48\n    ret\n\n.data\n.align 3\n_snc_spawn_ntids:\n    .quad 0\n_snc_spawn_tids:\n    .space 2048\n"
+#endif
+// Bounded MPMC channel runtime: 64 channels x 64 machine-word values. A tiny
+// AArch64 exclusive-load spinlock avoids relying on platform-specific pthread
+// mutex/condition object layouts. send/receive block by retrying; close wakes
+// retrying receivers logically (closed+empty returns zero) and rejects sends.
+asm_channel_runtime:
+#ifdef _WIN32
+    .asciz "\n.text\n.align 4\n.global snc_chan_lock\nsnc_chan_lock:\n    adrp x9, snc_chan_locks\n    add x9, x9, :lo12:snc_chan_locks\n    add x9, x9, x0, lsl #3\nL_snc_ch_lock_retry:\n    ldaxr x10, [x9]\n    cbnz x10, L_snc_ch_lock_retry\n    mov x10, #1\n    stlxr w11, x10, [x9]\n    cbnz w11, L_snc_ch_lock_retry\n    ret\n\n.global snc_chan_unlock\nsnc_chan_unlock:\n    adrp x9, snc_chan_locks\n    add x9, x9, :lo12:snc_chan_locks\n    add x9, x9, x0, lsl #3\n    stlr xzr, [x9]\n    ret\n\n.global snc_chan_send\nsnc_chan_send:\n    stp x29, x30, [sp, #-48]!\n    mov x29, sp\n    stp x19, x20, [sp, #16]\n    str x21, [sp, #32]\n    mov x19, x0\n    mov x20, x1\nL_snc_ch_send_retry:\n    mov x0, x19\n    bl snc_chan_lock\n    adrp x9, snc_chan_closed\n    add x9, x9, :lo12:snc_chan_closed\n    ldr x10, [x9, x19, lsl #3]\n    cbnz x10, L_snc_ch_send_closed\n    adrp x21, snc_chan_counts\n    add x21, x21, :lo12:snc_chan_counts\n    ldr x10, [x21, x19, lsl #3]\n    cmp x10, #64\n    b.ge L_snc_ch_send_full\n    adrp x9, snc_chan_tails\n    add x9, x9, :lo12:snc_chan_tails\n    ldr x11, [x9, x19, lsl #3]\n    adrp x12, snc_chan_values\n    add x12, x12, :lo12:snc_chan_values\n    add x12, x12, x19, lsl #9\n    str x20, [x12, x11, lsl #3]\n    add x11, x11, #1\n    and x11, x11, #63\n    str x11, [x9, x19, lsl #3]\n    add x10, x10, #1\n    str x10, [x21, x19, lsl #3]\n    mov x0, x19\n    bl snc_chan_unlock\n    mov x0, #1\n    b L_snc_ch_send_return\nL_snc_ch_send_full:\n    mov x0, x19\n    bl snc_chan_unlock\n    b L_snc_ch_send_retry\nL_snc_ch_send_closed:\n    mov x0, x19\n    bl snc_chan_unlock\n    mov x0, #0\nL_snc_ch_send_return:\n    ldr x21, [sp, #32]\n    ldp x19, x20, [sp, #16]\n    ldp x29, x30, [sp], #48\n    ret\n\n.global snc_chan_receive\nsnc_chan_receive:\n    stp x29, x30, [sp, #-48]!\n    mov x29, sp\n    stp x19, x20, [sp, #16]\n    str x21, [sp, #32]\n    mov x19, x0\nL_snc_ch_recv_retry:\n    mov x0, x19\n    bl snc_chan_lock\n    adrp x21, snc_chan_counts\n    add x21, x21, :lo12:snc_chan_counts\n    ldr x10, [x21, x19, lsl #3]\n    cbnz x10, L_snc_ch_recv_value\n    adrp x9, snc_chan_closed\n    add x9, x9, :lo12:snc_chan_closed\n    ldr x11, [x9, x19, lsl #3]\n    cbnz x11, L_snc_ch_recv_closed\n    mov x0, x19\n    bl snc_chan_unlock\n    b L_snc_ch_recv_retry\nL_snc_ch_recv_value:\n    adrp x9, snc_chan_heads\n    add x9, x9, :lo12:snc_chan_heads\n    ldr x11, [x9, x19, lsl #3]\n    adrp x12, snc_chan_values\n    add x12, x12, :lo12:snc_chan_values\n    add x12, x12, x19, lsl #9\n    ldr x20, [x12, x11, lsl #3]\n    add x11, x11, #1\n    and x11, x11, #63\n    str x11, [x9, x19, lsl #3]\n    sub x10, x10, #1\n    str x10, [x21, x19, lsl #3]\n    mov x0, x19\n    bl snc_chan_unlock\n    mov x0, x20\n    b L_snc_ch_recv_return\nL_snc_ch_recv_closed:\n    mov x0, x19\n    bl snc_chan_unlock\n    mov x0, #0\nL_snc_ch_recv_return:\n    ldr x21, [sp, #32]\n    ldp x19, x20, [sp, #16]\n    ldp x29, x30, [sp], #48\n    ret\n\n.global snc_chan_close\nsnc_chan_close:\n    stp x29, x30, [sp, #-32]!\n    mov x29, sp\n    str x19, [sp, #16]\n    mov x19, x0\n    bl snc_chan_lock\n    adrp x9, snc_chan_closed\n    add x9, x9, :lo12:snc_chan_closed\n    ldr x10, [x9, x19, lsl #3]\n    cbnz x10, L_snc_ch_close_done\n    mov x10, #1\n    str x10, [x9, x19, lsl #3]\n    mov x0, x19\n    bl snc_chan_unlock\n    mov x0, #1\n    b L_snc_ch_close_return\nL_snc_ch_close_done:\n    mov x0, x19\n    bl snc_chan_unlock\n    mov x0, #0\nL_snc_ch_close_return:\n    ldr x19, [sp, #16]\n    ldp x29, x30, [sp], #32\n    ret\n\n.data\n.align 3\nsnc_chan_locks: .space 512\nsnc_chan_heads: .space 512\nsnc_chan_tails: .space 512\nsnc_chan_counts: .space 512\nsnc_chan_closed: .space 512\nsnc_chan_values: .space 32768\n"
+#else
+    .asciz "\n.text\n.align 4\n.global _snc_chan_lock\n_snc_chan_lock:\n    adrp x9, _snc_chan_locks@PAGE\n    add x9, x9, _snc_chan_locks@PAGEOFF\n    add x9, x9, x0, lsl #3\nL_snc_ch_lock_retry:\n    ldaxr x10, [x9]\n    cbnz x10, L_snc_ch_lock_retry\n    mov x10, #1\n    stlxr w11, x10, [x9]\n    cbnz w11, L_snc_ch_lock_retry\n    ret\n\n.global _snc_chan_unlock\n_snc_chan_unlock:\n    adrp x9, _snc_chan_locks@PAGE\n    add x9, x9, _snc_chan_locks@PAGEOFF\n    add x9, x9, x0, lsl #3\n    stlr xzr, [x9]\n    ret\n\n.global _snc_chan_send\n_snc_chan_send:\n    stp x29, x30, [sp, #-48]!\n    mov x29, sp\n    stp x19, x20, [sp, #16]\n    str x21, [sp, #32]\n    mov x19, x0\n    mov x20, x1\nL_snc_ch_send_retry:\n    mov x0, x19\n    bl _snc_chan_lock\n    adrp x9, _snc_chan_closed@PAGE\n    add x9, x9, _snc_chan_closed@PAGEOFF\n    ldr x10, [x9, x19, lsl #3]\n    cbnz x10, L_snc_ch_send_closed\n    adrp x21, _snc_chan_counts@PAGE\n    add x21, x21, _snc_chan_counts@PAGEOFF\n    ldr x10, [x21, x19, lsl #3]\n    cmp x10, #64\n    b.ge L_snc_ch_send_full\n    adrp x9, _snc_chan_tails@PAGE\n    add x9, x9, _snc_chan_tails@PAGEOFF\n    ldr x11, [x9, x19, lsl #3]\n    adrp x12, _snc_chan_values@PAGE\n    add x12, x12, _snc_chan_values@PAGEOFF\n    add x12, x12, x19, lsl #9\n    str x20, [x12, x11, lsl #3]\n    add x11, x11, #1\n    and x11, x11, #63\n    str x11, [x9, x19, lsl #3]\n    add x10, x10, #1\n    str x10, [x21, x19, lsl #3]\n    mov x0, x19\n    bl _snc_chan_unlock\n    mov x0, #1\n    b L_snc_ch_send_return\nL_snc_ch_send_full:\n    mov x0, x19\n    bl _snc_chan_unlock\n    b L_snc_ch_send_retry\nL_snc_ch_send_closed:\n    mov x0, x19\n    bl _snc_chan_unlock\n    mov x0, #0\nL_snc_ch_send_return:\n    ldr x21, [sp, #32]\n    ldp x19, x20, [sp, #16]\n    ldp x29, x30, [sp], #48\n    ret\n\n.global _snc_chan_receive\n_snc_chan_receive:\n    stp x29, x30, [sp, #-48]!\n    mov x29, sp\n    stp x19, x20, [sp, #16]\n    str x21, [sp, #32]\n    mov x19, x0\nL_snc_ch_recv_retry:\n    mov x0, x19\n    bl _snc_chan_lock\n    adrp x21, _snc_chan_counts@PAGE\n    add x21, x21, _snc_chan_counts@PAGEOFF\n    ldr x10, [x21, x19, lsl #3]\n    cbnz x10, L_snc_ch_recv_value\n    adrp x9, _snc_chan_closed@PAGE\n    add x9, x9, _snc_chan_closed@PAGEOFF\n    ldr x11, [x9, x19, lsl #3]\n    cbnz x11, L_snc_ch_recv_closed\n    mov x0, x19\n    bl _snc_chan_unlock\n    b L_snc_ch_recv_retry\nL_snc_ch_recv_value:\n    adrp x9, _snc_chan_heads@PAGE\n    add x9, x9, _snc_chan_heads@PAGEOFF\n    ldr x11, [x9, x19, lsl #3]\n    adrp x12, _snc_chan_values@PAGE\n    add x12, x12, _snc_chan_values@PAGEOFF\n    add x12, x12, x19, lsl #9\n    ldr x20, [x12, x11, lsl #3]\n    add x11, x11, #1\n    and x11, x11, #63\n    str x11, [x9, x19, lsl #3]\n    sub x10, x10, #1\n    str x10, [x21, x19, lsl #3]\n    mov x0, x19\n    bl _snc_chan_unlock\n    mov x0, x20\n    b L_snc_ch_recv_return\nL_snc_ch_recv_closed:\n    mov x0, x19\n    bl _snc_chan_unlock\n    mov x0, #0\nL_snc_ch_recv_return:\n    ldr x21, [sp, #32]\n    ldp x19, x20, [sp, #16]\n    ldp x29, x30, [sp], #48\n    ret\n\n.global _snc_chan_close\n_snc_chan_close:\n    stp x29, x30, [sp, #-32]!\n    mov x29, sp\n    str x19, [sp, #16]\n    mov x19, x0\n    bl _snc_chan_lock\n    adrp x9, _snc_chan_closed@PAGE\n    add x9, x9, _snc_chan_closed@PAGEOFF\n    ldr x10, [x9, x19, lsl #3]\n    cbnz x10, L_snc_ch_close_done\n    mov x10, #1\n    str x10, [x9, x19, lsl #3]\n    mov x0, x19\n    bl _snc_chan_unlock\n    mov x0, #1\n    b L_snc_ch_close_return\nL_snc_ch_close_done:\n    mov x0, x19\n    bl _snc_chan_unlock\n    mov x0, #0\nL_snc_ch_close_return:\n    ldr x19, [sp, #16]\n    ldp x29, x30, [sp], #32\n    ret\n\n.data\n.align 3\n_snc_chan_locks: .space 512\n_snc_chan_heads: .space 512\n_snc_chan_tails: .space 512\n_snc_chan_counts: .space 512\n_snc_chan_closed: .space 512\n_snc_chan_values: .space 32768\n"
+#endif
+asm_call_chan_send:
+#ifdef _WIN32
+    .asciz "    bl snc_chan_send\n"
+#else
+    .asciz "    bl _snc_chan_send\n"
+#endif
+asm_call_chan_receive:
+#ifdef _WIN32
+    .asciz "    bl snc_chan_receive\n"
+#else
+    .asciz "    bl _snc_chan_receive\n"
+#endif
+asm_call_chan_close:
+#ifdef _WIN32
+    .asciz "    bl snc_chan_close\n"
+#else
+    .asciz "    bl _snc_chan_close\n"
+#endif
+asm_channel_init:
+#ifdef _WIN32
+    .asciz "    adrp x9, snc_chan_heads\n    add x9, x9, :lo12:snc_chan_heads\n    str xzr, [x9, x0, lsl #3]\n    adrp x9, snc_chan_tails\n    add x9, x9, :lo12:snc_chan_tails\n    str xzr, [x9, x0, lsl #3]\n    adrp x9, snc_chan_counts\n    add x9, x9, :lo12:snc_chan_counts\n    str xzr, [x9, x0, lsl #3]\n    adrp x9, snc_chan_closed\n    add x9, x9, :lo12:snc_chan_closed\n    str xzr, [x9, x0, lsl #3]\n"
+#else
+    .asciz "    adrp x9, _snc_chan_heads@PAGE\n    add x9, x9, _snc_chan_heads@PAGEOFF\n    str xzr, [x9, x0, lsl #3]\n    adrp x9, _snc_chan_tails@PAGE\n    add x9, x9, _snc_chan_tails@PAGEOFF\n    str xzr, [x9, x0, lsl #3]\n    adrp x9, _snc_chan_counts@PAGE\n    add x9, x9, _snc_chan_counts@PAGEOFF\n    str xzr, [x9, x0, lsl #3]\n    adrp x9, _snc_chan_closed@PAGE\n    add x9, x9, _snc_chan_closed@PAGEOFF\n    str xzr, [x9, x0, lsl #3]\n"
 #endif
 asm_ret:
     .asciz "    ret\n"
@@ -1707,6 +1758,12 @@ fn_return_extra_types: .quad 0
 fn_return_extra_decl_lengths: .quad 0
 .global fn_blueprint_ids
 fn_blueprint_ids: .quad 0
+// Owning module index for each function, or -1 for functions from the primary
+// source file. Grows in lockstep with the other fn_* tables.
+fn_module_ids:  .quad 0
+// Whether an imported function is currently visible to unqualified calls.
+// Module bodies remain available regardless, and qualified calls bypass this.
+fn_import_visible: .quad 0
 fn_capacity:     .quad 0   // current allocated capacity (in entries) of the fn tables
 fn_return_value: .space 8
 fn_return_length: .space 8
@@ -1779,6 +1836,7 @@ method_name_storage: .quad 0
 hidden_var_name_storage: .quad 0     // malloc-backed; grows with the var tables (see _snc_grow_vars), 32 bytes/entry, indexed by the global var index
 spawn_capture_fn_id:   .space 8
 spawn_wait_used:       .space 8           // 1 if wait() builtin used -> emit _snc_spawn_wait
+channel_count:         .space 8           // compile-time channel ids; emitted runtime supports 64
 spawn_fn_op_counts:    .space 256         // 32 functions * 8 (op counts for spawn bodies)
 spawn_fn_op_kinds:    .space 65536       // 32 * 256 * 8
 spawn_fn_op_arg0:      .space 65536
@@ -1788,6 +1846,9 @@ spawn_fn_op_arg3:      .space 65536
 spawn_fn_op_arg4:      .space 65536
 primary_module_name:   .space 8           // Store module name ptr during qualified access
 primary_module_name_len: .space 8         // Store module name length during qualified access
+// One-shot qualified-call override. Zero means normal name lookup; otherwise
+// the value is the exact function index plus one (so function 0 is representable).
+forced_call_fn_id_plus1: .space 8
 emit_tbl_kinds:        .space 8
 emit_tbl_arg0:         .space 8
 emit_tbl_arg1:         .space 8

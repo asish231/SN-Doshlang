@@ -1,0 +1,5 @@
+use std.math except factorial
+
+fn main() {
+    print(factorial(5))
+}

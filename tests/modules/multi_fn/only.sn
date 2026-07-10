@@ -1,0 +1,6 @@
+use std.math only abs, gcd
+
+fn main() {
+    print(abs(-5))
+    print(gcd(48, 18))
+}

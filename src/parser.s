@@ -264,6 +264,12 @@ _parse_statement:
 
     mov x0, x19
     mov x1, x20
+    LOAD_ADDR x2, kw_chan
+    bl _match_cstr_span
+    cbnz x0, Lstmt_chan
+
+    mov x0, x19
+    mov x1, x20
     LOAD_ADDR x2, kw_ref
     bl _match_cstr_span
     cbnz x0, Lstmt_ref
@@ -1564,6 +1570,91 @@ Lstmt_bracket_list_decl:
     mov x24, #4      // unified list type ID
     b Lstmt_list_name
 
+// `chan<T> name` or `chan<T> name = chan<T>()`.
+// Channels are stable compile-time handles into the emitted shared runtime.
+// Payloads are one machine word: int, bool, byte, or string pointer.
+Lstmt_chan:
+    bl _skip_whitespace
+    mov w0, #'<'
+    bl _expect_char
+    cbz x0, Lstmt_fail
+    bl _parse_type_spec
+    cbz x0, Lstmt_fail
+    mov x23, x1                 // payload type
+    cmp x23, #0
+    b.eq Lstmt_chan_type_ok
+    cmp x23, #1
+    b.eq Lstmt_chan_type_ok
+    cmp x23, #2
+    b.eq Lstmt_chan_type_ok
+    cmp x23, #3
+    b.ne Lstmt_type_mismatch
+Lstmt_chan_type_ok:
+    bl _skip_whitespace
+    mov w0, #'>'
+    bl _expect_char
+    cbz x0, Lstmt_fail
+    bl _parse_identifier
+    cbz x0, Lstmt_need_name
+    mov x19, x0
+    mov x20, x1
+
+    LOAD_ADDR x24, channel_count
+    ldr x21, [x24]
+    cmp x21, #64
+    b.ge Lstmt_fail
+
+    bl _skip_whitespace
+    bl _peek_char
+    cmp w0, #'='
+    b.ne Lstmt_chan_define
+    bl _advance_char
+    bl _parse_identifier
+    cbz x0, Lstmt_fail
+    mov x25, x0
+    mov x26, x1
+    mov x0, x25
+    mov x1, x26
+    LOAD_ADDR x2, kw_chan
+    bl _match_cstr_span
+    cbz x0, Lstmt_fail
+    mov w0, #'<'
+    bl _expect_char
+    cbz x0, Lstmt_fail
+    bl _parse_type_spec
+    cbz x0, Lstmt_fail
+    cmp x1, x23
+    b.ne Lstmt_type_mismatch
+    mov w0, #'>'
+    bl _expect_char
+    cbz x0, Lstmt_fail
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lstmt_fail
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lstmt_fail
+
+Lstmt_chan_define:
+    mov x0, x19
+    mov x1, x20
+    mov x2, x21                 // stable channel id
+    mov x3, #1                  // channel handles cannot be reassigned
+    mov x4, #12                 // channel type id
+    mov x5, x23                 // payload type metadata
+    bl _define_variable
+    cbnz x0, Lstmt_fail
+    mov x0, #122                // initialize/reset this declaration site
+    mov x1, x21
+    mov x2, #0
+    bl _record_operation
+    cbnz x0, Lstmt_fail
+    add x21, x21, #1
+    str x21, [x24]
+    bl _consume_optional_semicolon
+    mov x0, #0
+    b Lstmt_return
+
 Lstmt_list:
     bl _skip_whitespace
     mov w0, #'<'
@@ -2415,7 +2506,25 @@ Lstmt_member_dispatch:
     b.eq Lstmt_object_member
     cmp x2, #11
     b.eq Lstmt_object_member
+    cmp x2, #12
+    b.eq Lstmt_channel_member
     b Lstmt_method_call
+
+Lstmt_channel_member:
+    mov x23, x1                 // channel id
+    mov x24, x3                 // payload type
+    bl _advance_char
+    bl _parse_identifier
+    cbz x0, Lstmt_fail
+    mov x2, x0
+    mov x3, x1
+    mov x0, x23
+    mov x1, x24
+    bl _parse_channel_method
+    cbz x0, Lstmt_fail
+    bl _consume_optional_semicolon
+    mov x0, #0
+    b Lstmt_return
 
 Lstmt_self_member:
     LOAD_ADDR x9, current_self_instance
@@ -3367,11 +3476,14 @@ Lstmt_assign_runtime_eval_mul:
     mul x28, x25, x26
     b Lstmt_assign_runtime_update
 Lstmt_assign_runtime_eval_div:
-    cbz x26, Lstmt_assign_divide_zero
+    // An immediate zero divisor was rejected before variable lookup. For a
+    // runtime RHS, x26 is only the compiler's tracking value and may be zero
+    // even though the value produced at runtime is non-zero (for example, a
+    // function-call result). ARM64 udiv by zero is defined to return zero, so
+    // it is safe to keep tracking without issuing a false compile-time error.
     udiv x28, x25, x26
     b Lstmt_assign_runtime_update
 Lstmt_assign_runtime_eval_mod:
-    cbz x26, Lstmt_assign_divide_zero
     udiv x9, x25, x26
     msub x28, x9, x26, x25
 
@@ -5703,12 +5815,164 @@ Lmap_return:
     ldp x29, x30, [sp], #16
     ret
 
+// Parse a channel method after its name has already been consumed.
+// x0=channel id, x1=payload type, x2=method ptr, x3=method len.
+// Returns the standard expression tuple (x0=1, x1=value, x2=type,
+// x3=metadata, x4=runtime slot), or x0=0 on error.
+_parse_channel_method:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+    stp x25, x26, [sp, #-16]!
+    stp x27, x28, [sp, #-16]!
+    mov x19, x0                 // channel id
+    mov x20, x1                 // payload type
+    mov x21, x2                 // method name
+    mov x22, x3
+
+    mov x0, x21
+    mov x1, x22
+    LOAD_ADDR x2, kw_send
+    bl _match_cstr_span
+    cbnz x0, Lchannel_method_send
+    mov x0, x21
+    mov x1, x22
+    LOAD_ADDR x2, kw_receive
+    bl _match_cstr_span
+    cbnz x0, Lchannel_method_receive
+    mov x0, x21
+    mov x1, x22
+    LOAD_ADDR x2, kw_close
+    bl _match_cstr_span
+    cbnz x0, Lchannel_method_close
+    b Lchannel_method_fail
+
+Lchannel_method_send:
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lchannel_method_fail
+    bl _parse_expr_value
+    cbz x0, Lchannel_method_fail
+    mov x23, x1                 // compile-time value
+    mov x24, x2                 // actual type
+    mov x25, x3                 // string length/metadata
+    mov x26, x4                 // source runtime slot
+    cmp x24, x20
+    b.ne Lchannel_method_type_error
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lchannel_method_fail
+    cmn x26, #1
+    b.ne Lchannel_method_send_record
+
+    cmp x20, #2
+    b.eq Lchannel_method_materialize_string
+    mov x0, x23
+    bl _expr_materialize_ct_int
+    mov x26, x0
+    cmn x26, #1
+    b.eq Lchannel_method_fail
+    b Lchannel_method_send_record
+
+Lchannel_method_materialize_string:
+    mov x0, x23
+    mov x1, #2
+    mov x2, x25
+    bl _record_data_value
+    mov x27, x0                 // emitted string data id
+    bl _allocate_temp_var
+    mov x26, x0
+    mov x0, #72                 // store string literal into temp slot
+    mov x1, x26
+    mov x2, x27
+    mov x3, #0
+    bl _record_operation3
+    cbnz x0, Lchannel_method_fail
+
+Lchannel_method_send_record:
+    bl _allocate_temp_var
+    mov x27, x0                 // bool result slot
+    mov x0, #119
+    mov x1, x27
+    mov x2, x19
+    mov x3, x26
+    bl _record_operation3
+    cbnz x0, Lchannel_method_fail
+    mov x0, #1
+    mov x1, #1                  // optimistic tracking value
+    mov x2, #1                  // bool result
+    mov x3, #0
+    mov x4, x27
+    b Lchannel_method_return
+
+Lchannel_method_receive:
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lchannel_method_fail
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lchannel_method_fail
+    bl _allocate_temp_var
+    mov x27, x0
+    mov x0, #120
+    mov x1, x27
+    mov x2, x19
+    bl _record_operation
+    cbnz x0, Lchannel_method_fail
+    mov x0, #1
+    mov x1, #0
+    mov x2, x20                 // payload type
+    mov x3, #0
+    mov x4, x27
+    b Lchannel_method_return
+
+Lchannel_method_close:
+    mov w0, #'('
+    bl _expect_char
+    cbz x0, Lchannel_method_fail
+    mov w0, #')'
+    bl _expect_char
+    cbz x0, Lchannel_method_fail
+    bl _allocate_temp_var
+    mov x27, x0
+    mov x0, #121
+    mov x1, x27
+    mov x2, x19
+    bl _record_operation
+    cbnz x0, Lchannel_method_fail
+    mov x0, #1
+    mov x1, #1
+    mov x2, #1                  // bool result
+    mov x3, #0
+    mov x4, x27
+    b Lchannel_method_return
+
+Lchannel_method_type_error:
+    LOAD_ADDR x0, msg_type_mismatch
+    bl _report_error_prefix
+    bl _write_newline_stderr
+Lchannel_method_fail:
+    mov x0, #0
+Lchannel_method_return:
+    ldp x27, x28, [sp], #16
+    ldp x25, x26, [sp], #16
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
 .global _parse_use_statement_after_keyword
 _parse_use_statement_after_keyword:
     stp x29, x30, [sp, #-16]!
     mov x29, sp
     stp x19, x20, [sp, #-16]!
     stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+    stp x25, x26, [sp, #-16]!
+    stp x27, x28, [sp, #-16]!
 
     bl _skip_whitespace
     bl _parse_identifier
@@ -5718,6 +5982,8 @@ _parse_use_statement_after_keyword:
     mov x20, x1  // initial module name len
     mov x21, x0  // track current end position
     add x21, x21, x1
+    LOAD_ADDR x9, current_line
+    ldr x24, [x9] // line containing the final module-path component
 
 Luse_loop:
     bl _skip_whitespace
@@ -5733,85 +5999,200 @@ Luse_loop:
     add x22, x0, x1  // end of new identifier
     sub x20, x22, x19  // total length from start
     mov x21, x22  // update current end
+    LOAD_ADDR x9, current_line
+    ldr x24, [x9]
     b Luse_loop
 
 Luse_done:
-    bl _skip_whitespace
-    bl _peek_char
-    
-    // Check for selective imports
-    LOAD_ADDR x2, kw_only
+    // Load first so every function has module ownership metadata available to
+    // the visibility filter. Module loading saves/restores this source cursor.
     mov x0, x19
     mov x1, x20
+    bl _load_module
+    cbnz x0, Luse_load_error
+
+    mov x0, x19
+    mov x1, x20
+    bl _find_module
+    cmn x0, #1
+    b.eq Luse_load_error
+    mov x23, x0                 // loaded module id
+
+    // _skip_whitespace in the dotted-path loop may already have crossed the
+    // newline. A modifier is valid only on the module path's original line.
+    LOAD_ADDR x9, current_line
+    ldr x9, [x9]
+    cmp x9, x24
+    b.ne Luse_regular
+
+    LOAD_ADDR x9, cursor_pos
+    ldr x27, [x9]               // restore point if next token is not a modifier
+    bl _parse_identifier
+    cbz x0, Luse_regular
+    mov x25, x0
+    mov x26, x1
+    mov x0, x25
+    mov x1, x26
+    LOAD_ADDR x2, kw_only
     bl _match_cstr_span
     cbnz x0, Luse_selective_only
-    
+    mov x0, x25
+    mov x1, x26
     LOAD_ADDR x2, kw_except
-    mov x0, x19
-    mov x1, x20
     bl _match_cstr_span
     cbnz x0, Luse_selective_except
-    
-    // Regular import - load all
-    bl _consume_optional_semicolon
-    mov x0, x19  // module name ptr
-    mov x1, x20  // module name len
-    bl _load_module
-    cbnz x0, Luse_load_error
-    
-    mov x0, #0
-    ldp x21, x22, [sp], #16
-    ldp x19, x20, [sp], #16
-    ldp x29, x30, [sp], #16
-    ret
+
+    LOAD_ADDR x9, cursor_pos
+    str x27, [x9]
+
+Luse_regular:
+    mov x0, x23
+    mov x1, #1
+    bl _set_module_import_visibility
+    b Luse_success
 
 Luse_selective_only:
-    // Import only specific functions
-    bl _skip_whitespace
-    // TODO: Parse function list and selectively import
-    // For now, just load the entire module
-    bl _consume_optional_semicolon
-    mov x0, x19  // module name ptr
-    mov x1, x20  // module name len
-    bl _load_module
-    cbnz x0, Luse_load_error
-    
-    mov x0, #0
-    ldp x21, x22, [sp], #16
-    ldp x19, x20, [sp], #16
-    ldp x29, x30, [sp], #16
-    ret
+    mov x28, #1                 // selected names become visible
+    mov x0, x23
+    mov x1, #0                  // hide the module first
+    bl _set_module_import_visibility
+    b Luse_selector_loop
 
 Luse_selective_except:
-    // Import all except specific functions
-    bl _skip_whitespace
-    // TODO: Parse function list and exclude from import
-    // For now, just load the entire module
+    mov x28, #0                 // selected names become hidden
+    mov x0, x23
+    mov x1, #1                  // expose the module first
+    bl _set_module_import_visibility
+
+Luse_selector_loop:
+    // Skip horizontal whitespace only; selectors never continue on a later
+    // line. Commas are optional, so both `only a, b` and `only a b` work.
+    bl _peek_char
+    cmp w0, #' '
+    b.eq Luse_selector_take_space
+    cmp w0, #'\t'
+    b.eq Luse_selector_take_space
+    cmp w0, #'\r'
+    b.eq Luse_selector_take_space
+    b Luse_selector_ready
+Luse_selector_take_space:
+    bl _advance_char
+    b Luse_selector_loop
+
+Luse_selector_ready:
+    LOAD_ADDR x9, current_line
+    ldr x9, [x9]
+    cmp x9, x24
+    b.ne Luse_success
+    bl _peek_char
+    cmp w0, #','
+    b.ne Luse_selector_name
+    bl _advance_char
+    b Luse_selector_loop
+
+Luse_selector_name:
+    cmp w0, #'\n'
+    b.eq Luse_success
+    cmp w0, #';'
+    b.eq Luse_success
+    cbz w0, Luse_success
+    bl _parse_identifier
+    cbz x0, Luse_fail
+    // _parse_identifier returns ptr in x0 and len in x1.
+    mov x2, x1
+    mov x1, x0
+    mov x0, x23
+    mov x3, x28
+    bl _set_module_named_visibility
+    cbz x0, Luse_fail
+    b Luse_selector_loop
+
+Luse_success:
     bl _consume_optional_semicolon
-    mov x0, x19  // module name ptr
-    mov x1, x20  // module name len
-    bl _load_module
-    cbnz x0, Luse_load_error
-    
     mov x0, #0
-    ldp x21, x22, [sp], #16
-    ldp x19, x20, [sp], #16
-    ldp x29, x30, [sp], #16
-    ret
+    b Luse_return
 
 Luse_load_error:
     LOAD_ADDR x0, msg_module_load_error
     bl _report_error_prefix
     mov x0, #1
-    ldp x21, x22, [sp], #16
-    ldp x19, x20, [sp], #16
-    ldp x29, x30, [sp], #16
-    ret
+    b Luse_return
 
 Luse_fail:
     LOAD_ADDR x0, msg_expected_name
     bl _report_error_prefix
     mov x0, #1
+Luse_return:
+    ldp x27, x28, [sp], #16
+    ldp x25, x26, [sp], #16
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
+// x0=module id, x1=visibility. Apply to every function owned by the module.
+_set_module_import_visibility:
+    LOAD_ADDR x9, fn_count
+    ldr x10, [x9]
+    mov x11, #0
+    LOAD_TBL x12, fn_module_ids
+    LOAD_TBL x13, fn_import_visible
+Lset_module_visibility_loop:
+    cmp x11, x10
+    b.ge Lset_module_visibility_done
+    ldr x14, [x12, x11, lsl #3]
+    cmp x14, x0
+    b.ne Lset_module_visibility_next
+    str x1, [x13, x11, lsl #3]
+Lset_module_visibility_next:
+    add x11, x11, #1
+    b Lset_module_visibility_loop
+Lset_module_visibility_done:
+    ret
+
+// x0=module id, x1=name ptr, x2=name len, x3=visibility -> x0=found.
+_set_module_named_visibility:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+    mov x19, x0
+    mov x20, x1
+    mov x21, x2
+    mov x22, x3
+    LOAD_ADDR x9, fn_count
+    ldr x23, [x9]
+    mov x24, #0
+Lset_module_named_loop:
+    cmp x24, x23
+    b.ge Lset_module_named_not_found
+    LOAD_TBL x9, fn_module_ids
+    ldr x10, [x9, x24, lsl #3]
+    cmp x10, x19
+    b.ne Lset_module_named_next
+    LOAD_TBL x9, fn_name_lens
+    ldr x10, [x9, x24, lsl #3]
+    cmp x10, x21
+    b.ne Lset_module_named_next
+    LOAD_TBL x9, fn_name_ptrs
+    ldr x2, [x9, x24, lsl #3]
+    mov x0, x20
+    mov x1, x21
+    bl _match_span_span
+    cbz x0, Lset_module_named_next
+    LOAD_TBL x9, fn_import_visible
+    str x22, [x9, x24, lsl #3]
+    mov x0, #1
+    b Lset_module_named_return
+Lset_module_named_next:
+    add x24, x24, #1
+    b Lset_module_named_loop
+Lset_module_named_not_found:
+    mov x0, #0
+Lset_module_named_return:
+    ldp x23, x24, [sp], #16
     ldp x21, x22, [sp], #16
     ldp x19, x20, [sp], #16
     ldp x29, x30, [sp], #16
@@ -7697,6 +8078,8 @@ Lprimary_member_access:
     b.eq Lprimary_member_object
     cmp x26, #11
     b.eq Lprimary_member_object
+    cmp x26, #12
+    b.eq Lprimary_member_channel
     
     mov x0, x21
     mov x1, x22
@@ -7765,6 +8148,19 @@ Lprimary_member_access:
     cbnz x0, Lprimary_str_trim
     
     b Lprimary_fail
+
+Lprimary_member_channel:
+    mov x0, x25                 // channel id
+    mov x1, x27                 // payload type metadata
+    mov x2, x21                 // member name
+    mov x3, x22
+    bl _parse_channel_method
+    cbz x0, Lprimary_fail
+    mov x25, x1
+    mov x26, x2
+    mov x27, x3
+    mov x28, x4
+    b Lprimary_suffix_loop_start
 
 Lprimary_member_object:
     LOAD_ADDR x9, object_blueprint_ids
@@ -9160,26 +9556,25 @@ Lprimary_identifier:
     bl _lookup_variable
     cbnz x0, Lprimary_check_keywords
 
-    // Handle module qualified access
+    // Handle a fully-qualified module call. Keep the original start pointer;
+    // the final identifier before '(' is the function name and everything
+    // before its preceding dot is the complete module path.
+    mov x21, x19
+Lprimary_module_segment:
     bl _advance_char  // consume '.'
     bl _parse_identifier
     cbz x0, Lprimary_missing
-    mov x21, x19  // save module name
-    mov x22, x20  // save module name length
     mov x19, x0   // function name
     mov x20, x1   // function name length
-    
-    // Store module info for later use
-    LOAD_ADDR x9, primary_module_name
-    str x21, [x9]
-    LOAD_ADDR x9, primary_module_name_len
-    str x22, [x9]
-    
-    // Try to resolve as module function
     bl _skip_whitespace
     bl _peek_char
+    cmp w0, #'.'
+    b.eq Lprimary_module_segment
     cmp w0, #'('
     b.ne Lprimary_missing  // Must be a function call
+
+    sub x22, x19, x21
+    sub x22, x22, #1       // complete module path excludes final '.'
     
     // Look up the function in the specified module
     mov x0, x19  // function name
@@ -9187,10 +9582,16 @@ Lprimary_identifier:
     mov x2, x21  // module name
     mov x3, x22  // module name length
     bl _lookup_module_function
-    cbz x0, Lprimary_missing
+    cmn x0, #1
+    b.eq Lprimary_missing
     
-    // Call the module function
-    mov x19, x0  // function index
+    // Force exactly this owned function for one call. The plus-one encoding
+    // leaves zero available for the normal unqualified lookup path.
+    add x10, x0, #1
+    LOAD_ADDR x9, forced_call_fn_id_plus1
+    str x10, [x9]
+    mov x0, x19
+    mov x1, x20
     bl _call_function
     cbnz x0, Lprimary_fail
     mov x20, x1
@@ -9495,8 +9896,11 @@ Lprimary_interp_prefix_concat:
 Lprimary_interp_expr_start:
     // Update cursor to just after '{'
     add x23, x23, #1
-    LOAD_TBL x9, buffer
-    mov x10, x9
+    // Use the active source buffer. Imported modules are parsed from their own
+    // heap buffers, so subtracting the compiler's primary `buffer` produced a
+    // wild cursor offset whenever interpolation appeared inside a module.
+    LOAD_ADDR x9, source_ptr
+    ldr x10, [x9]
     sub x11, x19, x10
     add x11, x11, x23
     LOAD_ADDR x9, cursor_pos
@@ -9560,13 +9964,14 @@ Lprimary_interp_expr_concat_real:
 
 
 Lprimary_interp_update_offset:
-    // cursor_pos is an offset from source_ptr (= buffer base).
-    // x19 is an absolute pointer into buffer.
+    // cursor_pos is an offset from the active source_ptr.
+    // x19 is an absolute pointer into that source buffer.
     // x21 must be the new offset relative to x19 (the string content start).
     LOAD_ADDR x9, cursor_pos
-    ldr x11, [x9]              // x11 = current cursor offset from buffer base
-    LOAD_TBL x9, buffer
-    sub x10, x19, x9           // x10 = offset of string content start from buffer base
+    ldr x11, [x9]              // x11 = current cursor offset from source base
+    LOAD_ADDR x9, source_ptr
+    ldr x9, [x9]
+    sub x10, x19, x9           // x10 = string-content offset from source base
     sub x21, x11, x10          // x21 = cursor offset relative to string content start
     b Lprimary_interp_loop
 
@@ -9606,8 +10011,8 @@ Lprimary_interp_last_concat:
 
 Lprimary_interp_done:
     // Restore cursor past the entire literal (content + closing quote)
-    LOAD_TBL x9, buffer
-    mov x10, x9
+    LOAD_ADDR x9, source_ptr
+    ldr x10, [x9]
     sub x11, x19, x10
     add x11, x11, x20
     add x11, x11, #1
@@ -11402,6 +11807,68 @@ Lfn_lookup_return:
     ldp x29, x30, [sp], #16
     ret
 
+// Call-site lookup: local/same-module functions first, then only imports that
+// are currently unqualified-visible. Definition and method lookup retain the
+// broader historical _lookup_function behavior above.
+_lookup_callable_function:
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    stp x19, x20, [sp, #-16]!
+    stp x21, x22, [sp, #-16]!
+    stp x23, x24, [sp, #-16]!
+    mov x19, x0
+    mov x20, x1
+    mov x23, #-1
+    LOAD_ADDR x9, current_parse_fn_id
+    ldr x10, [x9]
+    cmp x10, #0
+    b.lt Lcallable_owner_ready
+    LOAD_TBL x9, fn_module_ids
+    ldr x23, [x9, x10, lsl #3]
+Lcallable_owner_ready:
+    LOAD_ADDR x9, fn_count
+    ldr x22, [x9]
+    mov x21, #0
+Lcallable_lookup_loop:
+    cmp x21, x22
+    b.ge Lcallable_lookup_imported
+    LOAD_TBL x9, fn_module_ids
+    ldr x10, [x9, x21, lsl #3]
+    cmp x10, x23
+    b.ne Lcallable_lookup_next
+    LOAD_TBL x9, fn_name_lens
+    ldr x10, [x9, x21, lsl #3]
+    cmp x10, x20
+    b.ne Lcallable_lookup_next
+    LOAD_TBL x9, fn_name_ptrs
+    ldr x2, [x9, x21, lsl #3]
+    mov x0, x19
+    mov x1, x20
+    bl _match_span_span
+    cbnz x0, Lcallable_lookup_found
+Lcallable_lookup_next:
+    add x21, x21, #1
+    b Lcallable_lookup_loop
+Lcallable_lookup_imported:
+    mov x0, x19
+    mov x1, x20
+    bl _is_imported_function
+    cbz x0, Lcallable_lookup_fail
+    mov x21, x1
+Lcallable_lookup_found:
+    mov x0, #1
+    mov x1, x21
+    b Lcallable_lookup_return
+Lcallable_lookup_fail:
+    mov x0, #0
+    mov x1, #-1
+Lcallable_lookup_return:
+    ldp x23, x24, [sp], #16
+    ldp x21, x22, [sp], #16
+    ldp x19, x20, [sp], #16
+    ldp x29, x30, [sp], #16
+    ret
+
 // ========================================================
 // _call_function
 // x0=name ptr, x1=name len
@@ -11515,12 +11982,22 @@ _call_function:
     LOAD_ADDR x9, var_count
     ldr x22, [x9]
 
-    // Look up the function
+    // A qualified module call resolves an exact function before entering this
+    // routine. Consume that one-shot override; normal calls honor selective
+    // import visibility through _lookup_callable_function.
+    LOAD_ADDR x9, forced_call_fn_id_plus1
+    ldr x10, [x9]
+    cbz x10, Lfn_call_lookup_name
+    str xzr, [x9]
+    sub x21, x10, #1
+    b Lfn_call_lookup_done
+Lfn_call_lookup_name:
     mov x0, x19
     mov x1, x20
-    bl _lookup_function
+    bl _lookup_callable_function
     cbz x0, Lfn_call_unknown
     mov x21, x1   // fn index
+Lfn_call_lookup_done:
 
     // Save the current variable floor so locals can shadow globals.
     LOAD_ADDR x9, var_scope_base

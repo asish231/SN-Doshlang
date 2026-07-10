@@ -195,16 +195,29 @@ blueprint Dog from Animal {
 
 ## SNlang Concurrency
 
-Current concurrency support is limited to detached fire-and-forget thread spawning via `spawn fn()` or `spawn obj.method()`.
+Current concurrency support includes `spawn fn()`, `wait()`, and typed bounded channels.
+`wait()` joins all outstanding workers and returns the number joined. Channels support
+`int`, `bool`, `byte`, and `str` payloads through `.send()`, `.receive()`, and `.close()`.
 
-The following forms are planned / not yet implemented and should not be treated as working language features:
+```sn
+chan<int> jobs
 
-- `spawn { ... }` blocks
-- Channels such as `chan<int>` with `.send()`, `.receive()`, and `.close()`
-- `lock`-based synchronization
-- `async` / `await`
+fn worker() {
+    jobs.send(42)
+}
 
-### Detached `spawn` example
+fn main() {
+    spawn worker()
+    print(jobs.receive())
+    print(wait())
+    jobs.close()
+}
+```
+
+The following forms are planned / not yet implemented: `spawn { ... }` blocks,
+`spawn obj.method()`, `lock`-based synchronization, and `async` / `await`.
+
+### Joinable `spawn` example
 
 ```sn
 fn worker() {
@@ -213,7 +226,7 @@ fn worker() {
 
 fn main() {
     spawn worker()
-    print("Main continues immediately")
+    print(wait())
 }
 ```
 

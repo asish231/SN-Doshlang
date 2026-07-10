@@ -1,0 +1,5 @@
+use std.math only abs
+
+fn main() {
+    print(max(5, 10))
+}

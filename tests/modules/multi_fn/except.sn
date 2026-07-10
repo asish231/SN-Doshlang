@@ -1,0 +1,6 @@
+use std.math except factorial, isPrime
+
+fn main() {
+    print(abs(-5))
+    print(gcd(48, 18))
+}

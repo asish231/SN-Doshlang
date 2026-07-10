@@ -105,6 +105,7 @@ expect "sub"                'fn main(){ print(20-5) }'                          
 expect "mul"                'fn main(){ print(6*7) }'                                 "42"
 expect "div"                'fn main(){ print(20/4) }'                                "5"
 expect "mod"                'fn main(){ print(17%5) }'                                "2"
+expect "runtime mod fn values" 'fn id(int x)->int{return x} fn main(){int x=id(17) int y=id(5) x=x%y print(x)}' "2"
 expect "precedence"         'fn main(){ print(10+4*3) }'                              "22"
 expect "parens"             'fn main(){ print((2+3)*4) }'                             "20"
 expect "negative"           'fn main(){ int x=0-5 print(x) }'                         "-5"
@@ -188,6 +189,7 @@ expect "value() still works" 'fn main(){ int x=42 ref<int> p=address(x) print(va
 # swallowed by module-qualified-access parsing and failed to compile.
 expect "list length prop"   'fn main(){ list<int> n=[1,2,3] print(n.length) }'       "3"
 expect "list length call"   'fn main(){ list<int> n=[1,2,3,4] print(n.length()) }'   "4"
+expect "expanded std.io import" 'use std.io fn main(){printInt(99) printBool(true)}' "99 true"
 expect "str length"         'fn main(){ str s="hello" print(s.length) }'             "5"
 expect "str slice"          'fn main(){ str s="hello" printn(s.slice(0,3)) }'        "hel"
 
@@ -463,6 +465,18 @@ expect "spawn wait output"   'fn w(){ print("hi") }\nfn main(){ spawn w() wait()
 expect "spawn wait count"    'fn w(){ int x=1 }\nfn main(){ spawn w() print(wait()) }' "1"
 expect "spawn wait multi"    'fn a(){ int x=1 }\nfn b(){ int x=2 }\nfn main(){ spawn a() spawn b() print(wait()) }' "2"
 expect "wait no spawn"       'fn main(){ print(wait()) }' "0"
+
+# Bounded typed channels: FIFO behavior, close semantics, constructor spelling,
+# payload typing, and real synchronization with a spawned worker.
+expect "channel fifo"         'fn main(){ chan<int> c c.send(10) c.send(20) print(c.receive()) print(c.receive()) }' "10 20"
+expect "channel close"        'fn main(){ chan<int> c print(c.close()) print(c.send(9)) print(c.receive()) }' "1 0 0"
+expect "channel constructor"  'fn main(){ chan<int> c=chan<int>() print(c.send(7)) print(c.receive()) }' "1 7"
+expect "channel bool"         'fn main(){ chan<bool> c c.send(true) print(c.receive()) c.close() }' "1"
+expect "channel string"       'fn main(){ chan<str> c c.send("hello") print(c.receive()) c.close() }' "hello"
+expect "channel spawn"        'chan<int> jobs\nfn worker(){ jobs.send(42) }\nfn main(){ spawn worker() print(jobs.receive()) print(wait()) jobs.close() }' "42 1"
+expect "channel redeclare"    'fn cycle(){chan<int> c c.send(3) print(c.receive()) c.close()} fn main(){cycle() cycle()}' "3 3"
+expect "channel bounded sync" 'chan<int> jobs\nfn producer(){int i=0 while(i<100){jobs.send(i) i=i+1}}\nfn main(){spawn producer() int sum=0 int n=0 while(n<100){int v=jobs.receive() sum=sum+v n=n+1} print(sum) print(wait()) jobs.close()}' "4950 1"
+expect_compile_fail "channel type mismatch" 'fn main(){ chan<int> c c.send("wrong") }' "error:"
 # `spawn obj.method()` (spawning a blueprint method) is not yet supported and now
 # fails with a CLEAR diagnostic instead of the former confusing empty "line N:"
 # error (its capture path clobbered the object-name registers and used an

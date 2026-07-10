@@ -1,3 +1,30 @@
+// std.io - small output helpers on top of the built-in print.
+//
+// print(x) already appends a newline; these wrappers add typed and repeated
+// variants so callers don't have to hand-build interpolation strings.
+
+// Print a string followed by a newline.
 fn println(str s) {
     print(s)
+}
+
+// Print an integer followed by a newline.
+fn printInt(int n) {
+    print("{n}")
+}
+
+// Print a boolean as "true"/"false" followed by a newline.
+fn printBool(bool b) {
+    if (b) {
+        print("true")
+    } else {
+        print("false")
+    }
+}
+
+// Print s on its own line n times.
+fn repeatPrint(str s, int n) {
+    for (int i = 0, i < n, i += 1) {
+        print(s)
+    }
 }

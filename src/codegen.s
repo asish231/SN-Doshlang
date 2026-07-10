@@ -682,6 +682,14 @@ Lemit_emit_runtime_helpers:
     LOAD_ADDR x0, asm_string_trim_runtime
     mov x1, #1
     bl _write_cstr_fd
+
+    LOAD_ADDR x9, channel_count
+    ldr x9, [x9]
+    cbz x9, Lemit_channel_runtime_done
+    LOAD_ADDR x0, asm_channel_runtime
+    mov x1, #1
+    bl _write_cstr_fd
+Lemit_channel_runtime_done:
 #ifndef _WIN32
     bl Lemit_maybe_spawn_thread_runtime
     bl Lemit_maybe_spawn_wait_runtime
@@ -1106,6 +1114,14 @@ _emit_operation:
     b.eq Lemit_op_spawn_wait
     cmp x21, #118
     b.eq Lemit_op_ord
+    cmp x21, #119
+    b.eq Lemit_op_channel_send
+    cmp x21, #120
+    b.eq Lemit_op_channel_receive
+    cmp x21, #121
+    b.eq Lemit_op_channel_close
+    cmp x21, #122
+    b.eq Lemit_op_channel_init
 
     b Lemit_op_done
 
@@ -1225,6 +1241,90 @@ Lemit_op_spawn_wait:
     mov x1, x0
     mov x0, #0
     bl _emit_stack_store_reg_fd
+    b Lemit_op_done
+
+Lemit_op_channel_send:
+    // arg0=result slot, arg1=channel id, arg2=payload source slot.
+    LOAD_ADDR x0, asm_mov_x0_imm_prefix
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_newline
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, emit_tbl_arg2
+    ldr x20, [x20]
+    ldr x1, [x20, x19, lsl #3]
+    mov x0, #1
+    bl _emit_stack_load_reg_fd
+    LOAD_ADDR x0, asm_call_chan_send
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_op_channel_store_result
+
+Lemit_op_channel_receive:
+    // arg0=payload result slot, arg1=channel id.
+    LOAD_ADDR x0, asm_mov_x0_imm_prefix
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_newline
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x0, asm_call_chan_receive
+    mov x1, #1
+    bl _write_cstr_fd
+    b Lemit_op_channel_store_result
+
+Lemit_op_channel_close:
+    // arg0=bool result slot, arg1=channel id.
+    LOAD_ADDR x0, asm_mov_x0_imm_prefix
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, emit_tbl_arg1
+    ldr x20, [x20]
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_newline
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x0, asm_call_chan_close
+    mov x1, #1
+    bl _write_cstr_fd
+
+Lemit_op_channel_store_result:
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, x0
+    mov x0, #0
+    bl _emit_stack_store_reg_fd
+    b Lemit_op_done
+
+Lemit_op_channel_init:
+    LOAD_ADDR x0, asm_mov_x0_imm_prefix
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x20, emit_tbl_arg0
+    ldr x20, [x20]
+    ldr x0, [x20, x19, lsl #3]
+    mov x1, #1
+    bl _write_u64_fd
+    LOAD_ADDR x0, asm_newline
+    mov x1, #1
+    bl _write_cstr_fd
+    LOAD_ADDR x0, asm_channel_init
+    mov x1, #1
+    bl _write_cstr_fd
     b Lemit_op_done
 
 Lemit_op_address:

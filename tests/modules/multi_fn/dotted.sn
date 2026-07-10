@@ -1,0 +1,6 @@
+use std.math
+
+fn main() {
+    print(std.math.abs(-7))
+    print(std.math.gcd(48, 18))
+}

@@ -1,6 +1,160 @@
+// std.string - string utilities.
+//
+// IMPORTANT: SNlang's `==` on strings compares identity, not content, so all
+// content comparison in this module is done character-by-character via ord()
+// (the ASCII code of a character). Every function below is content-correct.
+
+// True for the empty string "".
 fn isEmpty(str s) -> bool {
     if (s.length() == 0) {
         return true
     }
     return false
+}
+
+// Content equality of two strings.
+fn equals(str a, str b) -> bool {
+    if (a.length() != b.length()) {
+        return false
+    }
+    for (int i = 0, i < a.length(), i += 1) {
+        if (ord(a[i]) != ord(b[i])) {
+            return false
+        }
+    }
+    return true
+}
+
+// True if s begins with prefix.
+fn startsWith(str s, str prefix) -> bool {
+    int pl = prefix.length()
+    if (pl > s.length()) {
+        return false
+    }
+    for (int i = 0, i < pl, i += 1) {
+        if (ord(s[i]) != ord(prefix[i])) {
+            return false
+        }
+    }
+    return true
+}
+
+// True if s ends with suffix.
+fn endsWith(str s, str suffix) -> bool {
+    int sl = s.length()
+    int fl = suffix.length()
+    if (fl > sl) {
+        return false
+    }
+    int off = sl - fl
+    for (int i = 0, i < fl, i += 1) {
+        int idx = off + i
+        if (ord(s[idx]) != ord(suffix[i])) {
+            return false
+        }
+    }
+    return true
+}
+
+// Index of the first occurrence of single character ch, or -1 if absent.
+fn indexOf(str s, str ch) -> int {
+    int target = ord(ch)
+    for (int i = 0, i < s.length(), i += 1) {
+        if (ord(s[i]) == target) {
+            return i
+        }
+    }
+    return -1
+}
+
+// Index of the first occurrence of substring sub, or -1 if absent.
+// "" is considered to occur at index 0.
+fn find(str s, str sub) -> int {
+    int sl = s.length()
+    int subl = sub.length()
+    if (subl == 0) {
+        return 0
+    }
+    if (subl > sl) {
+        return -1
+    }
+    int last = sl - subl
+    for (int i = 0, i <= last, i += 1) {
+        bool ok = true
+        for (int j = 0, j < subl, j += 1) {
+            int idx = i + j
+            if (ord(s[idx]) != ord(sub[j])) {
+                ok = false
+            }
+        }
+        if (ok) {
+            return i
+        }
+    }
+    return -1
+}
+
+// True if sub occurs anywhere in s.
+fn contains(str s, str sub) -> bool {
+    if (find(s, sub) >= 0) {
+        return true
+    }
+    return false
+}
+
+// Number of occurrences of single character ch in s.
+fn countChar(str s, str ch) -> int {
+    int target = ord(ch)
+    int c = 0
+    for (int i = 0, i < s.length(), i += 1) {
+        if (ord(s[i]) == target) {
+            c += 1
+        }
+    }
+    return c
+}
+
+// s repeated n times ("" for n <= 0).
+fn repeat(str s, int n) -> str {
+    str out = ""
+    for (int i = 0, i < n, i += 1) {
+        out = out + s
+    }
+    return out
+}
+
+// s reversed.
+fn reverse(str s) -> str {
+    str out = ""
+    for (int i = s.length() - 1, i >= 0, i -= 1) {
+        out = out + s[i]
+    }
+    return out
+}
+
+// Left-pad s with single character fill until it is at least `width` long.
+fn padLeft(str s, int width, str fill) -> str {
+    str out = s
+    while (out.length() < width) {
+        out = fill + out
+    }
+    return out
+}
+
+// Right-pad s with single character fill until it is at least `width` long.
+fn padRight(str s, int width, str fill) -> str {
+    str out = s
+    while (out.length() < width) {
+        out = out + fill
+    }
+    return out
+}
+
+// Uppercase / lowercase copies (thin wrappers over the built-in methods).
+fn toUpper(str s) -> str {
+    return s.upper()
+}
+
+fn toLower(str s) -> str {
+    return s.lower()
 }

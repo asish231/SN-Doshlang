@@ -717,12 +717,13 @@ Lrecord_spawn_op_full:
 
 .global _snc_grow_fns
 // --------------------------------------------------------------------------
-// Grow the malloc-backed function tables. All 25 parallel arrays grow together:
-// sixteen 8-byte/entry tables, eight 32-byte/entry tables (4 param slots per
+// Grow the malloc-backed function tables. All 27 parallel arrays grow together:
+// eighteen 8-byte/entry tables, eight 32-byte/entry tables (4 param slots per
 // function), and the 64-byte/entry synthetic method-name storage. Doubles the
 // current capacity, or allocates the initial SNC_MAX_FUNCS entries when the
 // capacity is 0, preserving existing contents via realloc, then updates
-// fn_capacity. fn_blueprint_ids defaults to -1 for every new entry.
+// fn_capacity. fn_blueprint_ids and fn_module_ids default to -1 for every new
+// entry.
 //
 // Register contract: callers keep live function ids and parse state in
 // callee-saved registers and/or reload fn_count after the call. This routine
@@ -856,6 +857,38 @@ Lgrow_fns_fill_bp_loop:
     add x26, x26, #1
     b Lgrow_fns_fill_bp_loop
 Lgrow_fns_fill_bp_done:
+
+    LOAD_ADDR x23, fn_module_ids
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_fns_fail
+    str x0, [x23]
+    mov x27, x0
+    mov x26, x20
+    mov x28, #-1
+Lgrow_fns_fill_module_loop:
+    cmp x26, x21
+    b.ge Lgrow_fns_fill_module_done
+    str x28, [x27, x26, lsl #3]
+    add x26, x26, #1
+    b Lgrow_fns_fill_module_loop
+Lgrow_fns_fill_module_done:
+
+    LOAD_ADDR x23, fn_import_visible
+    ldr x0, [x23]
+    mov x1, x22
+    bl _realloc
+    cbz x0, Lgrow_fns_fail
+    str x0, [x23]
+    mov x26, x20
+Lgrow_fns_fill_visibility_loop:
+    cmp x26, x21
+    b.ge Lgrow_fns_fill_visibility_done
+    str xzr, [x0, x26, lsl #3]
+    add x26, x26, #1
+    b Lgrow_fns_fill_visibility_loop
+Lgrow_fns_fill_visibility_done:
 
     LOAD_ADDR x23, fn_scope_bases
     ldr x0, [x23]

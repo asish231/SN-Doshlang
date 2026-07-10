@@ -1,0 +1,81 @@
+// std.list - utilities over list<int> values.
+//
+// All functions take a list<int> parameter and iterate it with a real runtime
+// for-in loop, so they work over list literals, list variables and list
+// parameters passed down from the caller.
+
+// Sum of all elements (0 for an empty list).
+fn sum(list<int> xs) -> int {
+    int total = 0
+    for (v in xs) {
+        total = total + v
+    }
+    return total
+}
+
+// Largest element. Returns 0 for an empty list.
+fn maxOf(list<int> xs) -> int {
+    int best = 0
+    bool seen = false
+    for (v in xs) {
+        if (not seen) {
+            best = v
+            seen = true
+        } else {
+            if (v > best) {
+                best = v
+            }
+        }
+    }
+    return best
+}
+
+// Smallest element. Returns 0 for an empty list.
+fn minOf(list<int> xs) -> int {
+    int best = 0
+    bool seen = false
+    for (v in xs) {
+        if (not seen) {
+            best = v
+            seen = true
+        } else {
+            if (v < best) {
+                best = v
+            }
+        }
+    }
+    return best
+}
+
+// True if target appears in the list.
+fn includes(list<int> xs, int target) -> bool {
+    for (v in xs) {
+        if (v == target) {
+            return true
+        }
+    }
+    return false
+}
+
+// Index of the first occurrence of target, or -1 if absent.
+fn position(list<int> xs, int target) -> int {
+    int i = 0
+    for (v in xs) {
+        if (v == target) {
+            return i
+        }
+        i = i + 1
+    }
+    return -1
+}
+
+// How many times target appears in the list.
+fn count(list<int> xs, int target) -> int {
+    int c = 0
+    for (v in xs) {
+        if (v == target) {
+            c = c + 1
+        }
+    }
+    return c
+}

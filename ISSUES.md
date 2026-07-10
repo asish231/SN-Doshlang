@@ -1,6 +1,6 @@
 # SNlang / `snc` — Status & Known Issues (verified)
 
-_Last verified: 2026-07-09 on macOS ARM64 (Apple Silicon), clang toolchain._
+_Last verified: 2026-07-10 on macOS ARM64 (Apple Silicon), clang toolchain._
 
 This file replaces the previous marketing/status docs (`README.md`, `SNLANG_SPEC.md`,
 `SYNTAX.md`), which claimed the language was "working", "FULLY IMPLEMENTED", and
@@ -10,7 +10,7 @@ binaries, and comparing their printed output to the expected values.
 
 > **Update (2026-07-09) — self-hosting prerequisites landed.** Several items the
 > status paragraph below lists as "still blocks self-hosting" are now **done**,
-> verified by `make assert` = **211/211 must-pass** and the examples sweep =
+> verified by `make assert` = **224/224 must-pass** and the examples sweep =
 > **156/163 run OK** (the other 7 are deliberate negative tests):
 >
 > - **`system(cmd)` / `exec(cmd)` builtin** (op 114) — runs an external command and
@@ -50,6 +50,15 @@ binaries, and comparing their printed output to the expected values.
 > same pass. Verified by a 200000-element list in a **1.42 MB** source and a 5000-entry map,
 > both compiling and running correctly, with `make assert` still **211/211**.
 >
+> **Update (2026-07-10) — selective imports, dotted module calls, and channels are
+> implemented.** `use module only a, b` and `use module except a, b` now control
+> unqualified visibility, while complete paths such as `std.math.gcd()` resolve by stable
+> module ownership. Typed bounded channels (`chan<int>`, `chan<bool>`, `chan<byte>`,
+> `chan<str>`) provide blocking FIFO `.send()` / `.receive()` plus `.close()`, including
+> communication with `spawn`ed workers. Module-owned string interpolation and runtime `%`
+> over function-derived values were fixed along the way. Verification: **224/224**
+> assertions, **15/15** module tests, `make test`, and `make selfhost` all pass.
+>
 > Still open (see `SELF_HOSTING_ROADMAP.md`): a real standard library, syscalls/FFI, and the
 > compiler-in-SNlang + bootstrap proof.
 
@@ -57,7 +66,7 @@ binaries, and comparing their printed output to the expected values.
 > a broad set of programs — integers, variables, arithmetic with correct precedence,
 > comparisons, `if`/`else` branch selection, `while` loops, `for`-in loops over lists,
 > strings and string interpolation, lists, **and functions with integer arguments, return
-> values and recursion** (see sections 3–4, and run `make assert` → **211 must-pass**). An
+> values and recursion** (see sections 3–4, and run `make assert` → **224 must-pass**). An
 > intermittent compiler crash was also found and fixed (section 2.1), and the former
 > **±256 stack-offset limit** for verified large function frames is now fixed (section 6).
 > The language now runs real multi-function programs (e.g. recursive
@@ -219,8 +228,8 @@ with `expected expression`. (The `.length`/`.slice` support existed but was unre
 variables; only literals like `"abc".slice(...)` could reach it.) Fix: on seeing `.`, first
 `_lookup_variable`; if the identifier is a known variable, take the member-access path, and
 only fall through to module-qualified access when it is **not** a variable. Unqualified
-`use module` calls still work (`testmod_caller` → `30`); dotted `module.func()` was already
-non-functional in both the committed binary and this one (not a regression).
+`use module` calls still work (`testmod_caller` → `30`). At the time of this historical fix,
+dotted `module.func()` was non-functional; it is now implemented (section 2.26).
 
 **Update:** the `for-in` compile-time-unroll limitation described here is now **FIXED for
 integer/scalar lists** — `for-in` over such lists is a real runtime loop (see section 2.8),
@@ -863,6 +872,35 @@ old 1 MB cap (the 1.42 MB program above exercises a multi-read + grow).
 `make assert` remains **211/211 must-pass, 0 known-broken**; the `examples/` sweep is
 **156/163 OK** (the same 7 deliberate negative tests).
 
+### 2.26 DONE — selective imports, dotted module access, and typed channels
+
+Three formerly documented gaps are now implemented and regression-tested:
+
+1. **Selective imports.** `use std.math only abs, gcd` exposes only the selected names to
+   unqualified calls; `use std.math except factorial` exposes all functions from that module
+   except the selected names. Lists accept comma-separated or whitespace-separated names,
+   and an unknown selector is rejected instead of silently loading everything.
+2. **Dotted access.** Calls such as `std.math.abs(-7)` and `std.math.gcd(48, 18)` resolve the
+   complete dotted module path to the exact owned function. Function records now carry a
+   growable module-owner field, and nested module loads reserve stable identities before
+   parsing dependencies. Existing transitive unqualified imports remain compatible.
+3. **Typed channels.** `chan<int>`, `chan<bool>`, `chan<byte>`, and `chan<str>` declarations
+   (with optional `= chan<T>()`) support `.send(value)`, `.receive()`, and `.close()` as both
+   statements and expressions. The emitted ARM64 runtime supplies 64 declaration sites,
+   each with a bounded 64-word FIFO protected by atomic exclusive-load locks. Send/receive
+   block while full/empty; a closed channel rejects sends and returns zero for closed+empty
+   receives. Declaration execution resets its queue, and channels synchronize correctly
+   with `spawn fn()` / `wait()`.
+
+The implementation uses ops 119–122 (send, receive, close, initialize). Tests cover FIFO
+ordering, constructor syntax, bool/string payloads, close semantics, redeclaration, payload
+type rejection, a spawned handoff, and a 100-item producer/consumer run that exceeds the
+64-item capacity. Two underlying compiler bugs exposed by expanded modules were also fixed:
+runtime `%` no longer treats a function-derived tracking value as a compile-time zero, and
+string interpolation uses the active module `source_ptr` instead of the primary source
+buffer. Verified: **`make assert` = 224/224**, module suite **15/15**, `make test`, and
+`make selfhost` all pass.
+
 ---
 
 ## 3. Now verified WORKING (real stdout — run `make assert`)
@@ -1006,10 +1044,10 @@ in an expression, and a statement after a call all produce correct output.
 - ~~**Block `try`/`catch` is a stub**~~ **now works** (section 2.9) — `try`/`catch`/`throw`
   compile to a real runtime error path: throws jump to the catch, the caught `e` holds the
   message, `catch` with/without a variable and nested trys all behave correctly.
-- **Still open:** **selective/exclusion imports**
-  (`use module only …` / `except …`) load the whole module instead of the named subset.
-  Also unsupported: nested function *definitions* (`fn` inside `fn`), `int + str`
-  concatenation, `spawn`+`blueprint`, and dotted `module.func()` access.
+- ~~**Selective/exclusion imports and dotted access**~~ **now work** (section 2.26):
+  `only`/`except` control unqualified visibility and complete paths such as
+  `std.math.gcd()` resolve by module ownership. Nested function definitions and mixed
+  `int`/`str` concatenation are also fixed; spawning blueprint methods remains unsupported.
 
 ---
 
@@ -1090,9 +1128,9 @@ Deleted in this change because they misrepresented the project's state:
 **Update (2026-07-09) — DONE:** `LICENSE.md` has been truthed-up. The
 "✅ SELF-HOSTING READY" / "Self-Hosting Status" sections, the "829ms / 100M iterations"
 benchmark, the comparative marketing claims, and the phantom `build.ps1` reference were
-removed; the actual license terms were preserved, and the concurrency section now
-describes only the detached `spawn` that really exists (channels/`lock`/`async` are marked
-planned).
+removed; the actual license terms were preserved. The concurrency section now describes
+joinable `spawn fn()` / `wait()` and typed channels accurately; `spawn {}`, `lock`, and
+`async`/`await` remain planned.
 
 ---
 
@@ -1111,8 +1149,7 @@ planned).
 
 So this is a real, ambitious hand-written ARM64 compiler whose front-end and back-end now
 work for a substantial multi-function subset of the language; the immediate remaining
-limits are the still-broken/unverified feature paths (some branch/label generation and
-import subsets), fixed-size tables, and the missing standard-library / FFI ecosystem on top.
+limits are unverified feature paths and the missing standard-library / FFI ecosystem.
 
 ---
 
@@ -1176,7 +1213,8 @@ then syscalls/FFI.
 12. ~~Give `spawn` a join/sync primitive~~ **DONE (2026-07-09)** — threads are recorded (not
     detached) and the new `wait()` builtin joins them all, returning how many were joined, so
     worker output is no longer lost (section 2.23). `spawn obj.method()` now reports a clear
-    error instead of an empty one. (Still no channels / `lock` / `async`-`await`.)
+    error instead of an empty one. Typed channels have since landed; `lock` and
+    `async`/`await` remain open.
 13. ~~Make the op/print tables truly `malloc`-grown, add `ord()`, and start the self-hosted
     compiler~~ **DONE (2026-07-09)** — the operation and print/data tables now `malloc`/
     `realloc`-grow on demand (no more `too many operations` / `too many print statements`); a
@@ -1189,6 +1227,8 @@ then syscalls/FFI.
     in the same pass (which made the compiler reject all input) was fixed. Verified with a
     300-function program, a 5000-variable function, a 5000-element list, a 5000-entry map, and
     a 200000-element list in a 1.42 MB source. See section 2.25.
-15. Only then: build out `stdlib`, add syscalls/FFI, then `net` → `http`, and continue the
+15. ~~Implement selective imports, dotted module calls, and typed channels~~ **DONE
+    (2026-07-10)** — see section 2.26; covered by 15 module cases and nine channel cases.
+16. Only then: build out `stdlib`, add syscalls/FFI, then `net` → `http`, and continue the
     self-hosting components (parser → codegen in SNlang) toward the stage1≡stage2 bootstrap
     proof. See `SELF_HOSTING_ROADMAP.md` for the staged plan.

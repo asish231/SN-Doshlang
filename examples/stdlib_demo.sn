@@ -1,0 +1,87 @@
+// Demonstrates the std.* standard-library modules.
+// Expected output is asserted in tests/assert_suite.sh.
+//
+// Results are printed as `label=value` using str()+concat (rather than "{...}"
+// interpolation) because the interpolation parser does not accept string
+// literals nested inside {...}.
+
+use std.math
+use std.string
+use std.char
+use std.list
+use std.io
+
+// Local bool -> int so boolean results print as a clean 1/0.
+fn b2i(bool x) -> int {
+    if (x) {
+        return 1
+    }
+    return 0
+}
+
+fn main() {
+    // ----- std.math -----
+    print("abs=" + str(abs(-5)))
+    print("max=" + str(max(3, 7)))
+    print("min=" + str(min(3, 7)))
+    print("pow=" + str(pow(2, 10)))
+    print("clamp=" + str(clamp(15, 0, 10)))
+    print("sign=" + str(sign(-42)))
+    print("gcd=" + str(gcd(48, 36)))
+    print("lcm=" + str(lcm(4, 6)))
+    print("fact=" + str(factorial(5)))
+    print("even=" + str(b2i(isEven(10))))
+    print("odd=" + str(b2i(isOdd(7))))
+    print("prime13=" + str(b2i(isPrime(13))))
+    print("prime15=" + str(b2i(isPrime(15))))
+    print("isqrt=" + str(isqrt(50)))
+
+    // ----- std.string -----
+    print("empty0=" + str(b2i(isEmpty(""))))
+    print("empty1=" + str(b2i(isEmpty("x"))))
+    print("eq0=" + str(b2i(equals("abc", "abc"))))
+    print("eq1=" + str(b2i(equals("abc", "abd"))))
+    print("sw0=" + str(b2i(startsWith("Hello", "He"))))
+    print("sw1=" + str(b2i(startsWith("Hello", "lo"))))
+    print("ew0=" + str(b2i(endsWith("Hello", "lo"))))
+    print("ew1=" + str(b2i(endsWith("Hello", "He"))))
+    print("idx=" + str(indexOf("Hello", "l")))
+    print("find=" + str(find("Hello World", "World")))
+    print("ct0=" + str(b2i(contains("Hello World", "World"))))
+    print("ct1=" + str(b2i(contains("Hello", "xyz"))))
+    print("cc=" + str(countChar("Hello", "l")))
+    print("rep=" + repeat("ab", 3))
+    print("rev=" + reverse("abc"))
+    print("padL=" + padLeft("42", 5, "0"))
+    print("padR=" + padRight("42", 5, "."))
+    print("up=" + toUpper("abc"))
+    print("low=" + toLower("ABC"))
+
+    // ----- std.char -----
+    print("code=" + str(charCode("A")))
+    print("dig0=" + str(b2i(isDigit("7"))))
+    print("dig1=" + str(b2i(isDigit("a"))))
+    print("lower=" + str(b2i(isLower("a"))))
+    print("upper=" + str(b2i(isUpper("A"))))
+    print("alpha0=" + str(b2i(isAlpha("z"))))
+    print("alpha1=" + str(b2i(isAlpha("5"))))
+    print("alnum0=" + str(b2i(isAlnum("5"))))
+    print("space0=" + str(b2i(isSpace(" "))))
+    print("space1=" + str(b2i(isSpace("x"))))
+    print("toDigit=" + str(toDigit("9")))
+
+    // ----- std.list -----
+    print("sum=" + str(sum([10, 20, 30, 42])))
+    print("maxOf=" + str(maxOf([3, 9, 2, 7])))
+    print("minOf=" + str(minOf([3, 9, 2, 7])))
+    print("inc0=" + str(b2i(includes([1, 2, 3], 2))))
+    print("inc1=" + str(b2i(includes([1, 2, 3], 5))))
+    print("pos0=" + str(position([5, 6, 7], 7)))
+    print("pos1=" + str(position([5, 6, 7], 9)))
+    print("cnt=" + str(count([1, 2, 2, 3, 2], 2)))
+
+    // ----- std.io -----
+    printInt(99)
+    printBool(true)
+    repeatPrint("x", 2)
+}

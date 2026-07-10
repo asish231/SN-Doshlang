@@ -1,0 +1,83 @@
+// std.char - character classification helpers.
+//
+// Each function takes a single-character string (e.g. one element of a larger
+// string via s[i]) and answers a question about it, built on the ord() builtin
+// (the ASCII code of a character). These are exactly the primitives a
+// tokenizer/lexer needs, so this module also advances the self-hosting effort.
+
+// ASCII code of a character (thin, discoverable wrapper over ord()).
+fn charCode(str c) -> int {
+    return ord(c)
+}
+
+// '0'..'9'
+fn isDigit(str c) -> bool {
+    int k = ord(c)
+    if (k >= 48 and k <= 57) {
+        return true
+    }
+    return false
+}
+
+// 'a'..'z'
+fn isLower(str c) -> bool {
+    int k = ord(c)
+    if (k >= 97 and k <= 122) {
+        return true
+    }
+    return false
+}
+
+// 'A'..'Z'
+fn isUpper(str c) -> bool {
+    int k = ord(c)
+    if (k >= 65 and k <= 90) {
+        return true
+    }
+    return false
+}
+
+// A letter (either case).
+fn isAlpha(str c) -> bool {
+    if (isLower(c)) {
+        return true
+    }
+    if (isUpper(c)) {
+        return true
+    }
+    return false
+}
+
+// A letter or a digit.
+fn isAlnum(str c) -> bool {
+    if (isAlpha(c)) {
+        return true
+    }
+    if (isDigit(c)) {
+        return true
+    }
+    return false
+}
+
+// Space, tab, newline or carriage return.
+fn isSpace(str c) -> bool {
+    int k = ord(c)
+    if (k == 32) {
+        return true
+    }
+    if (k == 9) {
+        return true
+    }
+    if (k == 10) {
+        return true
+    }
+    if (k == 13) {
+        return true
+    }
+    return false
+}
+
+// Numeric value of a digit character: '0' -> 0 ... '9' -> 9.
+fn toDigit(str c) -> int {
+    return ord(c) - 48
+}

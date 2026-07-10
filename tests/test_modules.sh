@@ -162,6 +162,32 @@ run_test "transitive_reexport" \
     "40
 42"
 
+# 11. selective import — only the named functions become unqualified
+run_test "selective_only" \
+    "multi_fn/only.sn" \
+    "5
+6"
+
+run_test "selective_only_reject" \
+    "multi_fn/only_reject.sn" \
+    "COMPILE_ERROR"
+
+# 12. exclusion import — every function except the named functions is visible
+run_test "selective_except" \
+    "multi_fn/except.sn" \
+    "5
+6"
+
+run_test "selective_except_reject" \
+    "multi_fn/except_reject.sn" \
+    "COMPILE_ERROR"
+
+# 13. fully-qualified access uses the complete dotted module path
+run_test "dotted_module_access" \
+    "multi_fn/dotted.sn" \
+    "7
+6"
+
 # -------------------------------------------------------
 echo ""
 echo -e "${CYAN}-------------------${NC}"
